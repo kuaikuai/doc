@@ -1,0 +1,18 @@
+* emacsW32报错
+Debugger entered--Lisp error: (file-error "Opening output file" "permission denied" "d:/home/.emacs.d/server/server")
+  write-region(nil nil "d:/home/.emacs.d/server/server" nil 0)
+于是我就在d:/home/.emacs.d/下建立server/server目录
+而且.emacs中对应配置: 
+;; server mode
+(require 'server)
+(when (and (>= emacs-major-version 23)
+           (equal window-system 'w32))
+  (defun server-ensure-safe-dir (dir) "Noop" t)) ; Suppress error "directory
+                                        ; ~/.emacs.d/server is unsafe"
+                                        ; on windows.
+;;(server-start)
+但是始终报这个错误.
+后来发现不应建立server/server两级目录.
+
+建立d:/home/.emacs.d/server目录即可.并且保准当前用户有可写可读权限.
+

@@ -1,0 +1,437 @@
+#+OPTIONS: "\n:t"
+#+STARTUP: hidestars
+*一寸光阴，一寸命光*
+/思考才是进步的本质/
+
+* 最快的信息来源，
+  我做渗透测试，想获取tomcat的管理密码。
+  使用暴力破解太费时间，直接去问测试部的人就OK了。
+[2013-08-01 周四 18:25]
+我总是选择从其他系统，而不是人，来获取信息，这不好。
+** Note ID: 396F9BEF-596C-4C4F-975D-E08C6FB7A9C0
+* 给领导汇报时不要说这么多费话，谁怎么样，谁做了什么
+* 定位问题一个心法：trace。
+  使用合适的手法和工具trace过程。思路和程序执行流、数据流一致。
+* 逛超市看地图。做事情有计划
+* 不要忘记多在工作中学习。
+* 量化
+  对于问题中的数据进行量化
+  不要仅仅局限于定性分析，没有数据支撑，分析结果不可信。
+* 总在一个错误载到
+  7.7 7.27两次犯错，明显感觉腰疼，腿软，挤公交时感觉无力。
+  好了伤疤，忘了疼。
+  如何才能不在同一个问题栽两次，无论工作还是生活？
+  众生畏果，菩萨畏因。
+  应该把重点放在起因上，解决问题的本质，也不是结果。
+* 对一个40岁程序的总结 
+  1.要对自己的身体负责
+  2.要对自己的财务负责
+  不能只关注别人给自己的工作，一定要分精力给自己的事业（理财，创业，私活都算） 
+* 33岁总结
+老想和这个时代作对。不服气。
+不会顺时而动。
+* 决策
+  做一个选择时，做一个东西具体采用什么方案时，
+  我以前往往就傻傻拖着，不动脑子，不知道如何动脑子。
+  其实做一个选择，就需要列出能采用的备用方案。
+  分别列出每个方案的优缺点，这样都弄清了以后心里有谱了。 (思维导图)
+* 写一个程序思路不清时
+  可以通过写注释的方式，把大体思路写出来，然后再写代码，就容易了。
+* 要多总结
+
+* 一个缺点
+  每换一个新环境总被动的接受这个环境的信息。
+  没有主动搜寻与自己相关的信息。
+* 爬楼梯有感
+  电梯太难等，于是决定爬楼梯。
+  鉴于自己身体不强，一开始就很慢，很稳地爬，这样可以保持这个种状态一直到20层。
+  如果开始就用力爬，那恐怕很难到20层。
+  用力和产出之间不是正成比的，用力越大，边界效果也越低。
+另：又如人生的路，一步一步稳步上前，很有余力的向前，胜过气喘吁吁背负很压力。
+* 心法
+  *用意不用力*
+  从事体力和脑力活动中，发挥体力和脑力的极大功效的同时，降低对身体和心灵的损失。
+* 关于设计
+  对一个陌生的领域写设计文档时，往往很难下手。
+  这时不妨先写一些原型程序，探索一下，获取一些该领域的经验。会打开思路
+* 连网时代的注意力缺失
+  我们工作时，工作一会，
+  浏览一会网页。
+  学习一会，用QQ聊一会天。
+  上厕所大便，还要拿着手机上着网,哎呀！
+  这样注意力保持的时间很短，不能到达一个好的思考状态，不能做对一个事务深入思考。
+
+  解决办法：
+  1、离开电脑
+  2、练习打坐
+  3、尽可能使用emacs上网，这样只有字符，没有花花绿绿的图片分散注意力。
+  4、良好的作息习惯。我发现自己休息不好，尤其喜欢走神，因为思考东西太精力，不如走神来的舒服。
+ 
+* 体力即脑力
+  进行深度思考，一般需要很长的时间，
+  必须要好的体力来维持。
+  没有好体力，也难有好脑力。
+* 学习的秘诀
+  重复、重复、重复、再重复！
+* 我的学习方法重大缺陷
+  重理解，不重记忆
+  结果书本一放下，头脑空空。
+* 培养和保持发问的能力
+  我们见过太多既定规则，随着年龄的增长，好奇心越来越麻木。
+  无论生活还是技术。
+  例如C语言中，入参压栈的顺序，参数从右向左压入堆栈.
+  为什么呢？一次面试中我被问到了？以前从没问过自己这个问题。
+  *发问的能力即是智力*
+* 关于搜索
+  通过搜索引擎，看到论坛和别人博客中的知识太都片面，或者一个知识片段。
+  可以快速获取某种方便法门，但是不系统、没有深度。
+  如果仅局限这点东西，根本就不会用任何长进。
+  你是活了一辈子，还是只活了一天，重复了一辈子？
+* 给自己写脚本
+  也就是计划，工作清单
+  将自己视作机器，给自己写一个程序。
+* 编程巨星的秘诀（摘自外刊IT评论）
+别以为是那些软件开发定律，别以为是开发出那些特殊用途的软件，别以为是软件设计技术本身。只有一条真理决定了一个软件程序员的成功还是失败。由于坚持这个真理，一个资深的程序员能在一天的时间里学会一门新的编程语言，而由于不坚持这条真理，一个初级的程序员用十年时间也只能挣到一份糊口的钱、永远是来实现别人的设计、永远不够优秀而得不到晋升的机会。这条真理让你看清了差的程序员和好的程序员的不同之处，好的程序员和伟大的程序员的不同之处，伟大的程序员和能通过自己的技术创造出一个亿万美元价值的程序帝国的超级程序员的不同之处。
+
+不是什么复杂的道理，不是什么难懂的理论。不是具有什么天赋或“编程超能力“才能做到的事情。最终成为的是一个优秀的程序员还是一个很烂的程序员，这跟你的出身一点关系都没有。
+
+而真正的原因只有一个，唯一的一个：
+
+*对所做的事情的理解越深，你就会做的越好。*
+
+超级程序员跟那些平庸的、一般的程序员比起来，对自己要做的事情的理解要深的多的多。这就是原因。
+
+要想成为一名出色的程序员，你所要做的就是完全的理解要在做的事情。
+
+有人会说，该知道的我都知道了。而对说这话的人的验证就是看他们能有应用他们知道的知识的能力。是否他能够构造出完美的系统架构，让人们能轻松的维护？是否他能在不皱眉头的情况下把一个普通程序员毫无可能解决的问题轻松解决掉？是否他能在被询问时能用最简单的概念把任何问题都阐述明白？如果能够，那他就是一个杰出的程序员，他能很好的理解了他在做的事情。
+
+然而，尽管这些人看起来已经“无所不知”，很多的程序员(包括我)都感觉他们仍然在知识的海洋里奋斗不已。有如此多的东西需要去学习，一个人几乎要花费他毕生的心力去学习，但仍然很难说能掌握计算机知识的90%。
+
+而这场持久战中的秘密武器、战胜计算机知识的亚瑟王的神剑，就是透彻理解。对你的领域里的基础知识理解的越好，你就越容易提升到更高的层次。你对这一层次的知识理解的越好，你就更容易掌握下一层次，以此类推。一旦你从最简单最基础的知识走到最高级最复杂的理论，你可以从头再过一遍，此时你会惊奇的发现，在最低最底的底层，竟然还有那么多知识需要学习。
+
+看起来这个道理实在是太简单，难以受到重视，但事实就是这样。通往杰出的程序员的道路就是完全的深入的理解，从掌握精通最基本的知识开始，从而逐渐牢固掌握更高级的知识。
+
+我不想骗你—这是一个很长的路程。但你是值得去做的。在路的尽头，你会突然发现，自己神奇的成为了一位资深的程序员，受到所有人的尊敬。你能成为一位神奇的程序员，任何事情都难不倒的程序员，让其他程序员都羡慕的程序员。谁能预料到呢？我不能告诉你你该做什么或能成为什么。但我可以告诉你我发现一些真实的道理和有价值的东西。怎么去做全在于自己。
+* 这是给开发者的弥天大谎还是至理名言？（摘自外刊IT评论）
+
+ “当我需要用到它时我就去学它！”
+
+过去这些年里这句话我听到无数次；对于处在一个像软件开发这样的快速发展变化的行业里，这听起来像是一种十分适用主义的态度。从某些层面上说，它确实十分适用，但从另一个层面来看，我很受这句话困扰。它似乎成了我们这个行业的福音，但却从来没有把这个行业变的更好。问题就在于，这句话表面上借明智的有经验的开发者之言，其实是幌子，实为人们随波逐流的借口。实在是有太多的东西需要我们在工作之中“发现学习”，但对于这种对新知的“发现学习”，你是工作学习齐头并进，还是单纯的遇到了什么问题，就学习处理这问题的知识？这两者之间有很大的区别。
+
+整个行业里到处都是通才、全才，也许向来如此，只是我太闭塞，没有认识到这些，而且我也不愿意看到这种情况。没有人再愿意踏踏实实的深入研究一个东西，包括计算机科学基本原理、你正在使用的最新技术、甚至是你最近几年一直使用的语言。何必自寻烦恼，也许当你学在半途中时就会发现，这些技术知识已经被更新升级，被废弃，被边缘化，被过时、不再流行。我曾和很多人讨论过这个现象，没有一个人认为这是一个问题。“做个实用主义的人吧。”
+
+与此同时，我们大家都在相互模仿克隆。现在需要一个Java程序员，我是一个Java程序员，你也是Java程序员，我邻居也是个Java程序员。我们大家之间有什么区别？——没什么区别！还有，我学会一些jQuery知识。这不错，这样我就知道如何做一个可折叠的菜单了。而且，我可以使用Google在网上搜一下，到处都是，我能搜到最好的代码，剽窃它。而同时，如果你想招募一个真正的专家(也许你想要一个神奇的解释器或将大量数据进行可视化)，那你可要准备好足够的干粮和水了，因为你根本找不到。
+
+不错，是有很多地方能看出你我的区别，我有更好的沟通技巧，所以我做的更好。这当然很重要，但是，开发人员通过软实力，而不是开发技术能力来区分 —— 感觉有些扭曲。我们大家的沟通技巧都很好，可写出的代码是一团糟  。该死，我本不该说这些，因为我也算得上是一个通才。当然，我更愿意把自己看作一个既有广度又有深度(T型)的人，但是，如果你愿意说真正的实话，你会说，大部分的人都只有广度，没有深度，更像横线型(破折号型)  。在这些破折号中你就像是个巨大的石钟乳 —— 你是T型的。你看上去就像个专家，即使你从来不是专家，这就是在到处都是通才的时候做为专才的优势。
+投资你的未来
+
+我不想传道似的告诉大家我们应该对未来的职业生涯进行投资，因为这是每个人都知道的。大多数人认为自己正在投资，他们努力的工作，写大量的程序，甚至边工作边学习，诚然，这10年下去肯定会成为一个专家，20年下去成为一个资深专家。但是，如果事情果真是这样，那每个年纪大的人都会成为各个方面的专家，事实断然不会是这样。也许原因是人们不知道如何在某个方向去发展他们的特长(这是实际存在的)，但我私下里更怀疑是，人们更多的是缺乏热情，而不是缺乏这方面的指点。上面所说的各种问题都基本上可归于这种情况。
+
+我完全说跑题了。“对未来进行投资”只是我们讨论的问题之一，而主要问题是”我需要用到它时就会去学它“这句箴言。这句话给我老爸很合适，而且它也为我所用这么多年。让我们把这句话的思想应用到金融上吧，“当我需要钱时我会去进行投资的”。你会发现有些时候这句话并不是那么适用。
+你不知道你缺少哪些知识
+
+我们都经历过这样的时刻：你痛苦被折磨于要解决一个问题，最终是有人过来告诉关于X算法或Y技术，这让所有问题变得又快又简单。你很幸运能碰到这样一个能告诉你“简单”方法的人，否则的话你可能要用去数天、数周去把问题弄明白，而且事情会变的乱糟糟。你不会因为此而受到责备，因为你不可能提前知道你会缺少什么样的知识。我想，这就是“当我需要它时我就会学它”的思想方法失败的地方。你不可能去学你从未听说过的技术知识。Google做出了很大的成就来缓解这个问题，但这不能解决所有问题。在茫茫的未知领域你会遭遇到大量的未知难题，它们会让你撞的头破血流，要多惨有多惨，除非你能明白你所面对的是什么类型的问题(例如，如果你知道一些搜索算法和约束传播问题，你可以去解决数独难题，否则，你就陷入困境了)。你不可能去学习一种你不知道的或不知道用在哪里的算法。你不可能去利用一个你根本不知道能做什么的技术去解决一个问题。不可能一直有人在旁边指点你正确的方向。我敢打赌这世界上有数百万的代码可以被替换成更高效、更整洁、更有效的代码，只是因为写这些代码的人不知道自己欠缺某方面的知识。
+
+我想反向说明一下这个问题，假使能提前知道我们缺少什么知识，那么，诚然，我需要关注大量的知识。粗浅的大范围的尽可能多的涉猎各种知识对我们有很大帮助。当问题发生时，我就能看出问题是什么领域的，然后针对这种知识深入的研究。可是，事情并不会这样发生，浮光掠影的通览各种知识最终并不会在我们的脑海里留下任何痕迹，我们的大脑不是这样工作的。如果我不去强化和深入挖掘某个知识概念，我们的大脑会很快就会把它标记为不重要信息，完全是一种浪费时间(回想一下你为了考试而死记硬背的东西在第二天还能记住多少？)。然而，如果你能集中精力对某一主题进行深入研究——并伴随着兴趣——你会收获颇丰(这将是你不会忘记的)。我爷爷是一个核物理学家，数十年如一日的收集研究这个领域里的知识使他成为了一个专家，但这也同时使他成为了一个出色的数学家，一个不错的化学家，一个非常棒的地质学家，一个合格的生物学家，等等。这只是因为深入研究而获得的广泛的副产品。
+你能以足够快的速度学会它们吗
+
+
+有些东西需要你花很长时间才能学会。我有信心在不皱眉头的情况下学会一个以前从未见过的ORM框架，因为类似的东西我以前见过，它们概念是相同的。但如果你需要做一些把演说转换成文字的东西，这可不会这么简单，你没有足够的背景知识。把希望寄托在Google上，搜出一些东西我们可以去粘贴拷贝。这是一个很坏的做法，只有大学里的研究人员才会去做这种烂事。如果是开发一个网站呢？我们都知道该怎么做，但如果需要能支持每天1千万的用户访问量呢？我需要知道如何去升级，我相信不花一两个月的研究你是不可能把速度提上去的  。是呀，我太蠢了，我应该做的是雇一个专家，然后 … 哦 … 慢，等等，我们的干粮和水都不够了。
+为什么我在乎这些
+
+跟专家一起工作实在是太爽了。也许你以前有过这样的经历，他们说的那些东西都是那么新颖和有趣，他们的每行代码都能让你受益匪浅，你几乎都能感到你的脑容量在膨胀  。你希望能跟专家学习，可当你找不到这样的专家时，那就太不幸了。因为每个人都是在“需要”的时候才去学习，没有人可以教别人什么东西。而这其中最大的教训是，专家同样也想和专家一起工作，所以，你的问题在于，要能清楚专家是否愿意和你一起工作？如果能做到在需要的时候就去学习，这是个不错的做法，但你不能把它当作一个软件开发者的至理名言。不错，这个行业很宽广，你不可能样样都学，所以要选择一些，学精，如果你很好奇而做了深入研究，你会发现最终你在很多其他知识上都会有一个相当的掌握。而且如果你能做出一份出色的工作，其他精英贤达都会希望和你左右同行，因为他们这样可以从你身上学到知识，而你也能从他们身上学到更多的东西。这对每个人都是再好不过。
+ 原文如下：
+ The Greatest Developer Fallacy Or The Wisest Words You’ll Ever Hear?
+"I will learn it when I need it"! I've heard that phrase a lot over the years; it seems like a highly pragmatic attitude to foster when you're in an industry as fast-paced as software development. On some level it actually IS quite pragmatic, but on another level I am annoyed by the phrase. It has become a mantra for our whole industry which hasn't changed said industry for the better. The problem is this, in the guise of sounding like a wise and practical developer, people use it as an excuse to coast. There is too much stuff to know, it is necessary to be able to pick certain things up as you go along – part of the job. But, there is a difference between having to "pick up" some knowledge as you go along and doing absolutely everything just-in-time.
+
+The whole industry has become a bunch of generalists, maybe it has always been this way, I just wasn't around to see it, either way I don't like it. Noone wants to invest the time to learn anything really deeply, not computer science fundamentals, not the latest tech you're working with, not even the language you've been coding in every day, for the last few years. Why bother, it will be replaced, superseded, marginalised and out of fashion before you're half way done. I've discussed this with various people many times, but noone seems to really see it as a problem. "Just being pragmatic dude". In the meantime we've all become clones of each other. You want a Java developer, I am a Java developer, you're a Java developer, my neighbour is a Java developer. What differentiates us from each other – not much! Well, I've got some jQuery experience. That's great, so you know how to build accordion menu then? Sure, I Google it and steal the best code I find :). In the meantime, if you need to hire a REAL expert (in anything, maybe you're writing a fancy parser or need to visualise some big data), I hope you've stocked up on beer and sandwiches cause you're gonna be here a while.
+
+Ok, there are ways to differentiate yourself, I have better communication skills, which is why I do better. That's important too, but, developers differentiating themselves based on soft skills rather than developer skills – seems a bit twisted. We all communicate really well but the code is a mess :). Hell, I shouldn't really talk, I am a bit of a generalist too. Of course I'd like to think of myself as a T-shaped individual, but if we're completely honest, it's more of a dash-shaped or underscore-shaped with maybe a few bumps :). To the uninitiated those bumps might look like big giant stalactites – T-shaped indeed. You seem like an expert without ever being an expert, just one advantage of being in a sea of generalists.
+Investing In Your Future
+
+I don't want to preach about how we should all be investing in our professional future, everybody knows we should be. Most people probably think they are infact investing, they rock up to work, write a lot of code maybe even do some reading on the side, surely that must make them an expert in about 10 years, and a senior expert in 20 (I keep meaning to write more about this, one day I'll get around to it :))? But, if that was the way, every old person would be an expert in a whole bunch of stuff and that is emphatically not the case. Maybe it is just that people don't know how to build expertise (there is an element of truth to this), but I have a sneaking suspicion that it's more about lack of desire rather than lack of knowledge. What was that saying about the will and the way – totally applicable in this case?
+
+I've gone completely off-track. "Investing in professional future" is just one of those buzzword things, the mantra is "I will learn it when I need it". It was good enough for my daddy and it has served me well so far. Let's apply this thinking to finance, "I will invest my money when I think I need the money". Somehow it doesn't quite have the same kind of pragmatic ring to it.
+You Don't Know What You Don't Know
+
+We've all had those moments where you're going through major pain trying to solve a problem until someone comes along and tells you about algorithm X or technology Y and it makes everything fast and simple. It was lucky that person just happened to be there to show you the "easy" way, otherwise you would have spent days/weeks trying to figure it out and it would have been a mess. You can't be blamed for this though, you don't know what you don't know. For me, this is where the "I will learn it when I need it" mentality falls over. You can't learn something if you don't know it exists. Google goes a long way towards mitigating this problem, but not all the way. There are plenty of problems you will encounter in the wild where you can beat your head against the wall ad infinitum unless you know what class of problem you're looking at (e.g. if you know a bit about searching and constraint propagation, solving sudoku is easy, otherwise it's really quite hard). You can't learn about an algorithm if you're not aware of it or its applicability. You can't utilise a technology to solve a problem if you don't even realise it has that capability. You're not going to always have someone there to point you in the right direction. I am willing to bet there is a billion lines of code out there right now which can be replaced with a million lines of faster, cleaner, better code simply because whoever wrote it didn't know what they didn't know.
+
+I seem to be making a case for the opposite side here, if knowing what you don't know is the ticket then surely we should be focusing on breadth of knowledge. Superficial awareness of as much stuff as possible should see us through, we'll be able to recognise the problems when we see them and then learn what we need more deeply. Except it doesn't work like that, skimming subjects doesn't allow you to retain anything, our brain doesn't work that way. If we don't reinforce and dig deeper into the concepts we quickly page that information out as unimportant, it is a waste of time (think back to cramming for exams, how much do you remember the next day?). However if you focus on building deeper understanding of a subject – in an interesting twist – you will gain broad knowledge as well (which you will actually be able to retain). My grandad is a nuclear physicist, several decades of working to gain deeper knowledge of the subject has made him an expert, but it has also made him an excellent mathematician, a decent chemist, a pretty good geologist, a fair biologist etc. Just some empirical evidence that seeking depth leads to breadth as a side-effect.
+Can You Learn It Fast Enough
+
+
+Some stuff just takes a long time to learn. I am confident I can pick up an ORM framework I haven't seen before without even breaking stride, I've used them before, the concepts are the same. But what if you need to do some speech to text conversion, not quite as simple, not enough background. Hopefully Google will have something for us to copy/paste. That was a bad example, only research boffins at universities need to do that crap. How about building a website then, we all know how to do that, but what if you need to do it for 10 million users a day. We just need to learn everything about scaling, I am sure the users will wait a month or two for us to get up to speed :). Yeah, I am just being stupid, all we need to do is hire an expert and … errr … oh wait, we're all out of beer and sandwiches.
+Why Should I Care
+
+Working with experts is freaking awesome. You may have experienced it before, everything they say is something new and interesting, you learn new tricks with every line of code, you can almost feel your brain expanding :). You want to learn from the experts, so it's really sad when you can't find any. Since everyone is only learning when they "need it", noone can teach anything to anyone. The chunk of wisdom here is this, you want to work with experts, but the experts also want to work with experts, so what are you doing to make sure the experts want to work with you? Being able to learn something when you need it is a good skill to have, but you can not let it be your philosophy as a developer. Yes it is a big industry you can't learn everything, so pick something and make sure you know it backwards, if you're curious enough to follow up on the interesting bits, you'll find you have a decent grasp of a lot of other stuff at the end. And if you do a good enough job, other super-awesome-smart people are going to want to come and hang around you cause they'll be able to learn something from you and you'll be able to learn much from them. Everybody will be a winner.
+* 面试是一种技巧 （摘自外刊IT评论）
+面试是一件有趣的事情。要想获得一份编程开发工作，首先面试要面的好。能否被招聘单位选中，通常跟你能掌握的编程技术关系不大，这是程序员心中最典型的痛处。我们大多数人都觉得这种招聘方式应该改革。而对于我个人而言，我觉得还可以接受。它需要改进，但我要来告诉你如何在这种情况下获得一份工作。
+
+面试是一种技巧
+把面试当作一种技巧。你需要练习这种技巧。这种技巧跟编程有很大的区别。通过这些年对程序员的观察发现，缺乏经验的新手通常会认为，他们跟那些熟练的程序员知道的知识一样多，知道的知识比不知道的多。于是，当你成长为一名熟练的程序员后，你会发现自己是一名最差的程序员，因为你看到了自己不知道的那些知识。当面试时，这会成为一个很大的麻烦，因为其实你是在把自己售卖给公司。如果你不认为货物是那么的好，怎么可能把东西有效的卖出去？下一步你要考虑的是如何把自己卖出去。
+
+准备你的推销词
+我坚信一条，你一定要为你的面试做好行动计划。熟悉你在简历上写的任何东西。对最常见的可能会被问到的问题准备好答案。把它们用某种方式跟你的过去的经历拉上关系联系起来，突出你的能力。当面试官没有什么好说的时候，推出你的推销词。我曾有过几次面试，面试官只有几个在开始和结束时有时间问了几个问题。准备好你的推销词，让他们的问题的答案已经在推销词里体现出来，这十分的有效。
+
+程序样品
+在面试时编程是一件很傻的事情。它并不能反映出一个程序员的真实编程水平，我也不相信它能给面试官带来更好的判断。我发现一种最简单的能避免在面试时进行编程的办法是，事先准备一些能拿给面试官看的程序样品。很重要的一点，你既要让面试官看到这些程序，也要让他们知道这些程序能运行。就我来说，我在业余时间做了一个Rails项目，把它放在了heroku主机上，面试官不但看到它，而且能简单的对它进行操作。
+所有的面试都是对你的练习
+
+很多程序员在面试时都会很紧张。我用提醒自己“所有的面试都是一种练习”来消除紧张。如果没有应聘上，没什么大不了的。再找一家再面试就行了。就这样，我让我的面试技能得到了非常好的修炼。当然，在每一次面试之前，你一定要从上一次面试中总结经验。
+评估你的表现
+
+上次面试我什么地方做错了？怎么样才能改进？什么地方做的很好？在面试之后尽快的检讨自己的表现，这很重要。因为在面试刚刚结束后，你的记忆还很清晰，你不会漏掉什么细节。
+* 致IT同仁 — IT人士常犯的17个职场错误 (李云 的BLOG)
+记得刚参加工作时（那是97年），中国的IT刚刚兴起，那时，作为一个IT人士是一件很光荣的事，而那时的我正在做电气和电子相关的工作。99年第一次跳槽，进入了IT行业做软件开发。至今，中国的IT已经走过了十多年。但昔日的“光荣一员”却成为了现在的“IT农民工”，这究竟是怎么了？是中国的IT发展已经很好了所造成的吗？不是！在我看来中国的IT还比较的原始，还有很大的提升空间。我认为造成这一切的都是我们自己，是人！是我们的意识和方法问题。还记得刚从事软件行业时，当时有一句话很流行，这句话现在应当还能听到，那就是：做IT是吃青春饭。说实现在的，一直以来我对于这句话一点都不认同，但最近慢慢的觉得有道理。这种意识的转变不是因为自己在职业生崖上出现了什么问题，而是观察身边的人发现这句话还真有道理。由于不注意方法和不转变意识，我们当中的不少人过着“有工作没有生活”的日子，被工作压得失去了激情。接下来，让我说说我能想到或是看到的一些问题。
+
+ 1) 我们从学校毕业以后，觉得学习到此结束，应当是享受人生的时候了。其实，学习和享受生活是“正交”的，我们完全可以即学好又生活好。毫无疑问我们是生活在竞争的环境中的，那竞争的依据是什么呢？就是我们的能力。大家参加工作后应当知道，我们学校所学的东西在现实工作中不足以成为我们的核心竟争力。要打造自己的核心竟争力，必须学习，而且是在自己的业余时间学习。当然，工作也是一种学习方式，只是这种学习方式不容易创造很大的能力区分度。此外，学习是保持激情的有效方法。我工作近12年了，在软件行业干了大约10年，但是至今我还保持着非常好的工作激情，这是我很多同事对于我的评价，这一点我想与我保持学习很是相关。学习是我从学校毕业开始一直没有放弃去做的事！学得多了，自然会想去改变些什么，进而使得我们有激情。我在面试别人的时候，我一定会问题的一个问题是：你平时看书吗？看些什么书？一个不看书的人，其能力不可能很高，看问题的深度也不会深到哪儿去。通过看书，能让我们更快的积累知识和经验。有些弯路我们不是需要自己去走、有些错误我们不是非得犯了才知道、有些好方法和想法也不是一定要我们自己去想，看书能让我们站得更高、看得更远。当然，学习过了的东西应当转化为我们自己的东西（参见第14、15点）。
+
+ 2) 认为自己的能力与工作的年份是成正比的一条直线。在有些行业可能是，但在IT行业，这种想法是不对的。如果你了解三极管，我想我们的能力与工作年份的关系更像是一条伏安特性曲线。在开始的一段时间是线性的（因为我们刚毕业什么都不会），但之后从某一点开始永远是一个饱和区，到了饱和区后，能力的变化就非常的小了。这里要指出来的是，这条曲线的出现是因为我们从参加工作以来，都是采用同一种原始的方法去对待我们的工作的。如果我们善于改变自己的工作和学习方法，那么就不会得到一条伏安特性曲线，而有可能是一条接近直线的线。一个工作了七、八年左右的人，如果没有形成自己的一些思想（比如，设计思想），那么我认为很是有问题，自己得多去想想为什么。我们真正学习的黄金时间就是前面的七、八年左右。
+
+ 3) 不明白练“内功”的重要性。这里的内功是指系统性的分析和看待问题，或是其它的一些能力（比如软件设计的能力）。有些人今天学这个、明天学那个，总喜欢学“新”技术，但忘记了将所学的东西串起来从而系统性的去掌握这些技术背后的东西。其实，一旦学精了一样，很多东西是相通的，如此一来，我们很容易快速的去掌握新的东西。再说说软件开发，其实学习编程语言是简单的，是基本功而且不是软件开发的全部，软件开发要学习的是如何设计好一个软件，这一点要掌握一定原则和方法，比如我在《一个好的设计应当具备哪些要素》中提到到的“四性”就可以作为我们设计时的一些原则。软件设计能力是本质，而编语言只是一种表达设计的工具。当我们“内功”好了以后，学什么都快、做得也好、看得也深，这与练功夫是一样的道理。
+
+ 4) 害怕变化。拥抱变化往往能带给我们提高的机会。我们都有自己的舒适圈，我们害怕变化打破我们的舒适圈，但舒适圈的打破不是使得我们没有了舒适圈，相反意味着我们的舒适圈越来越大。我敢说，现在还有人在用Visual C++ 6.0做开发，而现在最新的是Visual Studio 2008（2010马上也要上市了），这不是因为Visual C++ 6.0比Visual Studio 2008好用，而是我们不想改变，还找个借口说“Visual C++太经典了”。而事实是，Visual Studio 2008能帮助我们更快的找出问题，不信试试看！我认为，一个勇于拥抱变化的人，他（她）的能力往往更容易提高。
+
+ 5) 过于埋头苦干。有的人一接到任务那可就埋头苦干起来了，有时应当停下来想一想：我这样做的方法是不是很有效率？能不能通过学一点别的工具或是方法来使我的工作更高效？我能从中学到新的东西呢？还是只是一种重复性的体力劳动？还存在一种人，这种人的确很能干，因此领导什么事都让他（她）出马，这样一来再苦再累都扛下来。这个人，从上司的角度来看，很好，但从个人的发展来看不一定是一件好事。你想，这个团队没有你就不行了？我想可能性很小。那如果是这样为什么什么事都要你干呢？有的工作其实干过了一遍就没有什么可学的，只是上司因为放心你才将事情交给你，在这种情况下，花再多的时间去干对于自己来讲可能是在浪费时间。如果不干，省出来的时间我们可以去学其它的东西。可能有人会想，我如果不答应上司（参见第12点），那会不会对我的绩效不大好呢？其实，这种想法大可不必了，加上有时绩效并不是真正的公平（其实世上不存在完全的公平）。今年绩效好是一个短期利益，如果多学一点提高自己则是一种长期的利益。再说，我们不干的话还可以给别人创造一些锻炼的机会。真的是双赢！
+
+ 6) 不善于思考。对于工作有时就是一个应声虫，别人怎么说，我们就怎么做。有时更为可怕的是：为什么那么做？合不合理？这种做法与我想到的做法有什么不同？这些问题全都不去想。一个没有自己思想的人，不可能在工作中比别人出色，能力自然也不会太高。
+
+ 7) 不明白高效的完成工作对于我们自己意味着什么。高效意味着我们可以花节约下来的时间去学习、生活，毕竟工作不是我们人生的全部。我们时刻应当警觉自己是不是在做无效率的工作，如果是，想尽办法找出自己无效率的原因并改善它。有时我们会找借口，说现在太忙了，没有时间去改善，但真相不是这样的。我们完全可以通过一段时间的努力找到一种好的解决方法，将自己解放出来。的确，在忙的时候，如果为了解决无效率问题而花时间去学习其它的东西，那会让我们更加的忙。但这种更加的忙（短期的）是有回报的，而且往往回报很不错（长期的），不要总是想“等我有时间时再来改善”，“乱中求冶”永远是王道！
+
+ 8) 见难就退，而不是迎难而上。容易意味着我们所学到的东西很少，或是根本就没有。做一百件容易的事，不如做一件难的事所学到的东西多。难的事多做一件，信心也会更强一点。
+
+ 9) 不善于表达我们对问题的不同看法。有些人在工作中不敢去表达自己与别人相左的想法。我想，如果存在相左的意见，说明当中有可能会是别人有些东西没有想到，或是我们自己有些东西没有想到，而通过交流我们有可能相互提高。拥有一个开放的态度面对相左的意见！
+
+ 10) 缺乏创新。一说到创新，比较容易让我们想到那种改变全世界的大举，其实不然，任何一种能改善我们生活的行为都可以认为是一种创新。创新也是一种思考和行动，是一种勇于改变现状的思考和行动。有的人在做一项工作时，其中有很多的重复（动作），即使烦，他（她）也不会想想是否可以写一个脚本去改变、或是采用什么方式解放自己。这一点或许与害怕变化（参见第4点）有关！
+
+ 11) 不善于记笔记和总结。对于我们IT人士，笔记不一定要写在本子上，可以写成一个Word文档，或是其它的什么文件。在笔记中将自己碰到的问题写下来，这便于我们需要用的时候马上能找到。有了笔记我们能更高效的工作以及更高兴的工作。好处很明显，干吗不记笔记呢？通过笔记我们也能很好的总结自己，发现一些有待于提高的部分。
+
+ 12) 不善于与上司沟通。通过沟通，一是可以从上司那得知他（她）对于我们的期望是什么，从而，我们可以得知自己的工作方式、方法是否与上司的期望是一致。如果不一致要想想，是不是自己可以改善，或是反过来改变上司原来的想法。第二就是要告诉上司你所期望的。比如，你想升级（职），那可以与上司说一说，当然，前提是你觉得自己的确能胜任。可能这一次上司并不会答应我们的要求，那也正常，因为他（她）有自己的考虑，此时上司可能会与你说原因。我们不能报着不同意就离职的态度来提要求。一次不同意，那我下次再提。在这种情况下，上司如果有一个名额，那很有可能就考虑到你了。沟通即简单也不简单，你所想的、做的不一定就是上司所想要的，如果这样的话结果自然也不会令自己满意。
+
+ 13) 少了一点追求完美的执着。人是不完美的，所以我们要去追求完美。追求完美的人更容易出色、更具责任心，做事往往也显得更专业。
+
+ 14) 不明白模仿的重要性。人天生就是模仿者，模仿多了，我们就会形成一定的思考和行事习惯，慢慢的也就转化成了自己的能力。我想很多人看过《设计模式》，可能在看时也有一种同感：其实，不少模式我们平时都在用。我做设计时，从来不去套《设计模式》中的模式，我能凭自己的直觉找到一种好的设计，当然，有时我得进行多次的反复。但是不是每一个人都有很好的直觉，这种直觉其实是一种能力，是长期的学习、思考和模仿所积累的能力。在我看来模仿是将所学东西转换为自己的能力的很好的一种方法。
+
+ 15) 只求知其然，不求知其所以然。学习不能只是表面化的“学过了”，还要从深层次去想其背后的思想和原理是什么，这往往使得我们更加容易的去分析和解决问题。想得多了，自己的层次才有可能提高，如果只是停留在被动的接受，那很难有所提高。
+
+ 16) 少了那么一点坚持。我们有可能在学习过程中少了那么一点坚持，本来已经做（学）到了90%，再坚持一下我们就能上一个台阶，能力也会有一个质的飞跃。但是很可惜，就是因为不多坚持那么一点，最后很有可能前功尽弃，最为可怕的是会打击我们的自信心 — 下次就不学了！人与人能力的区别或许可以说是能否坚持的区别！
+
+ 17) 不热爱自己的职业。这一点可能是一些综合性的因素造成的，或是在工作中没有找到成就感、或是自己不适合这个行业，等等。有时好好的想想，问问自己是什么原因造成的这种状况。如果是因为自己的一些方式或方法不对，那么看看是否能改变。如果的确是因为自己对行业没有兴趣，那我想长痛不如短痛，还是应当转行去做自己有兴趣的工作。快乐的工作着是重要的！
+
+ 此外，除了注意个人的提高，我想我们还要注意“金字塔原理”。无论我们能力多高，但我们还是处于金字塔中的一层，也就是说能力强的人的数量总是相对的少，我们不可能人人都在顶上。即然这样的话，我们是不是就不应当去提高了呢？我想不是的，毕竟提高能改善我们的生活，而生活，是自己的。
+
+ 看了上面的这些，是不是觉得有些道理呢？千万别看过就完了，而是要有所行动！拥抱变化！
+* 优秀程序员的两个品质
+  一、遇到困难时，不退缩，不逃避，通过解决问题，发现新知。
+  二、保持好奇心，不断打开黑盒子以便真正理解自己的工作。
+* 休息与疲惫
+  我一向给人一种无精打采的感觉，实际上就是这样的。
+  
+  1. 你真的会休息吗？看电影、看电视、玩游戏、胡乱上网浏览、以及K歌等等，我都不认为是休息。真正的休息就是什么都不做，什么都不想。
+  2.经看关于这方面的一些好书。如大卫·哈罗·芬克博士所写的《消除神经紧张》和丹尼尔·乔斯林写的《为什么要疲倦》(Why Be Tired)。
+  3.随时放松自己，使你的身体软的像一只旧袜子。
+  4.工作时采取舒服的姿势。要记住，身体的紧张会产生肩膀的疼痛和精神上的疲劳。
+  5.每天自我检讨5次，问问自己：“有没有使工作变得比实际上更重了？有没有用一些和我的工作毫无关系的肌肉？有没有和工作目标无关的情绪？”这些都有助于你养成放松的好习惯。
+  6.每天晚上再检讨一次，问问你自己：“我有多疲倦？如果我感觉疲倦，这不是我过分劳心的缘故，而是因为我做事的方法不对。”“我算算自己的成绩，”丹尼 尔·乔斯林说，“不是看我在一天完了之后有多疲倦，而是看我有多不疲倦。”他还说：“当一天过完而我感到特别疲倦时，或者是我感觉我的精神特别贫乏的时 候，我会毫无问题的知道，这一天不论在工作的质和量上都做得不够。如果每一位生意人都能学会这一点，因为神经紧张而引起的疾病致死的比率，就会马上降低 了，而且在我们的精神疗养院里，也不会再有哪些因为疲劳和忧虑，导致精神崩溃的人。”
+
+* 知足
+  当儿子还在肚子里，我对女人说：要是儿子现在抱在怀里，就好了。
+  当儿子抱在怀里，哭闹时，我对女人说：如果儿子现在会坐，就好了。
+  当儿子会坐时时，我对女人说：如果儿子会跑，就好了。
+* “外”知与“内”知
+  看佛经加强对一个道理的认知：
+  一个认知，一个道理，书本上讲了，老师教了，你记住了。
+  但是它还是一种“外”知，你没有真正的领悟它，没有经过自己经验体会，观察
+  之没有真正将其内化之前，这知识的作用相当的小。
+  真正内在的知识，时时刻刻在指导着你的工作学习生活。
+  可能是一个很朴素的道理，在真正懂到之后，确会发挥极大的作用。
+  就象《学习的艺术》中乔纳金，长期练习，不起眼一拳，确有极大的威力。
+
+* 激励还是约束
+  约束才是做成一件事情的根本原因。
+  激励只是表象！成功学的书都把笔墨浪费在激励上。
+  不停说：你能！你行！你是最棒的！
+  看得你血脉喷涨;看得顿时你雄心万丈.
+  其实你不明白，你就象一只被吹大了的气球。
+
+* 下水管
+  用抽马筒的工具抽，无效；
+  用钢丝捅，无效；后来我又用打气筒鼓，无效；
+  眼看快到中午了，最后把水管弄出来，用嘴吹了两口。通了。
+  一、众多的工具，居然没有自己的嘴管用。有时人本身就是高效的工具。
+  二、开始时没有人会想到用嘴吹这么脏的东西。思维定势。  
+
+* java手机的感想
+  大约两年前买的这个手机，当时想买一个nokia触屏手机。
+  看好一款，带着一干人等去迪信通。
+  结果导购说nokia触摸屏不好，等等，三星的触摸屏好，给我推荐了一款手机，
+  说的很实在的样子，很实在的样子。
+  说如何好，还送话费等等，自己人也不给力，耳朵根软。
+  居然说：“我也想要个这样的。”这类的话。
+  于是我就买了。
+  当时没有在意这个手机是移动定制手机。
+  *凡是移动定制手机，都可以归于垃圾手机一类。有着删不掉了垃圾吸钱的软件。*
+  买回来，平静下来后，追悔莫及。
+  于是在网上找非定制刷机包，未果，很愤懑。
+  
+  *教训：对于谦虚的人，对自己的主张务必理性的坚持。*
+  *对于购物上，在自己参考了各种信息后，购买东西，完全无视导购。*
+
+  该手机是非智能手机，只支持java扩展。
+  安装的程序总有个虚拟键盘，浪费屏幕空间。不悦。
+  后来渐渐冷淡了这个手机。
+
+  后来2年后再次寻找非定制刷机包，未果。
+  在灵机一动，查如何全屏云云，居然查到，一试果然灵。
+  使用感受立马不一样，手机也不那么讨厌了，仿佛又成了新手机。
+
+  心得：你所有拥有的东西，本来已经不错了。不必总羡慕未有的东西。
+        用好现用的东西，发掘其潜力。
+        推广之:
+        *你身边的人事物，本来已经不错了，应该利用好。*
+        正所谓“惜富富常在”。
+        再推一步：
+        *你自身本来就不错了，“佛性自足”。不必羡慕、嫉妒、恨别人如何之风光、多金、相貌、家庭、背景等等。*
+
+* 缩短迭代周期
+  我做测试一个东西，需要运行3次才能出结果，每次运行与上一次运行的时间间隔是5分。
+  每次我都傻傻等15分钟。
+  后来才意识到可以可以把时间间隔缩短。 
+  这个错误，我犯了若干次，弱! 以前也经常犯.
+  推而广之,许多事情都是不断迭代.
+  学习-->实践-->再学习-->再实践,如此循环.
+  动物生产-->变异-->再生产-->再变异,如此循环
+  如果能够缩短迭代周期,那么....
+
+* 空闲
+  这些年来，一直知道空闲时逼自己看书，记忆和理解书中的内容，
+  却总不给自己一个空闲的，不看书的时间，反思看过的东西，反思工作的经历、心得。
+  思考自己的不明朗的东西.
+  现在人都忙着工作,忙着娱乐,忙着享受,一直在忙.
+  你需要一个发呆的时间,什么都不做---发呆,或者练习坐禅.
+
+* 调整
+  以前感冒时自己有了个理由“放松”，于是看电影等等，结果感冒加剧。
+  现在感冒时真正的休息，什么都不干，睡觉。
+* 美食与美女
+  狗看到屎，如同看的美食;
+  蛆在屎尿池中，游泳，进食;
+  在屎壳郎眼中，粪球是美味的糕点;
+  在公狗眼里，母狗是美女;
+  在公猴眼中，母猴是美女;
+  人呢？
+* 年轻
+  我看以前写博客，25岁时发的感慨，
+  今天看起来那时我还年轻啊。
+  当我35岁，40岁，50岁等再回首现在，也会说那时我还年轻啊。
+  *珍惜现在，不留遗憾*
+* 对与错
+  人们常说或者怎样认为：这个件事情我知道不对，但是xxx。
+  后面的“但是”就是你做件事情的理由，合法性的依据，正确性的依据。
+  *实际上，我们从来不会做我们真正认为不对的事情。*
+  我们口中所谓的不对的概念，是别人（比如父母、老师、社会等）告诉我们，并不是我们发自内心所体会出来的。
+  比如你不让一个小孩去碰火，但是他总是隐约的好奇，一天终于碰了一下，知道了被火烧到的滋味，彻底自觉了。
+  成人也一样。
+  在个人的修养上，务必厘清对错！
+  *只做正确的事。*
+* 假快乐
+假快乐的几个特点：
+1. 短暂而不长久，
+2. 激烈而不稳定。
+3. 损耗大量的能量。
+4. 欲望不断升级，没有满足。
+
+美酒、香烟、美色等哪一种不能带来感官的刺激？
+但每一次快乐可能只有几分钟，然而那种激烈与销魂可能让我们越来越难以抗据。
+沉迷在其中，我们的情绪往往很难保持平和，大多会陷入放纵而不可自拔。
+
+人们之所以沉迷其中的原因是：
+与真快乐相比，假快乐的感官体验强烈的多，更符合人的动物本能，更适合人的动物特性。
+
+真快乐：
+1. 平和而长久
+   就象一个涓涓的清泉，缓缓的流过
+2. 给心身带来能量
+3. 低欲望，乃至无欲无求
+
+* TIPS
+  你多次遇到同一个问题、烦恼、或不方便的地方，这时候，
+  应该寻找解决问题的方法，一劳永逸的解决问题。应该对这种情况提高警惕，不应该麻木的适应。
+
+* 处理复杂问题或头脑不清晰时
+* 心象训练
+* 你对程序理解还停留调试阶段！！
+* 关于代码阅读
+  我读了这么长时间linux内核代码了。
+  但是整体仍然不能融会贯通。
+  需要在空闲的时间，把自己学习的各种场景串起来。如想象写一个文件的全过程。
+
+* 加速思考和记忆
+1. 尽量用图像思考，这才是你擅长的。
+   把头脑的图像尽量清晰化，如果能做的更真实类似是最好的状态。
+   寻找一种思考代码流程的图像模式
+2. 阅读代码，弄懂意思后，使用图形在脑子中演练一个其执行过程。
+   如果代码场景合适的话，阅读时就是使用图形思考代码。
+** 我总是走神，严重影响思考问题的深度和效率。
+* 需要ADT
+  抽象数据类型
+  之前这书中见过,但是自己从来真正领会,觉得"多此一罗嗦"--高中化学老师名言.
+  自己写代码,在这方面很随意.
+
+  最近今天越发觉得写bug-free程序的重要性.
+  与公与私都是很好的事情.
+  其它减少bug办法不说.
+
+  例如最近我写的传输文件程序,
+  每天产生的文件都以当天日期为名字保存.是yyyymmdd格式.
+  所以程序就到处有这样数组:
+#+begin_src c
+  char timestamp[8];
+#+end_src
+  还写了这样的函数获取当前的timestamp
+#+begin_src c
+  static char *get_current_timestamp(char *timestamp);
+#+end_src
+但是这种方式
+1. 暴露把数据存储方式本身暴露了.
+   象类似这样函数,没有界定char *timestamp指针向内容的长度,容易出现访问越界的错误.
+2. 思路局限于底层数据结果,没有提高,不易于"高层次"思考.
+
+更好的方式:
+#+begin_src c
+ typedef struct timestamp_ {
+    char u\[8\];
+ } timestamp_t;
+#+end_src
+这样函数就可以写成:
+#+begin_src c
+static timestamp_t get_current_timestamp(timestamp_t *timestamp);
+#+end_src
+这样实现一定抽象,提高了安全性和灵活性.
+
+* 一点
+全局变量或者结构，用途要唯一，
+比如snd_buf，仅用于发送消息
+rcv_buf，仅用于接受消息
+
+函数参数个数很多时，考虑封装到一个结构中。
+
+将代码复杂度限制在局部，保持全局的简洁易懂。
+这一方面，c++理念不错。
+* 一点心得
+
+  我修改的manager，它从数据库获取配置，
+  而数据库里的信息又是通过页面配置进去的。
+  然后根据配置向各个机器的代理程序发送命令，获取各个机器上的状态信息，
+  由于数据库存放了信息列的偏移值。
+  例如内存返回:0 0 0 50
+  通过数据库配置，我们知道第4列是CPU空闲率，从而计算出CPU利用率
+  
+  这个程序没有测试程序，如何才能恰当的测试呢？
+  各部分都耦合在一起，最好解耦，然后每一部分单独测试
+  手动不但麻烦，而且容易遗漏。
+* 重视每次会议
+  无论正式或者非正式，都尽量提出好的想法。
+* 好了伤疤忘了疼
+  感觉容易忘记，记住道理照着做。不以暂时的感觉为依据。
+  坏习惯涌来，总是忘记做正确的事情。

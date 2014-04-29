@@ -1,0 +1,77 @@
+#+STARTUP: showall
+#+TAGS: OFFICE(o) COMPUTER(c) HOME(h) PROJECT(p) READING(r) DVD(d) 
+#+STARTUP: hidestars
+
+* IPTM 9 Testing  (Beta Release)                :PROJECT:
+*** Install latest Ethereal                     :OFFICE:
+*** Retest bugs in RESOLVED status              :OFFICE:
+*** Review "Prognosis User guide"               :READING:
+*** Go to Post Office and buy stamps            :OFFICE:
+*** Ring Dentist to change appointment          :OFFICE:
+
+* Home Technical Learning
+** Learn to typeset music with Lilypond         :PROJECT:
+*** Typeset "Eleanor Rigby" for Katie           :COMPUTER:
+*** Typeset piano part of Sicilienne            :COMPUTER:
+** C# Windows Forms Programming                 :PROJECT:
+*** Speech timer (use Egg Timer as basis)       :COMPUTER:
+*** Note entry program for LilyPond             :COMPUTER:
+**** Midi or wav file playback?
+** Learn to Inkscape                            :PROJECT:
+*** Study Tutorial 1                            :COMPUTER:
+
+* Home Projects
+** Home maintenance
+*** Picture hooks in lounge room                :HOME:
+** GTD Implementation                           :PROJECT:
+*** Learn org-mode properly                     :COMPUTER:
+*** Write and publish tutorial on org-mode      :COMPUTER:
+** DVDs to watch
+*** Howl's moving castle DEADLINE: <2006-09-07 Thu> :DVD:
+*** Fantasia DEADLINE: <2006-09-15 Fri>         :DVD:
+
+* Someday/Maybe
+** Reading
+*** Read Matrix Screenplay then watch film
+*** 50 Years of the Design Science Revolution - BuckyFuller
+*** The Mathematics of Nina Gluckstein
+*** Roger Penrose - The Emperors New Mind
+*** A New Kind of Science - Electronic Copy
+**** Chapter 1 and Notes have been printed
+**** Cellular Automata Reading
+**** Write Perl script to create CA
+*** Time Design Booklet - in GTD File
+*** Chaucer - Canterbury Tales
+*** Facts from Figures - Read and Make Notes
+*** Hells Angels - Hunter S Thompson
+*** Pygmalion - G B Shaw
+**** Then watch MY FAIR LADY
+*** No Logo - Naomi Klein
+** DVDs to watch
+*** The Producers
+*** Apocalypse Now
+*** Godfather 3
+** Music Appreciation
+*** Bartok - Listeners Guide
+*** Carmen - Listen to opera while following libretto
+**** Watch the DVD
+*** Beethoven
+**** Piano Sonatas listening project (see card file)
+**** String Quartets
+**** Violin Sonatas
+*** Schubert - Die Schone Mullerin
+**** Compile German vocab list
+**** Follow music while listening
+**** Memorise a song
+**** Play an accompaniment
+*** John Tavener
+**** Listen to all CDs
+**** Biography/TimeLine
+**** List of Works
+*** Chicago - musical
+**** Read libretto
+**** Listen to the 2 different recordings I have
+** Cartooning
+*** John Byrne Book - work through              :HOME:
+
+

@@ -1,0 +1,559 @@
+#+OPTIONS: "\n:t"
+
+http://www.linuxvirtualserver.org/zh/lvs3.html
+* LVS tunnel 配置
+1. 安装ipvsadmin
+
+2. LB 配置
+- 配置网络地址
+  #配置eth0的VIP地址
+  /sbin/ifconfig eth0:0 192.168.1.100 broadcast 192.168.1.100 netmask 255.255.255.255 up
+  #加路由
+  /sbin/route add –host 192.168.1.100 dev eth0:0
+
+- 配置网络系统参数（eth0为绑定VIP的网卡设备） TODO？下面四条是否有必要？
+  echo "0" >/proc/sys/net/ipv4/ip_forward
+  echo "1" >/proc/sys/net/ipv4/conf/all/send_redirects   
+  echo "1" >/proc/sys/net/ipv4/conf/default/send_redirects
+  echo "1" >/proc/sys/net/ipv4/conf/eth0/send_redirects
+- 配置IPVS的服务类型、VIP地址以及对应的RS信息，例如：
+/sbin/ipvsadm -A –t 192.168.1.100:80 -s rr
+/sbin/ipvsadm -a -t 192.168.1.100:80 -r 192.168.1.10 -i -w 1
+/sbin/ipvsadm -a -t 192.168.1.100:80 -r 192.168.1.20 -i -w 1
+
+3. RS 配置
+- 配置网络地址
+  #配置tunl0
+  /sbin/ifconfig tunl0 192.168.1.100 broadcast 192.168.1.100 netmask 255.255.255.255 up
+  #增加路由
+  /sbin/route add –host 192.168.1.100 dev tunl0
+- 配置系统参数
+  #关闭转发功能
+  echo "0" >/proc/sys/net/ipv4/ip_forward
+- 解决arp问题
+  echo 1 > /proc/sys/net/ipv4/conf/tunl0/arp_ignore
+  echo 2 > /proc/sys/net/ipv4/conf/tunl0/arp_announce
+  echo 1 > /proc/sys/net/ipv4/conf/all/arp_ignore
+  echo 2 > /proc/sys/net/ipv4/conf/all/arp_announce
+- 解决源地址验证问题
+  echo 0 > /proc/sys/net/ipv4/conf/tunl0/rp_filter
+  echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
+
+4. 在其他机器访问http://192.168.1.100:80测试
+
+* ipvsmand
+  #+CAPTION: ipvsmond 类图
+  [[file:img/ipvsmon.png]]
+1. ipvsmand
+   监控lvs各种server
+   ipvsmand
+   流程：
+   - 调用ipvsadm 加载/var/lib/ipvsadm目录下的配置文件
+   - cfg解释/etc/ipvsman/topology.cfg文件到内存中
+   - cfg解释/var/lib/ipvsadm下的配置文件到内存中
+   - 获取topology.cfg的修改时间戳
+   - 调用runRealDaemons启动监控线程，监控每个service的real
+   - 启动查看topology.cfg修改的线程
+     当topology.cfg修改时，该线程根据配置增减，调用ipvsadm增减service\real
+   - 为信号SIGHUP设置处理函数
+     当接受到SIGHUP时，重新执行上面的过程。
+2. ipvsadm.py
+   封装ipvsadm命令的各种功能
+
+3. data.py
+   包含 Service、Real两个类
+   构造函数 Real(service, realArgs)
+   其中service 为Service对象
+   realArgs为该real的配置
+
+4. plugins.py
+   实现探测各个server可用的功能
+   包含类Tester
+
+5. config.py
+   configparser.py
+   包含 Tokenize、ParseToDict两个类
+   ipvsmand的配置解释
+   
+   ParseToDict的主要函数为parseComplex
+
+6. iptv_ipvsman 启动、停止ipvsmand服务的脚本
+
+* LVS集群系统网络核心原理分析
+
+** LVS结构与工作原理
+
+　　LVS由前端的负载均衡器(Load Balancer，LB)和后端的真实服务器(Real Server，RS)群组成。RS间可通过局域网或广域网连接。
+LVS的这种结构对用户是透明的，用户只能看见一台作为LB的虚拟服务器(Virtual Server)，而看不到提供服务的RS群。
+
+　　当用户的请求发往虚拟服务器，LB根据设定的包转发策略和负载均衡调度算法将用户请求转发给RS。
+    RS再将用户请求结果返回给用户。同请求包一样，应答包的返回方式也与包转发策略有关。
+
+　　LVS的包转发策略有三种：
+1. NAT (Network Address Translation)模式。
+   LB收到用户请求包后，LB将请求包中虚拟服务器的IP地址转换为某个选定RS的IP地址，转发给RS；
+   RS将应答包发给LB，LB将应答包中RS的IP转为虚拟服务器的IP地址，回送给用户。
+2. IP隧道 (IP Tunneling)模式。
+   LB收到用户请求包后，根据IP隧道协议封装该包，然后传给某个选定的RS；
+   RS解出请求信息，直接将应答内容传给用户。此时要求RS和LB都要支持IP隧道协议。
+3. DR(Direct Routing)模式。
+   LB收到请求包后，将请求包中目标MAC地址转换为某个选定RS的MAC地址后将包转发出去，RS收到请求包后 ,可直接将应答内容传给用户。
+   此时要求LB和所有RS都必须在一个物理段内,且LB与RS群共享一个虚拟IP。
+
+   LVS软件的核心是运行在LB上的IPVS，它使用基于IP层的负载均衡方法。
+   IPVS的总体结构主要由IP包处理、负载均衡算法、系统配置与管理三个模块及虚拟服务器与真实服务器链表组成。
+
+** LVS对 IP包的处理模式
+
+   IP包处理用Linux 2.4内核的Netfilter框架完成。一个数据包通过Netfilter框架的过程如图所示：
+    
+   通俗的说，netfilter的架构就是在整个网络流程的若干位置放置了一些检测点（HOOK），
+   而在每个检测点上上登记了一些处理函数进行处理（如包过滤，NAT等，甚至可以是用户自定义的功能
+   NF_IP_PRE_ROUTING：刚刚进入网络层的数据包通过此点（刚刚进行完版本号，校验和等检测），源地址转换在此点进行；
+   NF_IP_LOCAL_IN：经路由查找后，送往本机的通过此检查点,INPUT包过滤在此点进行；
+   NF_IP_FORWARD：要转发的包通过此检测点,FORWORD包过滤在此点进行；
+   NF_IP_LOCAL_OUT：本机进程发出的包通过此检测点，OUTPUT包过滤在此点进行；
+   NF_IP_POST_ROUTING：所有马上便要通过网络设备出去的包通过此检测点，内置的目的地址转换功能（包括地址伪装）在此点进行。
+
+   在IP层代码中，有一些带有NF_HOOK宏的语句，如IP的转发函数中有：
+   NF_HOOK(PF_INET, NF_IP_FORWARD, skb, skb->dev, dev2,ip_forward_finish);
+   //其中NF_HOOK宏的定义基本如下：
+#+begin_src c
+   #ifdef CONFIG_NETFILTER
+   #define NF_HOOK(pf, hook, skb, indev, outdev, okfn)
+   (list_empty(&nf_hooks[(pf)][(hook)])
+   ? (okfn)(skb)
+   : nf_hook_slow((pf), (hook), (skb), (indev), (outdev), (okfn)))
+   #else /* !CONFIG_NETFILTER */
+   #define NF_HOOK(pf, hook, skb, indev, outdev, okfn) (okfn)(skb)
+   #endif /*CONFIG_NETFILTER*/
+#+end_src
+   如果在编译内核时没有配置netfilter时，就相当于调用最后一个参数，此例中即执行ip_forward_finish函数；
+   否则进入HOOK 点，执行通过nf_register_hook（）登记的功能（这句话表达的可能比较含糊，实际是进入nf_hook_slow（）函数，再由它执行登记的函数）。
+
+   NF_HOOK宏的参数分别为：
+
+   pf：协议族名，netfilter架构同样可以用于IP层之外，因此这个变量还可以有诸如PF_INET6，PF_DECnet等名字。
+   hook：HOOK点的名字，对于IP层，就是取上面的五个值；
+   skb：顾名思义
+   indev：进来的设备，以struct net_device结构表示；
+   outdev：出去的设备，以struct net_device结构表示；
+   okfn:是个函数指针，当所有的该HOOK点的所有登记函数调用完后，转而走此流程。
+
+   内核中定义好的，除非你是这部分内核代码的维护者，否则无权增加或修改，而在此检测点进行的处理，则可由用户指定。
+   像packet filter,NAT,connection track这些功能，也是以这种方式提供的。正如netfilter的当初的设计目标－－提供一个完善灵活的框架，为扩展功能提供方便。
+
+   如果我们想加入自己的代码,便要用nf_register_hook函数，其函数原型为：
+#+begin_src c
+   int nf_register_hook(struct nf_hook_ops *reg)
+   struct nf_hook_ops：//结构
+   struct nf_hook_ops
+   {
+   struct list_head list;
+   /* User fills in from here down. */
+   nf_hookfn *hook;
+   int pf;
+   int hooknum;
+   /* Hooks are ordered in ascending priority. */
+   int priority;
+   };
+#+end_src
+
+   　　其实，类似LVS的做法就是生成一个struct nf_hook_ops结构的实例，并用nf_register_hook将其HOOK上。其中list项要初始化为{NULL,NULL}；
+   由于一般在 IP层工作，pf总是PF_INET；hooknum就是HOOK点;一个HOOK点可能挂多个处理函数，谁先谁后，便要看优先级，即priority的指定了。
+   netfilter_ipv4.h中用一个枚举类型指定了内置的处理函数的优先级：
+#+begin_src c
+enum nf_ip_hook_priorities {
+NF_IP_PRI_FIRST = INT_MIN,
+NF_IP_PRI_CONNTRACK = -200,
+NF_IP_PRI_MANGLE = -150,
+NF_IP_PRI_NAT_DST = -100,
+NF_IP_PRI_FILTER = 0,
+NF_IP_PRI_NAT_SRC = 100,
+NF_IP_PRI_LAST = INT_MAX,
+};
+#+end_src
+　　hook是提供的处理函数，也就是我们的主要工作，其原型为：
+#+begin_src c
+unsigned int nf_hookfn(unsigned int hooknum,
+struct sk_buff **skb,
+const struct net_device *in,
+const struct net_device *out,
+int (*okfn)(struct sk_buff *));
+#+end_src
+　　它的五个参数将由NFHOOK宏传进去。
+
+　　以上是NetFillter编写自己模块时的一些基本用法，接下来，我们来看一下LVS中是如何实现的。
+
+*** LVS中Netfiler的实现
+
+    利用Netfilter，LVS处理数据报从左边进入系统，进行IP校验以后，数据报经过第一个钩子函数NF_IP_PRE_ROUTING [HOOK1]进行处理；
+    然后进行路由选择，决定该数据报是需要转发还是发给本机；若该数据报是发被本机的，则该数据经过钩子函数 NF_IP_LOCAL_IN[HOOK2]处理后传递给上层协议；
+    若该数据报应该被转发，则它被NF_IP_FORWARD[HOOK3]处理；经过转发的数据报经过最后一个钩子函数NF_IP_POST_ROUTING[HOOK4]处理以后，再传输到网络上。
+    本地产生的数据经过钩子函数 NF_IP_LOCAL_OUT[HOOK5]处理后，进行路由选择处理，然后经过NF_IP_POST_ROUTING[HOOK4]处理后发送到网络上。
+
+    当启动IPVS加载ip_vs模块时，模块的初始化函数ip_vs_init( )注册了NF_IP_LOCAL_IN[HOOK2]、NF_IP_FORWARD[HOOK3]、NF_IP_POST_ROUTING[HOOK4] 钩子函数用于处理进出的数据报。
+
+**** NF_IP_LOCAL_IN处理过程
+
+　　用户向虚拟服务器发起请求，数据报经过NF_IP_LOCAL_IN[HOOK2],进入ip_vs_in( )进行处理。
+1. 如果传入的是icmp数据报，则调用ip_vs_in_icmp( )；
+2. 否则继续判断是否为tcp/udp数据报，如果不是tcp/udp数据报，则函数返回NF_ACCEPT(让内核继续处理该数据报)；
+3. 余下情况便是处理tcp/udp数据报。
+   首先，调用ip_vs_header_check( )检查报头，如果异常，则函数返回NF_DROP(丢弃该数据报)。
+   接着，调用ip_vs_conn_in_get( )去ip_vs_conn_tab表中查找是否存在这样的连接：它的客户机和虚拟服务器的ip地址和端口号以及协议类型均与数据报中的相应信息一致。
+   如果不存在相应连接，则意味着连接尚未建立，
+   此时如果数据报为tcp的sync报文或udp数据报则查找相应的虚拟服务器；如果相应虚拟服务器存在但是已经满负荷，则返回NF_DROP；
+   如果相应虚拟服务器存在并且未满负荷，那么调用ip_vs_schedule( )调度一个RS并创建一个新的连接，如果调度失败则调用ip_vs_leave( )继续传递或者丢弃数据报。
+   如果存在相应连接，首先判断连接上的RS是否可用，如果不可用则处理相关信息后返回NF_DROP。找到已存在的连接或建立新的连接后，修改系统记录的相关信息如传入的数据报的个数等。
+   如果这个连接在创建时绑定了特定的数据报传输函数，调用这个函数传输数据报，否则返回 NF_ACCEPT。
+
+　　ip_vs_in()调用的ip_vs_in_icmp( )处理icmp报文。函数开始时检查数据报的长度，如果异常则返回NF_DROP。
+函数只处理由tcp/udp报文传送错误引起的目的不可达、源端被关闭或超时的icmp报文，其他情况则让内核处理。
+针对上述三类报文，首先检查检验和。如果检验和错误，直接返回NF_DROP；否则，分析返回的icmp差错信息，查找相应的连接是否存在。
+如果连接不存在，返回NF_ACCEPT；如果连接存在，根据连接信息，依次修改差错信息包头的ip地址与端口号及 ICMP数据报包头的ip地址，
+并重新计算和修改各个包头中的检验和，之后查找路由调用ip_send( )发送修改过的数据报，并返回NF_STOLEN(退出数据报的处理过程)。
+
+　　ip_vs_in()调用的函数ip_vs_schedule( )为虚拟服务器调度可用的RS并建立相应连接。它将根据虚拟服务器绑定的调度算法分配一个RS，
+如果成功，则调用ip_vs_conn_new( )建立连接。ip_vs_conn_new( )将进行一系列初始化操作：设置连接的协议、ip地址、端口号、协议超时信息，
+绑定application helper、RS和数据报传输函数，最后调用ip_vs_conn_hash( )将这个连接插入哈希表ip_vs_conn_tab中。
+一个连接绑定的数据报传输函数，依据IPVS工作方式可分为ip_vs_nat_xmit( )、ip_vs_tunnel_xmit( )、ip_vs_dr_xmit( )。
+例如ip_vs_nat_xmit( )的主要操作是：修改报文的目的地址和目的端口为RS信息，重新计算并设置检验和，调用ip_send( )发送修改后的数据报。
+
+**** NF_IP_FORWARD处理过程
+
+　　数据报进入NF_IP_FORWARD后，将进入ip_vs_out( )进行处理。这个函数只在NAT方式下被调用。它首先判断数据报类型，如果为icmp数据报则直接调用ip_vs_out_icmp( )；
+其次判断是否为tcp/udp数据报，如果不是这二者则返回NF_ACCEPT。
+余下就是tcp/udp数据报的处理。首先，调用 ip_vs_header_check( )检查报头，如果异常则返回NF_DROP。
+其次，调用ip_vs_conn_out_get( )判断是否存在相应的连接。
+1. 若不存在相应连接
+   调用ip_vs_lookup_real_service( )去哈希表中查找发送数据报的RS是否仍然存在，
+   如果RS存在且报文是tcp非复位报文或udp 报文，则调用icmp_send( )给RS发送目的不可达icmp报文并返回NF_STOLEN；
+   其余情况下均返回NF_ACCEPT。
+2. 若存在相应连接
+   检查数据报的检验和，如果错误则返回NF_DROP，
+   如果正确，修改数据报，将源地址修改为虚拟服务器ip地址，源端口修改为虚拟服务器端口号，重新计算并设置检验和，并返回 NF_ACCEPT。
+
+　　ip_vs_out_icmp( )的流程与ip_vs_in_icmp( )类似，只是修改数据报时有所区别：
+   ip报头的源地址和差错信息中udp或tcp报头的目的地址均修改为虚拟服务器地址，差错信息中udp或tcp报头的目的端口号修改为虚拟服务器的端口号。
+
+**** NF_IP_POST_ROUTING处理过程
+
+　　NF_IP_POST_ROUTING钩子函数只在NAT方式下使用。数据报进入NF_IP_POST_ROUTING后,由 ip_vs_post_routing( )进行处理。
+   它首先判断数据报是否经过IPVS，如果未经过则返回NF_ACCEPT；否则立刻传输数据报，函数返回NF_STOLEN，防止数据报被 iptable的规则修改。
+** LVS系统配置与管理
+
+   IPVS模块初始化时注册了setsockopt/getsockopt( )，ipvsadm命令调用这两个函数向IPVS内核模块传递ip_vs_rule_user结构的系统配置数据，完成系统的配置，实现虚拟服务器和RS 地址的添加、修改、删除操作。系统通过这些操作完成对虚拟服务器和RS链表的管理。
+
+   虚拟服务器的添加操作由ip_vs_add_service( )完成，该函数根据哈希算法向虚拟服务器哈希表添加一个新的节点，查找用户设定的调度算法并将此算法绑定到该节点；
+   虚拟服务器的删除由ip_vs_del_service拟服务器的修改由 ip_vs_edit_service( )完成，此函数修改指定服务器的调度算法；
+   虚拟服务器的删除由ip_vs_del_service( )完成，在删除一个虚拟服务器之前，必须先删除此虚拟服务器所带的所有RS，并解除虚拟服务器所绑定的调度算法。
+
+   与之类似，RS的添加、修改、删除操作分别由ip_vs_add_dest( )、ip_vs_edit_dest( )和ip_vs_edit_dest( )完成。
+
+** 负载均衡调度算法
+
+　　前面已经提到，用户在添加一个虚拟服务时要绑定调度算法，这由ip_vs_bind_scheduler( )完成，调度算法的查找则由ip_vs_scheduler_get( )完成。
+ip_vs_scheduler_get( )根据调度算法的名字，调用ip_vs_sched_getbyname( )从调度算法队列中查找此调度算法，如果没找到则加载相应调度算法模块再查找，最后返回查找结果。
+
+目前系统有八种负载均衡调度算法，具体如下:
+
+rr：轮循调度(Round-Robin) 它将请求依次分配不同的RS，也就是在RS中均摊请求。这种算法简单，但是只适合于RS处理性能相差不大的情况。
+wrr：加权轮循调度(Weighted Round-Robin) 它将依据不同RS的权值分配任务。权值较高的RS将优先获得任务，并且分配到的连接数将比权值较低的RS更多。相同权值的RS得到相同数目的连接数。
+dh：目的地址哈希调度 (Destination Hashing) 以目的地址为关键字查找一个静态hash表来获得需要的RS。
+sh：源地址哈希调度(Source Hashing) 以源地址为关键字查找一个静态hash表来获得需要的RS。
+Lc：最小连接数调度(Least-Connection) IPVS表存储了所有的活动的连接。把新的连接请求发送到当前连接数最小的RS。
+Wlc：加权最小连接数调度(Weighted Least-Connection) 假设各台RS的权值依次为Wi（I = 1..n），当前的TCP连接数依次为Ti（I＝1..n），依次选取Ti/Wi为最小的RS作为下一个分配的RS。
+Lblc：基于地址的最小连接数调度(Locality-Based Least-Connection) 将来自同一目的地址的请求分配给同一台RS如果这台服务器尚未满负荷，否则分配给连接数最小的RS，并以它为下一次分配的首先考虑。
+Lblcr：基于地址的带重复最小连接数调度(Locality-Based Least-Connection with Replication) 对于某一目的地址，对应有一个RS子集。对此地址的请求，为它分配子集中连接数最小的RS；如果子集中所有的服务器均已满负荷，则从集群中选择一个连接数较小的服务器，将它加入到此子集并分配连接；若一定时间内，这个子集未被做任何修改，则将子集中负载最大的节点从子集删除。
+
+* LVS 其他
+1. ipvs分为三种负载均衡模式
+
+  NAT、tunnel、direct routing（DR）
+  NAT：所有交互数据必须通过均衡器
+  tunnel：半连接处理方式，进行了IP封装
+  DR：修改MAC地址，需要同一网段。
+
+2. ipvs支持的均衡调度算法
+
+  轮叫调度（Round-Robin Scheduling） 
+  加权轮叫调度（Weighted Round-Robin Scheduling） 
+  最小连接调度（Least-Connection Scheduling） 
+  加权最小连接调度（Weighted Least-Connection Scheduling） 
+  基于局部性的最少链接（Locality-Based Least Connections Scheduling） 
+  带复制的基于局部性最少链接（Locality-Based Least Connections with Replication Scheduling） 
+  目标地址散列调度（Destination Hashing Scheduling） 
+  源地址散列调度（Source Hashing Scheduling）
+
+3. ipvs代码记录
+
+  内核为 Linux-kernel 3.3.7
+1)  结构体
+    ipvs各结构体定义在include\net\ip_vs.h与include\linux\ip_vs.h头文件中
+    - struct ip_vs_protocol
+
+      这个结构用来描述ipvs支持的IP协议。ipvs的IP层协议支持TCP, UDP, AH和ESP这4种IP层协议
+    - struct ip_vs_conn
+      这个结构用来描述ipvs的链接
+    - struct ip_vs_service
+      这个结构用来描述ipvs对外的虚拟服务器信息
+    - struct ip_vs_dest
+      这个结构用来描述具体的真实服务器信息
+    - struct ip_vs_scheduler
+      这个结构用来描述ipvs调度算法，目前调度方法包括rr，wrr，lc, wlc, lblc, lblcr, dh, sh等
+    - struct ip_vs_app
+      这个结构用来描述ipvs的应用模块对象
+    - struct ip_vs_service_user
+      这个结构用来描述ipvs用户空间的虚拟服务信息
+    - struct ip_vs_dest_user
+      这个结构用来描述ipvs用户空间的真实服务器信息
+    - struct ip_vs_stats_user
+      这个结构用来描述ipvs用户空间的统计信息
+    - struct ip_vs_getinfo
+      这个结构用来描述ipvs用户空间的获取信息
+    - struct ip_vs_service_entry
+      这个结构用来描述ipvs用户空间的服务规则项信息
+    - struct ip_vs_dest_entry
+      这个结构用来描述ipvs用户空间的真实服务器规则项信息
+    - struct ip_vs_get_dests
+      这个结构用来描述ipvs用户空间的获取真实服务器项信息
+    - struct ip_vs_get_services
+      这个结构用来描述ipvs用户空间的获取虚拟服务项信息
+    - struct ip_vs_timeout_user
+      这个结构用来描述ipvs用户空间的超时信息
+    - struct ip_vs_daemon_user
+      这个结构用来描述ipvs的内核守护进程信息
+
+2) 模块初始化
+
+  - ipvs服务初始化
+    net\netfilter\ipvs\ip_vs_core.c文件
+    static int __init ip_vs_init(void)
+
+  - ioctl初始化
+    net\netfilter\ipvs\ip_vs_ctl.c文件
+    int __init ip_vs_control_init(void)
+
+  - 协议初始化
+    net\netfilter\ipvs\ip_vs_proto.c文件
+    int __init ip_vs_protocol_init(void)
+
+  - 连接初始化
+    net\netfilter\ipvs\ip_vs_conn.c文件
+    int __init ip_vs_conn_init(void)
+
+  - netfilter挂接点数组，具体的数据包处理见数组中对应.hook的函数
+    net\netfilter\ipvs\ip_vs_core.c文件
+    static struct nf_hook_ops ip_vs_ops[]
+    ret = nf_register_hooks(ip_vs_ops, ARRAY_SIZE(ip_vs_ops));
+
+
+
+ 
+
+3) 调度算法具体实现
+
+  各算法与ip_vs_scheduler结构体对应
+
+  rr算法在net\netfilter\ipvs\ip_vs_rr.c文件中实现，以此类推。
+#+begin_src c
+static struct ip_vs_scheduler ip_vs_rr_scheduler = {
+.name =                        "rr",                        /* name */
+.refcnt =                ATOMIC_INIT(0),
+.module =                THIS_MODULE,
+.n_list =                LIST_HEAD_INIT(ip_vs_rr_scheduler.n_list),
+.init_service =                ip_vs_rr_init_svc,
+.update_service =        ip_vs_rr_update_svc,
+.schedule =                ip_vs_rr_schedule,
+};
+#+end_src
+- init_service
+  算法初始化，在虚拟服务ip_vs_service和调度器绑定时调用(ip_vs_bind_scheduler()函数)
+- update_service()
+  函数在目的服务器变化时调用(如ip_vs_add_dest(), ip_vs_edit_dest()等函数)
+  而算法核心函数schedule()则是在ip_vs_schedule()函数中在新建IPVS连接前调用，找到真正的服务器提供服务，建立IPVS连接。
+
+4) 连接管理
+   - struct ip_vs_conn *ip_vs_conn_in_get(const struct ip_vs_conn_param *p)
+     进入方向
+   - struct ip_vs_conn *ip_vs_conn_out_get(const struct ip_vs_conn_param *p)
+     发出方向
+   - struct ip_vs_conn * ip_vs_conn_new(...)
+     建立连接
+   - void ip_vs_bind_dest(struct ip_vs_conn *cp, struct ip_vs_dest *dest)
+     绑定真实服务器
+   - int ip_vs_bind_app(struct ip_vs_conn *cp, struct ip_vs_protocol *pp)
+     绑定应用协议
+   - static inline void ip_vs_bind_xmit(struct ip_vs_conn *cp)
+     绑定发送方法
+   - static inline int ip_vs_conn_hash(struct ip_vs_conn *cp)
+     将连接结构添加到连接hash表
+   - static inline int ip_vs_conn_unhash(struct ip_vs_conn *cp)
+     从连接hash表中断开
+   - static void ip_vs_conn_expire(unsigned long data)
+     连接超时
+   - static inline void ip_vs_control_del(struct ip_vs_conn *cp)
+     从主连接中断开
+   - void ip_vs_unbind_app(struct ip_vs_conn *cp)
+     解除与应用的绑定
+   - static inline void ip_vs_unbind_dest(struct ip_vs_conn *cp)
+     接触与真实服务器的绑定
+   - static void ip_vs_conn_flush(struct net *net)
+     释放所有连接
+   - void ip_vs_random_dropentry(struct net *net)
+     定时随即删除连接
+   - static inline int todrop_entry(struct ip_vs_conn *cp)
+     判断是否要删除连接
+
+3.5、协议管理
+
+   - static int __used __init register_ip_vs_protocol(struct ip_vs_protocol *pp)
+     注册一个ipvs协议
+   - static int unregister_ip_vs_protocol(struct ip_vs_protocol *pp)
+     注销一个ipvs协议
+   - struct ip_vs_protocol * ip_vs_proto_get(unsigned short proto)
+     查找服务,返回服务结构指针
+   - void ip_vs_protocol_timeout_change(struct netns_ipvs *ipvs, int flags)
+     修改协议超时标记
+   - int *ip_vs_create_timeout_table(int *table, int size)
+     创建状态超时表
+   - int ip_vs_set_state_timeout(int *table, int num, const char *const *names, const char *name, int to)
+     修改状态超时表
+   - const char * ip_vs_state_name(__u16 proto, int state)
+     返回协议状态名称
+下面以TCP协议的实现来详细说明，相关代码文件为net\netfilter\ipvs\ip_vs_proto_tcp.c
+#+begin_src c
+struct ip_vs_protocol ip_vs_protocol_tcp = {
+.name =                        "TCP",
+.protocol =                IPPROTO_TCP,
+.num_states =                IP_VS_TCP_S_LAST,
+.dont_defrag =                0,
+.init =                        NULL,
+.exit =                        NULL,
+.init_netns =                __ip_vs_tcp_init,
+.exit_netns =                __ip_vs_tcp_exit,
+.register_app =                tcp_register_app,
+.unregister_app =        tcp_unregister_app,
+.conn_schedule =        tcp_conn_schedule,
+.conn_in_get =                ip_vs_conn_in_get_proto,
+.conn_out_get =                ip_vs_conn_out_get_proto,
+.snat_handler =                tcp_snat_handler,
+.dnat_handler =                tcp_dnat_handler,
+.csum_check =                tcp_csum_check,
+.state_name =                tcp_state_name,
+.state_transition =        tcp_state_transition,
+.app_conn_bind =        tcp_app_conn_bind,
+.debug_packet =                ip_vs_tcpudp_debug_packet,
+.timeout_change =        tcp_timeout_change,
+};
+#+end_src
+   - static void __ip_vs_tcp_init(struct net *net, struct ip_vs_proto_data *pd)
+     tcp初始化函数
+   - static void __ip_vs_tcp_exit(struct net *net, struct ip_vs_proto_data *pd)
+     tcp退出函数
+   - static int tcp_register_app(struct net *net, struct ip_vs_app *inc)
+     注册tcp应用协议
+   - static voidtcp_unregister_app(struct net *net, struct ip_vs_app *inc)
+     注销tcp应用协议
+   - static int tcp_conn_schedule(int af, struct sk_buff *skb, struct ip_vs_proto_data *pd, int *verdict, struct ip_vs_conn **cpp)
+     tcp连接调度，该函数在ip_vs_in()函数中调用。
+   - struct ip_vs_conn * ip_vs_conn_in_get_proto(int af, const struct sk_buff *skb, const struct ip_vs_iphdr *iph, unsigned int proto_off, int inverse)
+     进入方向连接查找
+   - struct ip_vs_conn * ip_vs_conn_out_get_proto(int af, const struct sk_buff *skb, const struct ip_vs_iphdr *iph, unsigned int proto_off, int inverse)
+     发出方向连接查找
+   - static int tcp_snat_handler(struct sk_buff *skb, struct ip_vs_protocol *pp, struct ip_vs_conn *cp)
+     该函数完成对协议部分数据进行源NAT操作,对TCP来说,NAT部分的数据就是源端口
+   - static inline void tcp_fast_csum_update(int af, struct tcphdr *tcph, const union nf_inet_addr *oldip, const union nf_inet_addr *newip, __be16 oldport, __be16 newport)
+     TCP校验和快速计算法,因为只修改了端口一个参数,可根据RFC1141方法快速计算
+   - static int tcp_dnat_handler(struct sk_buff *skb, struct ip_vs_protocol *pp, struct ip_vs_conn *cp)
+     该函数完成对协议部分数据进行目的NAT操作,对TCP来说,NAT部分的数据就是目的端口
+   - static int tcp_csum_check(int af, struct sk_buff *skb, struct ip_vs_protocol *pp)
+     计算IP协议中的校验和,对于TCP,UDP头中都有校验和参数,TCP中的校验和是必须的,而UDP的校验和可以不用计算。
+     该函数用的都是linux内核提供标准的校验和计算函数
+
+   - static const char * tcp_state_name(int state)
+     该函数返回协议状态名称字符串
+static const char *const tcp_state_name_table[IP_VS_TCP_S_LAST+1] = {
+[IP_VS_TCP_S_NONE]                =        "NONE",
+[IP_VS_TCP_S_ESTABLISHED]        =        "ESTABLISHED",
+[IP_VS_TCP_S_SYN_SENT]                =        "SYN_SENT",
+[IP_VS_TCP_S_SYN_RECV]                =        "SYN_RECV",
+[IP_VS_TCP_S_FIN_WAIT]                =        "FIN_WAIT",
+[IP_VS_TCP_S_TIME_WAIT]                =        "TIME_WAIT",
+[IP_VS_TCP_S_CLOSE]                =        "CLOSE",
+[IP_VS_TCP_S_CLOSE_WAIT]        =        "CLOSE_WAIT",
+[IP_VS_TCP_S_LAST_ACK]                =        "LAST_ACK",
+[IP_VS_TCP_S_LISTEN]                =        "LISTEN",
+[IP_VS_TCP_S_SYNACK]                =        "SYNACK",
+[IP_VS_TCP_S_LAST]                =        "BUG!",
+};
+
+TCP协议状态名称定义
+
+static void tcp_state_transition(struct ip_vs_conn *cp, int direction, const struct sk_buff *skb, struct ip_vs_proto_data *pd)
+
+tcp状态转换
+
+static inline void set_tcp_state(struct ip_vs_proto_data *pd, struct ip_vs_conn *cp, int direction, struct tcphdr *th)
+
+设置tcp连接状态
+
+static struct tcp_states_t tcp_states []
+
+tcp状态转换表
+
+static void tcp_timeout_change(struct ip_vs_proto_data *pd, int flags)
+
+超时变化
+
+static int tcp_app_conn_bind(struct ip_vs_conn *cp)
+
+本函数实现将多连接应用协议处理模块和IPVS连接进行绑定
+
+* proc
+  代码见ip_vs_ctl.c
+  /proc/net/ip_vs
+  ip_vs_conn.c
+  /proc/net/ipv_vs_conn
+
+在18上运行lvs director.
+#+begin_example
+bss-18:~ # ipvsadm -Ln
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  10.0.64.244:8080 rr
+  -> 10.0.64.13:8080              Tunnel  1      0          0         
+  -> 10.0.64.117:8080             Tunnel  1      0          1    
+#+end_example
+
+访问10.0.64.244:8080后
+#+begin_example
+bss-18:~ # cat /proc/net/ip_vs_conn
+Pro FromIP   FPrt ToIP     TPrt DestIP   DPrt State       Expires PEName PEData
+TCP 0A004013 9B2C 0A0040F4 1F90 0A004075 1F90 ESTABLISHED     897
+#+end_example
+再次查看
+#+begin_example
+bss-18:~ # cat /proc/net/ip_vs_conn
+Pro FromIP   FPrt ToIP     TPrt DestIP   DPrt State       Expires PEName PEData
+TCP 0A004013 9B2C 0A0040F4 1F90 0A004075 1F90 FIN_WAIT        110
+#+end_example
+* LVS tcp状态转换
+  LVS根据tcp头中tcpflags，来维护简单的状态机。
+  根据对应的状态，对每一个连接设置合适的超时时间。
+
+  ip_vs_in()->ip_vs_set_state()->set_tcp_state()
+
+  ip_vs_proto_tcp.c
+  set_tcp_state():
+  ...
+  设置根据链接的状态，链接的超时时间
+  cp->timeout = pp->timeout_table[cp->state = new_state];
+* LVS Director RealServer 端口问题
+  在使用Tunnel和Director模式时，
+  通过ipvsadm 设置RealServer的端口异于Director的端口时，自动改成Director的端口.
+  因为这两种模式不会修改4层的报文。
+
+  有这需求时需要使用NAT模式

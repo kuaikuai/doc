@@ -1,0 +1,82 @@
+
+* 函数编程常用几种常用技术：
+用python 代码表示 （python对函数式编程支持不好）
+1. map & reduce 等操作列表。
+#+begin_src python
+print map(lambda x: x.upper(), ["funtional", "programming"])
+#输出 [’FUNCTIONAL‘, ’PROGRAMMING‘]
+print reduce(lambda x, y: x+y, [1, 2, 3, 4, 5])
+#输出 15
+#+end_src
+reduce执行过程：
+#+begin_verse
+[1, 2, 3, 4, 5]
+   [3, 3, 4, 5]
+      [6, 4, 5]
+        [10, 5]
+             15
+#+end_verse
+
+2. pipeline
+类似unix的shell常用的手法
+ps aux | awk '{print $2}' | sort -n | xargs echo
+如果用函数式编程的方式表达：
+xargs(  echo, sort('-n', awk('print $2', ps('aux')))  )
+
+#+begin_src python
+def even_filter(nums):
+    return filter(lambda x: x%2==0, nums)
+ 
+def multiply_by_three(nums):
+    return map(lambda x: x*3, nums)
+ 
+def convert_to_string(nums):
+    return map(lambda x: 'The Number: %s' % x,  nums)
+ 
+nums = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+
+def pipeline_func(data, fns):
+    return reduce(lambda a, x: x(a),
+                  fns,
+                  data)
+
+print pipeline_func(nums, [even_filter,
+                     multiply_by_three,
+                     convert_to_string])
+
+# or 这种写法在lisp多见。
+print convert_to_string(
+      multiply_by_three
+         (even_filter(nums)))
+
+#+end_src
+3. recursing
+   略
+4. currying
+
+在直觉上，「如果你固定某些参数，你将得到接受余下参数的一个函数」。
+所以对于有两个变量的函数y^x，如果固定了 y=2，则得到有一个变量的函数 2^x
+#+begin_src python
+def curry(x, argc=None):
+    if argc is None:
+        argc = x.func_code.co_argcount
+    def p(*a):
+        if len(a) == argc:
+            return x(*a)
+        def q(*b):
+            return x(*(a + b))
+        return curry(q, argc - len(a))
+    return p
+
+@curry
+def myfun(a,b,c):
+    print '%d-%d-%d' % (a,b,c)
+
+myfun(11,22,33)
+myfun(44,55)(66)
+myfun(77)(88)(99)
+#+end_src
+
+5. high order function
+
+

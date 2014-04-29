@@ -1,0 +1,261 @@
+#+OPTIONS: "\n:t"
+
+*重复、重复、再重复*
+* 电子书网站
+http://www.it-ebooks.info/
+http://ishare.iask.sina.com.cn
+* 健康：
+- 《人体药库学》三部曲 5 star
+-  《营养圣经》
+-  《人体经络使用手册》
+-  《中国健康调查报告》
+* 计算机体系：
+-  《计算机系统　Computer System A Programmer’s Perspective》电子工业出版社
+-  《Intel汇编语言程序设计（第四）版》
+- 《汇编语言》（王爽） 
+-  《计算机体系结构-量化研究方法（第四版）》（英文版） 未看
+-  《计算机组织与设计硬件/软件接口（第四版）》（英文版）
+    对于我来说，这本书讲的计算机组织体系的东西足够用了。
+-  《计算机系统概论（Introduction to Computing Systems）（英文版）》
+    讲了一个简单CPU的实现。入门好书
+  
+* 数学：
+-  《离散数据及其应用（第五版）》（英文版）
+- 《具体数学》（英文班）
+- 《组合数学》（英文版）
+* 操作系统：
+-  《UNIX操作系统设计（The Design of UNIX Operating System）》 （英文版）人民邮电出版社
+   我看第一本关于操作系统设计原理的书
+-  《LINUX 源码注释》赵炯 
+-  《现代操作系统》Tanenbaum 机械工业出版社
+-  《LINUX源代码情景分析》
+   《Linux kernel development 2nd edition》
+-  《深入理解linux内核》中国电力出版社
+-  《Linux Kernel Architecture》自己打印
+-  《Understanding The Linux Virtual Memory Manager》 pdf
+    讲述了linux2.6的内存管理，主要结合《深入理解linux内核》看
+-  《linux设备驱动程序》中国电力出版社
+-  《4.4BSD操作系统设计与实现》（英文版）
+  
+* 算法：
+-  《算法导论（第二版 影印版）Introduction to Algorithms(Second Edition)》 高等教育出版社
+   不是合适作为教材，但是确实是好书。有空一定看完！！！务必
+   涉及的面比较广，书很厚，看似不象introduction，除了数学上比一般算法书严谨一些，内容多一些。
+   仔细体味，许多算法的奥秘，书并未谈及，确实是introduction。
+-  《C算法（第一卷：基础、数据结构、排序和搜索）（第三版）（Robert Sedgewick ）》 人民邮电出版社
+- 《算法V (C实现)--图算法 Algorithms in C Part 5: Graph Algorithms (第三版 影印)》
+-  《算法设计技巧与分析（英文版） Algorithms Design Techniques and Analysis》 
+  　作者: （沙特）M.H.Alsuwaiyel 出版社: 电子工业出版社 
+- 《Mastering Algorithms with Perl》
+  使用Perl实现大量的算法。
+  其中一些算法比《C算法》中写的好。
+  直接用perl实践算法，比C等语言静态语言要方便，
+  我们不用关心编译问题，内存问题，指针飞掉等。而且有现成hash,queue,stack可以用，更能抓住算法的本质。
+-  《程序实用算法》
+- 《Advanced Data Structures》 pdf
+- 《Data Structures And Algorithms In C++ 2nd》 pdf
+* 编译
+- 《编译原理》中英版龙书
+  我很赖，只看了前三章。
+- 《Language Implementation Patterns：
+    Create Your Own Domain-Specific and General Programming Languages》 pdf
+  很实用的书!!
+  看了再这个再回头看龙书之类的书，会事半功倍。
+
+* LINUX/UNIX编程：
+- 《UNIX环境高级编程》英文版
+- 《Linux 应用程序开发》英文版 第2版
+- 《UNIX Systems Programming: Communication, Concurrency and Threads》 pdf
+- 《Pthread Primer》 pdf
+- 《Programming with POSIX Threads》 pdf
+* 网络:
+  steven的几卷书都是经典，我很大程度上靠他的书混饭吃。
+-  《TCP/IP详解:　卷１　协议》英文版
+-  《TCP/IP详解：卷2 实现》 英文版
+-  《Internetworking with TCP/IP, Vol I - Principles, Protocols And Architecture 5th》 by Douglas E. Comer
+   如果说《TCP/IP Illustrated: vol I》是实践派，江湖派
+   那么这本书，就是学院派。结合两者，加深理解。
+-  《UNIX网络编程 卷1 套接字联网API》英文版 第3版 机械工业出版社
+- 《Interconnections: Bridges, Routers, Switches, and Internetworking Protocols 2nd》
+  网络互连_网桥.路由器.交换机和互连协议
+  写的很精简的，但是有深度。
+- 《Computer.Networks,.Andrew.S..Tanenbaum,.David.J..Wetherall, 5ed》
+  计算机网络第五版
+* 数据压缩
+- 《Fundamental Data Compression》
+* 搜索
+- 《Lucene in Action》
+* 多CPU，分布式
+- 《Principles of Transaction Processing》 出版商Morgan Kaufmann
+   事务处理入门, 需要再复习一遍，
+- 《事务处理原理与实现》英文版 未看
+- 《多处理器编程的艺术（英文版）》机械工业出版社
+  使出吃奶的劲，看了两章，楞是没看懂，后放弃，以后有机缘的话，再回头修理它
+  最打击的我书。原因：对于多CPU的物理架构不了解。
+- 《分布式系统的原理与范型（英文版）》 
+  写的不是很好。
+
+* 函数式编程
+- 《Land of Lisp: Learn to Program in Lisp, One Game at a Time!》 pdf
+  中穿插了大量的漫画，很有幽默，我见过最有意思的技术书。
+  用来学习common lisp是很好的入门书。
+  之前看<how to programme>中的scheme，给我造成一种错觉：
+  /函数式编程语句中没有循环，（给个语法糖衣也行啊，不要总是递归），没有hash之类的数据结构，只是能写玩具代码/
+  通过这个本书，彻底改变了我的想法。
+- 《Practical Common Lisp》
+- 《On Lisp》
+- 《程序设计方法》
+- 《真实世界的haskell》（英文版）
+- 《计算机程序的构造和解释》
+* C语言:
+- 《C编程语言》（中文版、英文版）
+- 《C语言缺陷与陷阱》
+- 《C专家编程》
+- 《编程精粹》
+* C++:
+- 《Accelerated C++》
+  c++很好的入门书。
+  学习一门语言，最好的办法就是用。
+  随着书中例子，边看边敲代码，获取语感。
+- 《C++编程思想》
+   更多的是从C语言角度切入，我比较喜欢。
+- 《C++ Primer》
+- 《C++ 沉思录》
+- 《Modern C++ Design Generic Programming and Design Pattern Applied》
+- 《Effective c++》
+- 《深度探索C++对象模型》
+- 《C++语言的设计和演化》
+- 《The C++ Programming Language (Speical 3rd Edition)》
+* perl:
+perl 三步曲。
+perl很丑，很怪，但我喜欢。
+- 《Learning Perl》
+- 《Intermediate Perl》
+- 《Master Perl》
+
+- 《perl编程语言》
+- 《Extending And Embedding Perl》
+  详细描述如何拓展perl和嵌入perl
+- 《High Order Perl》 pdf
+  perl函数式编程的好书
+- 《C程序员精通Perl》（steve Oualline）人民邮电出版社
+* 指导性的：
+-  《程序员修炼之道》
+-  《程序开发心理学》
+-  《系统设计的一般原理》 
+-  《The Practice of Programming》
+-  《Write Solid Code》
+-  《Code Complete, 2nd》
+-  《卓有成效的程序员（影印版）》
+-  《架构之美》（英文版）
+   经典语句：
+   conceptual integrity is the most important attribute of an architecture.
+   本人深以为然！
+-  《编程人生》
+-  《程序员的自我修养--链接、装载与库》
+-  《软件开发者路线图》
+* 方法论：
+  《设计模式》 （英文版）
+  《敏捷软件开发》 （英文版）
+  《冒号课堂——编程范式与OOP思想》
+  国内出版的技术书算是相当好一个书了。
+* 调试：
+- 《软件调试思想》电子工业出版社
+- 《Why Program Fail》
+* python:
+  说实话，不太喜欢python与java，感觉过于死板
+-  《Learning Python》pdf
+* java:
+- 《深入java虚拟机》
+- 《Thinking in Java》
+- 《Effect Java》
+
+* 正则表达式
+-  《精通正则表达式》（英文版）
+* emacs
+- 《学习GNU Emacs》
+
+* 杂:
+- 《学习的艺术》 乔希·维茨金 (Josh Waitzkin) 绝对的好书
+  经典语句：
+  肌肉和思想一样需要通过不断拓展自己才能够发展，然而如果伸得太长就会有断掉得危险。有时候我们不得不放弃现有得一些观点来吸收更多新得知识，却绝对不能放弃太多我们独一无二得内在。
+  成为顶尖得选手并没有什么秘诀，而是对可能是基本技能得东西有更深得理解。每天都学得更深一点而不是更广一点，因为更深一点可以让我们把我们潜力中那些看不到，感受不到但又极具创造力得部分挖掘出来。
+
+  在每一个领域，区分强者与弱者的标准很大程度上取决于在危机关头是否能够保持清醒的头脑，保持冷静，从容自如。如果一个选手表现得从容不迫，而另一个选手已经开始被心理因素摧垮，那么比赛的结果已经不言而喻了。被掠者已经不能客观从容地应对时，会出现一次又一次的失误，掠杀者此时就能步步紧逼出杀招了。更微妙的是，这种心理战术或许对需要独立完成的比如写作、绘画、学术思考或研究来说更为重要。 在没有外部推动的情况下，我们必须成为我们自己的监督者，有多从容成了最好的标尺。如果我们只以“度过此生”来作为生活的标准，那么永远都不能指望杰出。而另一方面，如果发自内心深处且灵活的从容成为了习性，那么生活、艺术和学习将会变得丰富多彩，而这种丰富多彩能带给你不断的惊喜和愉悦。那些高人一筹的人都是能将创造潜力发挥到极致的人。对那些生活的强者来说，从容应对每天的学习过程的心理就如同他人梦想着在危机时分能体验最高潮瞬间的那种执著。
+
+  漩涡效应：当你犯了第一次错误之后，很容易接着犯第二个、第三个错误。情绪的影响是巨大的。所以，保持内心的平静吧。
+以退为进，任何时候都应该放弃旧习，放下自尊心，重新开始学习，这样才能不受固习的影响。很多时候，我们就是抱着自己脑中原先灌输的观念和概念不放，对新的知识形成一道无形的屏障。 
+　划小圈，每天不是学习更广一些而是更深一些，这样才能挖掘自己观察事物的潜力，同时在表现上可以更深刻一些。
+
+- 《原因与结果法则(as a man thinkth)》
+- 《富兰克林自传》
+- 《简单的逻辑学》中国人民大学出版社（Being Logical: A Guilde to Good Thinking）
+- 《彼道原理》（我宁愿归它到哲学类！！哈哈）
+- 《万里任禅游》（禅与摩托车维修的艺术的中译本）
+- 《Zen And The Art Of Motorcycle Maintenance》 原版
+   在海淀图书城，一家不起眼的书店，淘到，哈哈，爽。
+* 批判性思维：
+- <思考的力量>
+  Critical Thinking - Tools For Taking Charge Of Your Professional And Personal Life 原版名 
+- 《学会提问--批判性思维指南》(第7版) 中国轻工业出版社
+
+* 心理学
+  两本极好的心理学书，探究社会环境对个体的影响。
+- 《社会性动物》
+- 《态度改变与社会影响》
+* 哲学与灵性：
+- 《中国哲学简史》冯友兰
+- 《生活的艺术》
+- 《新世界 灵性的觉醒》
+- 《当下的力量》
+* 佛教
+  梁启超认为佛教：
+  “入世而非厌世”、
+  “乃智信而非迷信”、
+  “乃兼善而非独善”、
+  “乃无量而非有限”、
+  “乃平等而非差别”、
+  “乃自力而非他力”
+  这几点就比基督教等宗教，高出不知道多少档次！
+- 《平常禅》
+  禅修入门
+- 《箭术与禅心》
+- 《正信的佛教》圣严法师
+  介绍了一些佛教的知识，和容易被人误解的地方。
+- 《禅的世界》圣严法师
+- 《无常》 
+- 《百喻经》
+- 《杂阿含经》
+- 《大佛顶首楞严经浅释》（宣化上人）
+- 《金刚经、心经》
+* 传统
+- 《王凤仪笃行录》
+- 《王凤仪讲人生》
+- 《寿康宝鉴白话》
+* 文学: 
+-  《一九八四》
+- 《凡尔登湖》
+- 《人生的枷锁》
+- 《动物庄园》
+- 《冰风谷三部曲》
+- 《暗黑精灵三部曲》
+  暗黑精灵崔斯特的成长史，喜欢其中的心理描写。
+- 《悲惨世界》
+- 《平凡的世界》
+- 《别闹了，费曼先生》
+  费曼自传
+- 《基督山伯爵》
+  盛名之下其实难负，只不过一个复仇的故事，着重强调了金钱的力量。
+  或者一句金钱无敌。
+- 《追风筝的人》
+- 《银河系漫游指南》
+- 《约翰·克利斯朵夫》
+- 《教父》
+- 《局外人》
+* 经济：
+- 《经济学的思维方式》第１１版　（The Economic Way of  Thinking）　世界图书出版社
+- 《金融的逻辑》
+- 《专业投机原理》
+* todo
+  Programming Abstractions in C: A Second Course in Computer Science
+  Discrete Mathematics and Its Applications

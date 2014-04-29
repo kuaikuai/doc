@@ -1,0 +1,595 @@
+#+OPTIONS: "\n:t"
+#+STARTUP: hidestars
+*一寸光阴，一寸命光*
+/超级工具/
+
+
+* perldoc
+如 man 命令一样，在写 perl 程序时可以用perldoc 命令来查看相关的说明文档。 常用功能如下：
+perldoc [模块文档]，如：
+perldoc CGI
+perldoc Socket
+
+使用 -l 选项查看模块的路径：
+# perldoc -l Socket
+/usr/share/perl/5.10/Socket.pod
+
+使用 -m 选项查看原始模块代码：
+perldoc -m Socket
+
+使用 -f 选项查看内置参数的使用说明：
+perldoc -f sin
+perldoc -f open
+perldoc -f print
+
+* 交互环境
+  perl -de 1
+  没有python这么方便的交互环境，但是我们可以使用调试模式来
+* perl Base64编码
+编码: perl -MMIME::Base64 -e 'print encode_base64("XXX");'
+解码: perl -MMIME::Base64 -e 'print decode_base64("XXX");'
+编码: perl -e 'use MIME::Base64;open (FH," < file_pain");print encode_base64($_) while (<FH>);' > file_base64
+解码: perl -e 'use MIME::Base64;open (FH,"< file_base64");print decode_base64($_) while (<FH>);' > file_plain
+* Perl Development Kit(PDK)在转换perl脚本为exe unkown encoding "gb2312"
+use  Encode::XX;   # (XX=CN, JP, KR, and TW)    #经试验，貌似有问题. 提示错误：undefined subroutine &main::decode
+
+或者在PDK转换的命令行中通过--add加入参数 use Encode::XX   这种方式没问题！
+例如：
+D:\>perlapp --norunlib --add Encode::CN --exe test.exe test.pl
+
+* 写perl拓展
+文档：
+perldoc perlxs
+perldoc perlguts
+perldoc perlxstut
+* perl批量替换
+  perl -pi -e 's|ABCD|Linux|g' `find ./ -type f`
+* perl 命令行
+** 选项
+整洁性
+| -w       | 打开警告                  |
+| -Mstrict | 打开严格编译指示（pragma) |
+
+数据
+| -0 | （这是个零）指定输入记录分隔符                                    |
+| -a | 将数据分割成名为 @F 的数组                                        |
+| -F | 指定分割时 -a 使用的模式（请参阅 perldoc -f split）               |
+| -i | 在适当的位置编辑文件（请参阅 perldoc perlrun 以获取大量详细信息） |
+| -n | 使用 <> 将所有 @ARGV 参数当作文件来逐个运行                       |
+| -p | 和 -n 一样，但是还会打印 $_ 的内容                                |
+执行控制
+| -e | 指定字符串以作为脚本（多个字符串迭加）执行 |
+| -M | 导入模块                                   |
+** 举例
+#+begin_example
+操作文件
+行模式
+perl -lape '.....' file 
+对于文件的每一行，运行......，把每一行输出到标准输出
+perl -lane '.....' file 
+对于文件的每一行，运行......，默认不输出行
+
+全文模式
+Slurp mode: perl -0777 
+将记录分割符号设置为undefined，所以perl把这个文件当作一行来操作
+Paragraph mode: perl -00 
+将记录分割符号设置为空行，所以perl把每一个段当一行来操作
+
+# run program, but with warnings 
+perl -w my_file 
+
+# run program under debugger 
+perl -d my_file
+
+# just check syntax, with warnings 
+perl -wc my_file
+
+打印passwd文件第一栏-用户名
+perl -lan -F: -e 'print $F[0]' /etc/passwd
+
+大家还记得awk分割域(awk ‘{i = NF – 1; print $1 + $i}’)啊,是不是很方便,下面我们来看看perl
+perl -lane 'print $F[0] + $F[-2]'
+这个神奇的地方在于-a,使用-a后.因为-n分行读进来,然后-a给数据分割成@F的数组.
+
+类似grep，输出匹配的文件和行
+perl -nle 'print "$ARGV:$_" if /pattern/' file(s)
+
+修改当前file文件中的文件,不生成中间文件,速度很快.记住 -i 开关，因为它让你原地编辑文件.
+perl -pi -e 's/aaa/bbb/' filename
+
+象grep一样过滤文件中需要的内容.这个地方,使用了-n,所以一次是做一行的操作,直到整个文件读完.另外,在管道时,-n也会一样,来遍历管道送过来的内容.
+perl -ne 'print if /^aaaaa/' filename
+
+这个例子中的,没用-ne,只是命令写成了-n -e,其实一样,这个例子中,是给当前文件中的内容都加一个行号打印出来.注:$.表示当前行号
+perl -n -e 'print "$. - $_"' filename
+
+这个其实和上面一样,分别只是使用了-p替换了-n,但-p按行来遍历完文件后,会给$_打印出来.
+perl -pe '$_ = "$.  $_"' filename
+
+打印正则中从$start到$end的地方
+perl -ne 'print if /^START$/ .. /^END$/'
+
+有效地打印数字范围中的行
+perl -ne 'print if $. >= 15; exit if $. >= 17;'
+
+原地修改 -i 开关的神奇之处在于它对 @ARGV 中的每个文件都用该脚本对该文件输出所产生的文件版本进行替代
+perl -p -i.bak -e 's/\bfoo\b/bar/g' *.c
+
+给文件中的内容反向排序,比如文件中有fukai,就会变成iakuf
+perl -ne 'print scalar reverse $_' test
+
+#+end_example
+* perl 抓页面
+使用LWP
+可以用于来抓页面，做测试，刷火车票
+#+BEGIN_EXAMPLE
+use LWP::Simple;
+use URI::Escape ('uri_escape');
+$url = "http://xxxxx/" . uri_escape($ARGV[0]);
+$content = get $url;
+die "Couldn't get $url" unless defined $content;
+print $content;
+#+END_EXAMPLE
+* 处理字体文件
+  “说不得”同学做网站，用了特殊字体，用到字体的地方，把文字做成图片了。
+  但是验收方，不想要图片。
+  于是就找css解决了这个问题，使用css加载字体文件。
+  问题是默认的字体狂大，一般用户浏览网站，根本不是忍受下载字体的时间。
+  我使用Font Create Program，将她用到的每个字体从字体文件裁出来，做个一个小字体，只有20k
+
+  裁字体文件是个体力活，后来发现fontforge可以写脚本，自动化干这个事情很好！！
+  SelectMoreSingletons(0uxxxx)选择中一个unicode码是xxxx的字。
+  SelectInvert()反选
+  Clear()清空选中的字体
+
+使用perl生成fontforge的脚本
+#+begin_example
+use Encode;
+$a="这些汉字需要从字体文件里弄出来";
+$a = decode ("gb2312", $a);
+#重点获取汉字的unicode编码
+map { print sprintf("SelectMoreSingletons(0u%x);", $_), "\n" } unpack ("U*",$a);
+print "SelectInvert();\n";
+print "Clear();\n";
+print "Generate(\"test.ttf\", \"ttf\");\n";
+print "Open(\"test.ttf\");\n";
+print "Generate(\"test.svg\");\n";
+print "Generate(\"test.woff\");\n";
+#+end_example
+* perl处理中文                                                         :perl:
+
+  use encoding 'gbk'; # 系统默认编码为GBK
+
+  open IN,”<:encoding(gbk)”,$in or die “Can’t open $in\n”;
+  open OUT,”>:encoding(gbk)”,$out or die “Can’t open $out\n”;
+  binmode(STDERR,”:encoding(gb2312)”);#控制台输出设定为gbk编码
+
+* perl处理中文文件                                                     :perl:
+   为了统一以GBK编码
+1. perl脚本源代码文件以GBK编码保存，这样保证代码中内嵌字符串以GBK编码。
+2. 指定use encoding 'gbk'；设置默认编码为GBK
+3. 打开读写文件也强制指定GBK编码
+   . open SQL_FILE, ">:encoding(gbk)","db.sql" or die "cannot create db.sql";
+   . open EXCEL_FILE,  "<:encoding(gbk)","excel.txt" or die "cannot find excel.txt";
+* perl批量修改文件名（File::Find的使用）                               :perl:
+给老婆写一个小工具(windows 平台），修改文件后缀名，可能我也能用到：
+如果是linux，一句shell就搞定了。
+#+BEGIN_EXAMPLE
+find . -name "*.html" | xargs rename .html .htm
+#+END_EXAMPLE
+
+perl代码：
+#+BEGIN_EXAMPLE perl
+use strict;
+use File::Find;
+my $path = "C:/Documents and Settings/Administrator.LIFE/桌面/chanpin";
+
+sub wanted {
+    if ( -f $File::Find::name ) {
+        if ( $File::Find::name =~ /\.htm$/ ) {
+            #print "$File::Find::name\n";
+            my $file = $File::Find::name;
+            $file =~ s/\.htm/\.html/;
+            rename($File::Find::name, $file);
+        }
+    }
+}
+
+find( \&wanted, $path );
+#+END_EXAMPLE
+wanted函数没有入参
+其中几个变量可以使用
+$File::Find::dir ：当前路径名 
+$_ ：当前文件名不包含路径
+$File::Find::name ：全路径的当前文件名
+
+http://perldoc.perl.org/File/Find.html
+
+* perl 线程共享
+ my $var:shared
+ my @array:shared
+
+* perl多线程
+
+   使用use threads;
+   (use Thread是老的线程模式。)
+   threads->create(\&func, arg);
+   我在写一个测试代码，在windows上，希望创建168个线程，只能结果创建116个线程。
+   使用use threads ('stack_size' => 64*4096);
+   或者threads->set_stack_size(64*4096);
+   设置了一下默认的线程栈大小以后，可以创建168个了。
+   为什么？
+
+* tinyperl
+  可以学习tinyperl的裁减通用版的perl
+  可以把perl精简为3M左右
+
+* 给pdf加索引
+我经常下载电子书看，经常下载到没有目录索引的，
+看的时候不方便，我在虚拟机运行的adobe Acrobat，手动加标签，很累。
+于是再次求助perl，Perl库丰富，是干脏话，累活的最佳工具。
+
+
+示例代码如下：
+#+BEGIN_SRC PERL
+use warnings;
+use PDF::API2;
+
+$filename = $ARGV[0];
+
+unlink "mypdf.txt";
+#利用pdftotext将pdf中的内容转txt，一边匹配其中Chapter，和页数
+system "pdftotext \"$filename\" mypdf.txt";
+
+open FILE, "<mypdf.txt" or die "cannot open mypdf.txt @!";
+{
+local $/ = undef;
+$content = <FILE>;
+}
+close FILE;
+# 每页开始都是\x0c
+@pages = split "\x0c", $content;
+
+@sections = ();
+$pagenum = 1;
+$chapter = 1;
+foreach $p (@pages) {
+    #print $_;
+    @lines = split "\n", $p;
+    foreach (@lines) {
+        # 这里应该根据不同的电子书格式修改
+        if(/^Chapter (\d+).*$/) {
+            if($chapter != $1) {
+                next;
+            }
+            push @sections, [$_, $pagenum];
+            print "$_ $pagenum\n";
+            $chapter++;
+        }
+    }
+    $pagenum++;
+}
+
+$pdf = PDF::API2->open($filename);
+$outline_root = $pdf->outlines();
+
+for $chapter (@sections) 
+{
+    $section = $outline_root->outline();
+    # 索引文本内容
+    $section->title($$chapter[0]);
+    $page = $pdf->openpage($$chapter[1]);
+    # 跳到哪一页
+    $section->dest($page);
+}
+
+$pdf->saveas("my.pdf");
+
+#+END_SRC
+
+
+小工具
+* find 匹配多钟文件
+  find . \( -name "*.pc" -o -name "*.c" -o -name "*.o" \) -print
+* find 使用例子
+
+Linux下find命令实例
+$find    .     -name    "[A-Z]*"    -print    #查以大写字母开头的文件
+$find    /etc    -name    "host*"    -print #查以host开头的文件
+$find    .    -name    "[a-z][a-z][0--9][0--9].txt"     -print    #查以两个小写字母和两个数字开头的txt文件
+$find .    -perm    755    -print
+$find    .    -perm -007    -exec ls -l {} \;    #查所有用户都可读写执行的文件同-perm 777
+$find    . -type d    -print   打印目录结构
+$find    .   !    -type    d    -print  打印非目录文件
+find /usr/include -name '*.h' -exec grep AF_INEF6 {} \;
+因grep无法递归搜索子目录，故可以和find相结合使用。 在/usr/include 所有子目录中的.h文件中找字串AF_INEF6
+
+$find    .    -type l    -print
+$find    .    -size    +1000000c    -print         #查长度大于1Mb的文件
+$find    .    -size    100c          -print        # 查长度为100c的文件
+$find    .    -size    +10    -print               #查长度超过期作废10块的文件（1块=512字节）
+$cd /
+$find    etc    home    apps     -depth    -print    | cpio    -ivcdC65536    -o    /dev/rmt0
+$find    /etc -name "passwd*"    -exec grep    "cnscn"    {}    \;    #看是否存在cnscn用户
+$find . -name "yao*"    | xargs file
+$find    . -name "yao*"    |    xargs    echo     "" > /tmp/core.log
+$find    . -name "yao*"    | xargs    chmod    o-w
+
+
+find    -name april*                        在当前目录下查找以april开始的文件
+find    -name    april*    fprint file          在当前目录下查找以april开始的文件，并把结果输出到file中
+find    -name ap* -o -name may*    查找以ap或may开头的文件
+find    /mnt    -name tom.txt    -ftype vfat    在/mnt下查找名称为tom.txt且文件系统类型为vfat的文件
+find    /mnt    -name t.txt ! -ftype vfat     在/mnt下查找名称为tom.txt且文件系统类型不为vfat的文件
+find    /tmp    -name wa* -type l             在/tmp下查找名为wa开头且类型为符号链接的文件
+find    /home    -mtime    -2                   在/home下查最近两天内改动过的文件
+find /home     -atime -1                    查1天之内被存取过的文件
+find /home -mmin     +60                    在/home下查60分钟前改动过的文件
+find /home    -amin    +30                    查最近30分钟前被存取过的文件
+find /home    -newer    tmp.txt               在/home下查更新时间比tmp.txt近的文件或目录
+find /home    -anewer    tmp.txt              在/home下查存取时间比tmp.txt近的文件或目录
+find    /home    -used    -2                    列出文件或目录被改动过之后，在2日内被存取过的文件或目录
+find    /home    -user cnscn                  列出/home目录内属于用户cnscn的文件或目录
+find    /home    -uid    +501                   列出/home目录内用户的识别码大于501的文件或目录
+find    /home    -group    cnscn                列出/home内组为cnscn的文件或目录
+find    /home    -gid 501                     列出/home内组id为501的文件或目录
+find    /home    -nouser                      列出/home内不属于本地用户的文件或目录
+find    /home    -nogroup                     列出/home内不属于本地组的文件或目录
+find    /home     -name tmp.txt     -maxdepth    4    列出/home内的tmp.txt 查时深度最多为3层
+find    /home    -name tmp.txt    -mindepth    3    从第2层开始查
+find    /home    -empty                       查找大小为0的文件或空目录
+find    /home    -size    +512k                 查大于512k的文件
+find    /home    -size    -512k                 查小于512k的文件
+find    /home    -links    +2                   查硬连接数大于2的文件或目录
+find    /home    -perm    0700                  查权限为700的文件或目录
+find    /tmp    -name tmp.txt    -exec cat {} \;
+find    /tmp    -name    tmp.txt    -ok    rm {} \;
+find     /    -amin     -10         # 查找在系统中最后10分钟访问的文件
+find     /    -atime    -2           # 查找在系统中最后48小时访问的文件
+find     /    -empty                # 查找在系统中为空的文件或者文件夹
+find     /    -group    cat          # 查找在系统中属于 groupcat的文件
+find     /    -mmin    -5           # 查找在系统中最后5分钟里修改过的文件
+find     /    -mtime    -1          #查找在系统中最后24小时里修改过的文件
+find     /    -nouser               #查找在系统中属于作废用户的文件
+find     /    -user     fred         #查找在系统中属于FRED这个用户的文件
+
+
+查询当天修改过的文件
+ find    ./    -mtime    -1    -type f    -exec    ls -l    {} \;
+
+
+1)在/tmp中查找所有的*.h，并在这些文件中查找“SYSCALL_VECTOR"，最后打印出所有包含"SYSCALL_VECTOR"的文件名
+A) find    /tmp    -name    "*.h"    | xargs    -n50    grep SYSCALL_VECTOR
+B) grep    SYSCALL_VECTOR    /tmp/*.h | cut     -d':'    -f1| uniq > filename
+C) find    /tmp    -name "*.h"    -exec grep "SYSCALL_VECTOR"    {}    \; -print
+
+2)find / -name filename -exec rm -rf {} \;
+     find / -name filename -ok rm -rf {} \;
+
+3)比如要查找磁盘中大于3M的文件：
+find . -size +3000k -exec ls -ld {} ;
+
+4)将find出来的东西拷到另一个地方
+find *.c -exec cp '{}' /tmp ';'
+如果有特殊文件，可以用cpio，也可以用这样的语法：
+find dir -name filename -print | cpio -pdv newdir
+
+6)查找2004-11-30 16:36:37时更改过的文件
+# A=`find ./ -name "*php"` |    ls -l --full-time $A 2>/dev/null | grep "2004-11-30 16:36:37
+二、linux下find命令的用法1. 基本用法：
+      find / -name 文件名
+     find ver1.d ver2.d -name '*.c' -print    查找ver1.d,ver2.d *.c文件并打印
+     find . -type d -print 从当前目录查找，仅查找目录，找到后，打印路径名。可用于打印目录结构。
+2. 无错误查找：
+      find / -name access_log 2 >/dev/null
+3. 按尺寸查找：
+      find / -size 1500c （查找1,500字节大小的文件，c表示字节）
+      find / -size +1500c （查找大于1,500字节大小的文件，+表示大于）   
+      find / -size +1500c （查找小于1,500字节大小的文件，-表示小于）   
+4. 按时间：
+      find / -amin n 最后n分钟
+      find / -atime n 最后n天
+      find / -cmin n 最后n分钟改变状态
+      find / -ctime n 最后n天改变状态
+5. 其它：
+      find / -empty 空白文件、空白文件夹、没有子目录的文件夹
+      find / -false 查找系统中总是错误的文件
+      find / -fstype type 找存在于指定文件系统的文件，如type为ext2
+      find / -gid n 组id为n的文件
+      find / -group gname 组名为gname的文件
+      find / -depth n 在某层指定目录中优先查找文件内容
+      find / -maxdepth levels 在某个层次目录中按递减方式查找
+6. 逻辑
+      -and 条件与 -or 条件或
+7. 查找字符串
+      find . -name '*.html' -exec grep 'mailto:'{} 
+* cp同步目录
+  我需要修改的代码从代码目录同步到U盘上，如果没次全目录复制，速度还慢，还增加了U的写次数。
+  如果能判断那些是最新修改，只复制修改，那就没有问题。
+  使用cp -u。
+  所以现在我使用：
+  cp -ruv kidfs/    /media/000A-BA76/
+  把kidfs目录递归更新的U盘。:-)。
+  linux下的命令就是考虑的周全！
+
+* 分割和合并文件
+[root@pps public_rw]# ls -lh RevolutionOS.rmvb
+-rwx------ 1 hoho hoho 276M 2005-09-09 RevolutionOS.rmvb
+ 
+将将这个276M文件分割成20M的小文件，文件分割操作如下：
+ 
+用法：split [选项] [输入 [前缀]]
+ 
+[root@pps public_rw]# split -b 20m RevolutionOS.rmvb RevOS_part_
+[root@pps public_rw]# ls -lh
+总计 552M
+-rwx------ 1 hoho hoho 276M 2005-09-09 RevolutionOS.rmvb
+-rw-r--r-- 1 root root  20M 03-19 17:59 RevOS_part_aa
+-rw-r--r-- 1 root root  20M 03-19 17:59 RevOS_part_ab
+...
+-rw-r--r-- 1 root root  20M 03-19 18:00 RevOS_part_am
+-rw-r--r-- 1 root root  16M 03-19 18:00 RevOS_part_an
+ 
+“-b 20m”指定分割文件的大小为20M，文件后面的“RevOS_part_”是分割文件的前缀，最后的是16M的“剩余”文件。
+ 
+组装文件：
+
+[root@pps public_rw] cat RevOS_part_* > RevolutionOS_RSB.rmvb
+ 
+这里不怕组装顺序错误，因为分割的时候是按字母顺序排下来的，cat也是按照字母顺序处理的，如果不放心，将组装后的文件哈希对比一下：
+ 
+[root@pps public_rw]# md5sum RevolutionOS.rmvb
+ac7cce07f621b1ed6f692e6df0ac8c16  RevolutionOS.rmvb
+ 
+[root@pps public_rw]# md5sum RevolutionOS_RSB.rmvb
+ac7cce07f621b1ed6f692e6df0ac8c16 
+
+* 文件重命名
+   开始使用rename命令，很憋气，rename oldname newname 就是不管用。
+   其实rename更适合来批量修改文件名
+   如把当前目录下的以.htm为扩展名的文件改为.html
+   rename .htm .html *
+   如果修改单个文件名可以用mv命令
+   mv oldname newname
+   
+* wget下载整个页面
+* 加密工具gpg
+
+gpg加密及签名
+
+** 产生密钥对
+gpg --gen-key
+这样会在用户家目录生成一个./gnupg的目录，然后会要求你回答一系列问题，前面三个按默认即可。
+进入到real name，是要求你输入用户ID，注意姓名要5个字符长。这里假设为test
+在Email address处，填写上自己的邮箱地址，假设为test@yahoo.com.cn
+在 comment处，填写一些注释信息
+输入大写字母“O”，回车确认。
+在Enter passphrase处，输入导入私钥用的密码句，这里假设为test，密码句是用来保护私钥的，一定要牢记。这里输入时是没有回显的，且要输入两次。
+
+
+** 导出私钥
+ gpg -o filename --export-secret-keys username
+ 第一个filename是导出私钥的文件名，第二个xiaolang是用户标识，若不提供用户标
+ 识的话就是导出所有的私钥。这个导出的也是以二进制的形式，要以ASCII的形式导出加入-
+ a选项
+ gpg -o filename -a --export-secret-keys username
+
+** 导入密钥
+导入私钥和公钥都用下面的命令
+gpg –import username.asc
+username.asc是备份密钥的文件
+
+** 导出公钥（公钥应公之于众，以便别人使用你的公钥来加密文件）
+命令各式：
+gpg -o name.gpg -a --export name
+其中name为用户ID
+name.gpg为导出的公钥文件，文件名必须后缀为gpg
+例如：
+gpg -o davidway.gpg -a --export davidway
+这样就把用户ID为davidway的公钥导出来了。
+
+** 导入别人的公钥（以便给别人发送加密文件，公钥用来加密）
+gpg --import someone.gpg
+上面 someone.gpg是别人的公钥
+
+** 删除公钥和私钥
+      gpg --delete-secret-and-public-key xiaolang
+** 删除私钥
+      gpg --delete-secret-key xiaolang7 删除公钥
+      gpg --delete-key xiaolang
+** 显示所有公钥
+      gpg --list-public-keys
+      gpg -k
+** 显示所有私钥
+      gpg --list-secret-keys
+      gpg -K
+
+** 使用外部私钥文件解密
+在本机导入对应的公钥，然后
+将自己的私钥secring.skr放置于U盘根目录下，U盘插入电脑后盘符为/media/usb，则可以这样来解密：
+gpg --secret-keyring /media/usb/secring.skr  -o outputfile -d encryptfile
+这样就可以不必导入私钥就可以来解密文件了。增强了安全性。
+
+** 编辑公钥，以验证导入的公钥的真实性
+gpg --edit-key someone
+someone是别人的用户ID
+出现命令提示符 >
+>fpr
+查看用户someone的公钥的指纹，之后应设法核对指纹，以证明真实性。如果真实，则可以签署。
+查看someone的指纹，用下面这个命令
+gpg --list-key
+
+>sign
+签署这个公钥，这样以后再使用它加密时，就不会再警告
+
+>check
+检查用户someone的公钥已有的签名
+出现sig! 3   sig! 1   表示已完成。
+
+输入quit，回车，再输入y保存退出
+
+** 查看公钥
+gpg --list-key
+
+** 用别人的公钥加密文件
+命令格式：
+gpg -o doc.gpg -er name doc
+其中name是选择谁的公钥加密，即谁是文件的接收者。
+doc为要加密的文件，即原文件
+doc.gpg为命令执行后生成的加密的文件，这里要先指定好文件名
+例如：
+gpg -o test.gpg -er someone test
+加密test文件后，生成test.gpg加密文件，发送给 someone
+
+** 解密文件
+命令格式：
+gpg -o doc.new -d doc.gpg
+其中doc.gpg是别人发给自己的加密过的文件
+doc.new是解密后生成的文件
+d表示解密
+例如：
+gpg -o test.new -d test.gpg
+解密需导入私钥，这时会提示输入密码句，以导出私钥来解密
+
+** 使用对称密钥加密
+gpg -o doc.gpg -c doc
+这种加密适用于本机文件加密，这时提示输入的密码句和私钥密码句没有联系，但一样不能忘记，因为解密时需要输入同样的密码句。
+
+** 数字签名
+命令格式：
+gpg -o doc.sig -s doc
+其中doc是原文件，doc.sig包含了原文件和签名，是二进制的。这个命令会要求你输入你的私钥的密码句。
+gpg -o doc.sig -ser name doc
+既签名又加密
+
+** 文本签名
+gpg -o doc.sig --clearsign doc
+这样产生的doc.sig同样包含原文件和签名，其中签名是文本的，而原文件不变。
+
+** 分离式签名
+gpg -o doc.sig -ab doc
+doc.sig仅包括签名，分离式签名的意思是原文件和签名是分开的。
+b 表示分离式签名detach-sign
+
+** 验证签名
+gpg --verify doc.sig  [doc]
+验证之前必须导入文件作者的公钥，对于分离式签名，最后还要加上原文件，即后面的doc。
+
+* tar 压缩
+  压缩为gz格式
+  tar zcvf xxx.tgz xxx
+  压缩为bz2格式
+  tar jcvf xxx.bz xxx
+  压缩为lzma格式
+  tar lzmacvf xxx.lzma xxx
+  其中以lzma格式压缩比最高, gz压缩比最低，压缩和解压速度最快
+* DBD::mysql
+  ppm install "DBD::mysql"
+* LWP::UserAgent HTTP keep-alive
+ LWP::UserAgent->new( keep_alive => 1 );
+* Data::Dumper
+  输出数据结构
+  print Dumper($a);
+ print Dumper(/@my_array);
+ print Dumper(/%some_hash);
+ print Dumper((/%some_hash, /@my_array));

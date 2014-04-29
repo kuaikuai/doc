@@ -1,0 +1,1300 @@
+#+OPTIONS: "\n:t"
+#+STARTUP: hidestars
+* 减少BUG的策略
+(从<编程精粹>学一些)
+** 把编译器告警级别打到最高
+** 使用lint工具
+我的经验教训
+** C文件所有函数和全局变量默认都设置为static
+#+begin_example
+   做这样一个东西,
+   ATM监控,本来有个主线程采集ATM设备的状态信息,
+   运行一段时间后,又一个新需求:要求能实时地把ATM上的对帐文件发送到服务器上.
+   开始我写了一个独立的进程(.exe)实现上送文件的功能,测试过后,
+   发现和原来的程序集成一块,最方便的办法是新功能作为一个线程存在,方便整个任务的控制.
+   后来在服务器上测试收文件的服务程序,总会收到不合法的数据包.
+   费了半天劲,终于发现实现采集的主文件agent.c里有个全局变量:
+   struct sockaddr_in server_addr;
+   而实现上送文件transact.cpp的函数也有同样的全局变量.
+   
+   问题的原因:
+   编译链接时,transact.cpp链接到了agent.c中的server_addr
+   transact.cpp初始化server_addr变量,错把agent.c用到的变量给改了.
+   所以agent.c中发送的状态数据,都发送到接受文件的服务程序中了.
+#+end_example
+** 慎用全局变量
+** 做好自己程序周边的模拟程序，尽量不依赖别人的程序为自己测试。
+  做环境模拟程序，
+  例如我做的ATM监控代理，测试功能需要与服务端交互，
+  所以程序测试就严重依赖服务端了。我做了一个模拟服务端的程序，来辅助自己测试。
+
+* 日志文件出现诡异乱码
+编译器VC6，平台windows 2000 XP
+日志文件如：
+#+begin_example
+2011/12/25 21:17:23(INF):  ENTER get_trackcard_status
+2011/12/25 21:17:23(WAR):  open vdm faild -15
+c 譁c 譁k 譁k 譁k 譁c 譁k 譁k 螠k....（省略若干乱码，直到重启）
+#+end_example
+问题只在一种型号机器偶然上出现，开始一点点怀疑是机器的问题，
+代码如下：
+#+begin_src c
+void dlog(int type, const char *format, ...)
+{
+    va_list ap;
+    FILE *fp;
+    char msg[MAX_LINE_SIZE];
+
+    fp = fopen(LOG_FILE, "a+");
+    if(NULL == fp) {
+        return;
+    }
+    va_start(ap, format);
+    _vsnprintf(msg, sizeof(msg)-1, format, ap);
+    msg[MAX_LINE_SIZE-1] = '\0';
+    va_end(ap);
+    write_log(fp, LOG_FILE, type, msg);
+    fclose(fp);
+    return;
+}
+
+void write_log(FILE *fp, char *name, int type, char *msg)
+{
+    time_t ltime;
+    struct tm *today;
+    #define TIME_STR_SIZE 64
+    char date_str[TIME_STR_SIZE] = {0};
+    char time_str[TIME_STR_SIZE] = {0};
+    int size;
+    char *typestr;
+    int rc;
+    time(&ltime);
+    today = localtime(&ltime);
+    switch(type) {
+    case INFO_TYPE:
+        typestr = "INF";
+        break;
+        ...
+    default:
+        return;
+    }
+    if (fp != NULL)
+    {
+        ...
+        if (today != NULL) {
+            rc = sprintf(date_str,"%04d/%02d/%02d",today->tm_year+1900,today->tm_mon+1,today->tm_mday);
+            sprintf(time_str,"%02d:%02d:%02d",today->tm_hour,today->tm_min,today->tm_sec);
+        }
+        date_str[TIME_STR_SIZE - 1] = '\0';
+        time_str[TIME_STR_SIZE - 1] = '\0';
+        fprintf(fp, "%s %s(%s):  ", date_str, time_str, typestr);
+        fprintf(fp, "%s", msg);
+        fprintf(fp,"\n");
+        fflush(fp);
+    }
+    return;
+}
+#+end_src
+我写代码做很好的容错处理，
+如对日志类型错误时，直接返回。
+msg字符串末尾，强制加上一个结束符号。
+即使调用dlog故意传一个非法的内存，只能打印512个乱码。
+想的头疼也不可能出现这种问题。
+
+
+开始我经常有一种直觉，就是
+这句fprintf(fp, "%s", msg)出了问题。
+当向日志文件输入时，msg所在内存，别的线程改掉了。
+但是这种想法只是一晃就过去。
+因为自己没有找到一个理由说服自己，更主要一个原因是
+一直怀疑是自己代码其它部分引入的。
+
+一个错误的观念导致我长时间解决不了问题。
+这个观念是：
+2011/12/25 21:17:23(WAR):  open vdm faild -15
+和后面的乱码是分两次打入日志文件的。
+
+这样考虑的话，
+那就是
+fprintf(fp, "%s %s(%s):  ", date_str, time_str, typestr);
+这行代码的问题。
+但是看了又看还是没有问题啊。郁闷。
+
+N天后上午，一转念。
+2011/12/25 21:17:23(WAR):  open vdm faild -15和后面乱码
+是一起打入日志的。更有可能。
+那就印证开始的直觉。
+这样的话，就考虑到fprintf等函数是否thread-safe.
+
+我启动了几个工作线程，使用了CreateThread
+后来查了一下CreateThread和_beginthread区别
+由于我的线程程序使用了大量的c库函数，所以应该使用_beginthread(ex)，而不是CreateThread.
+#+begin_example
+如果在除主线程之外的任何线程中进行一下操作，你就应该使用多线程版本的C runtime library,并使用_beginthreadex和_endthreadex：
+　　　1 使用malloc()和free()，或是new和delete
+　　　2 使用stdio.h或io.h里面声明的任何函数
+　　　3 使用浮点变量或浮点运算函数
+　　　4 调用任何一个使用了静态缓冲区的runtime函数，比如:asctime(),strtok()或rand()
+#+end_example
+
+Keypoint: C runtime library  is  thread-safe?
+
+* 关于cp命令复制整个目录的问题
+#+begin_example
+  问题背景：
+  原有一块80G的硬盘，装有oracle和tomcat，由于硬盘大小，
+  无法满足业务的需要，银行又新加一块320G的硬盘，
+  我让人先把新硬盘格式化后，
+  mount /dev/sdb /mnt
+  cd /opt/oracle
+  cp -R * /mnt
+  这样把oracle的数据文件都复制到新硬盘上了，
+  然后修改/etc/fstab，把/dev/sdb mount到/opt/oracle下
+  结果有启动有问题。
+  
+  原因是cp -R没有把原文件的权限复制过去。
+  可以使用cp -a * /mnt，具体见cp --help
+#+end_example
+* windows 使用read读包含\r\n文本
+  Windows doesn't distinguish between \r\n and any other two characters.
+  However, there is one situation where it is treated as one character: 
+  if you use the C runtime and open a file as text, \r\n in the file will be read as \n, and \n will be written to the file as \r\n.
+  需要read函数返回准确读取字符的个数，需要open函数指定O_BINARY标志，这个标志好像只有windows有。
+* read 问题
+#+begin_example
+  我写了一个打包文件的小工具，
+  解包时，生成的文件总是长度不足，
+  最后发现原因是没有open时没有指定以binary方式读取。
+ #+end_example
+* windows socket编程一个问题，该死的windows
+  关闭socket，使用closesocket
+  而不是close，
+  
+* 关于socket server有大量socket处于TIME_WAIT问题处理。
+  这个问题由于server先于client调用了close。
+  可以这样操作。
+  client:
+  close(sock)
+  server:
+  recv(sock, buff, sizeof(buff));
+  close(sock);
+  这样就可以保证server后调用close,变成被动关闭了。呵呵
+* popen使用不当引入的问题
+
+  写一个python服务程序A
+  接受客户端的请求，
+  通过popen调用脚本启动、关闭、或者重启一个服务B。
+  而服务B也是由python写。
+  当服务A完成工作，执行sock.close，
+  我发现客户端根本没有感知到。
+  sock.recv(1024)一直阻塞着。
+  通过netstat -tnp
+  发现链接在建立着。
+  
+  后来发现由于popen启动子进程复制了服务程序A的所有文件描述符，包括socket的，
+  所以close一次不能关闭。
+  设置了close_fs = True，才解决这个问题
+  Popen([cmd], stdout=PIPE, close_fds=True)
+* socket recv接口使用不当
+  recv接受最大的数据长度是是sizeof(read_buff)，
+  但是并不保证每次能接受sizeof(read_buff)长度，所以以读取长度少于缓冲长度，
+  判断传输文件完毕是不对的。
+  实际环境中，往往出现产生大小少于原文件的小文件。
+#+begin_src c
+    while(filelen > 0) {
+        len = recv(sock, read_buff, sizeof(read_buff), 0);
+        if(len == SOCKET_ERROR) {
+            mon_log(INFO_TYPE, "recv error %d\n", WSAGetLastError());
+            fclose(fp);
+            return 1;
+        }
+        /* 这一句是不对的!! */
+        if(len < sizeof(read_buff)) {
+            goto LAST;
+        }
+        rc = fwrite(read_buff, sizeof(char), len, fp);
+        if(rc < len) {
+            mon_log(INFO_TYPE, "\nwrite file failed %s\n", strerror(errno));
+            fclose(fp);
+            return 1;
+        }
+        filelen -= len;
+    }
+    LAST:
+#+end_src
+* 有注释引发的程序问题！
+  我写一个程序调试了半天多，
+  最后才发现原因是注释中的汉字在编译环境中被视为乱码，
+#+begin_src c
+  /* 注释 */
+  code1
+  code2
+  /* 注释 */
+  code3
+#+end_src
+ 结果两个注释连为一个注释，其中code1和 code2全被注释掉了
+ 以后注意汉字两头都加空格（英文空格)
+
+* 运行命令挂住
+在windows上写一个支持远程控制的服务程序
+其中需要远程运行终端的程序，并获取程序输出。
+结果发现运行的程序，如果程序输出会多于一屏左右时，
+那么远程控制服务一直挂起。
+代码如下：
+#+begin_src c
+int exec_cmd(SOCKET sock, char *data_buff)
+{
+    PROCESS_INFORMATION pi = {0};
+    STARTUPINFO si;
+    SECURITY_ATTRIBUTES sa;
+    HANDLE hRead, hWrite;
+    DWORD bytesRead;
+    BOOL res;
+    char buffer[1024], cmd[128];
+
+    memset(buffer, 0, 1024);
+    sprintf(cmd, "cmd.exe /C %s", data_buff);
+
+    sa.nLength = sizeof(SECURITY_ATTRIBUTES);
+    sa.lpSecurityDescriptor = NULL;
+    sa.bInheritHandle = TRUE;
+    if (!CreatePipe(&hRead,&hWrite,&sa,0)) {
+        sprintf(buffer, "create pipe failed %d\n", GetLastError());
+        sendn(sock, buffer, strlen(buffer)+1);
+        goto LAST;
+    }
+   if (!SetHandleInformation(hRead, HANDLE_FLAG_INHERIT, 0) ) {
+       sprintf(buffer, "SetHandleInformation failed %d\n", GetLastError());
+       sendn(sock, buffer, strlen(buffer)+1);
+       goto LAST;
+   }
+    memset(&si, 0, sizeof(si));
+    GetStartupInfo(&si);
+    si.dwFlags |= STARTF_USESTDHANDLES; 
+    si.wShowWindow = SW_HIDE;
+	
+    si.hStdOutput = hWrite;
+    si.hStdError = hWrite;
+    res = CreateProcess(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    if (res) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    else {
+        CloseHandle(hWrite);
+        CloseHandle(hRead);
+        sprintf(buffer, "CreateProcess %s failed %d\n", cmd, GetLastError());
+        sendn(sock, buffer, strlen(buffer)+1);
+        goto LAST;
+    }
+    CloseHandle(hWrite);
+    while(1) {
+        memset(buffer, 0, sizeof(buffer));
+        if(!ReadFile(hRead, buffer, sizeof(buffer), &bytesRead, NULL)) {
+            break;
+        }
+        sendn(sock, buffer, bytesRead);
+    }
+    CloseHandle(hRead);
+
+LAST:
+    sendn(sock, EOF_STR, strlen(EOF_STR));
+    return 0;
+}
+#+end_src
+过程：
+当创建一个进程成功时，程序阻塞，等于运行命令的进程退出。
+新进程将输出写入管道。
+然后我们读取管道中的输出信息，发送到远端。
+
+问题在于：
+当进程输出多于默认的管道的缓冲区时，进程阻塞，
+等待管道的另一端读取信息。
+但是在上述程序中，却一直在等到程序退出，等到程序退出再去读管道。
+所以就僵持这里了，一直阻塞。
+
+正确的做法：
+#+begin_src c
+    res = CreateProcess(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    if (res) {
+        (void)CloseHandle(hWrite);
+        for(;;) {
+            if(!ReadFile(hRead, buffer, sizeof(buffer), &bytesRead, NULL)) {
+                break;
+            }
+            if(senden(sock, buffer, bytesRead) <= 0) {
+                break;
+            }
+        }
+        (void)CloseHandle(hRead);
+        (void)WaitForSingleObject(pi.hProcess, 30*60*1000);
+        (void)CloseHandle(pi.hThread);
+        (void)CloseHandle(pi.hProcess);
+    }
+    else {
+        (void)CloseHandle(hWrite);
+        (void)CloseHandle(hRead);
+        sprintf(buffer, "CreateProcess %s failed %lu\n", cmd, GetLastError());
+        (void)senden(sock, buffer, strlen(buffer));
+        goto LAST;
+    }
+LAST:
+    (void)sendeneof(sock);
+    return;
+#+end_src
+* python list遍历删除问题
+下面代码：
+#+begin_example
+items = [1, 2, 3, 4, 5, 6]
+for item in items:
+    items.remove(item)
+print items
+#+end_example
+输出为2，4，6
+并不会删除所有的元素！
+
+* 捉虫记
+** 背景：
+   由于dev_getinfo访问硬件速度很慢，所以使用hash的方式，
+  使用dev_name和dwCategory拼成的字符串作为键，所以之前的访问硬件的结果。
+** 问题：
+  但是实际上使用dev_getcacheinfo时，发现一个设备总是不能从hash读到cache，总要调用dev_getinfo。
+  如果在同一个函数调用第二dev_getcacheinfo会从hash表，读到cache.
+例如下面函数
+#+begin_src c
+static int get_operatorswitch(USHORT *status)
+{
+    ...
+    SIU.debug(INFO_TYPE, "ENTER get_operatorswitch");
+    /* A */
+    hr = SIU.getcacheinfo(module_name, WFS_INF_SIU_STATUS, &lpResult);
+    ...
+    /* B */
+    hr = SIU.getcacheinfo(module_name, WFS_INF_SIU_STATUS, &lpResult);
+    ...
+}
+
+static int get_operatorswitch2(USHORT *status)
+{
+    ...
+    /* C */
+    hr = SIU.getcacheinfo(module_name, WFS_INF_SIU_STATUS, &lpResult);
+    ...
+    /* D */
+    hr = SIU.getcacheinfo(module_name, WFS_INF_SIU_STATUS, &lpResult);
+    ...
+}
+
+int main() 
+{
+   get_operatorswitch(status);
+   get_operatorswitch2(status);
+}
+#+end_src
+结果发现有的设备
+B处可以从hash读到cache，因为A句把访问结果放到hash表中。
+C处居然读不到cache，还要直接调用dev_getinfo。
+D处可以从hash读取cache。
+
+只要跨函数就不行了，情况很诡异。
+** 原因
+那究竟是什么原因呢？
+关键有两处
+1. find_entry函数中：这一句 he->key = (void *)key;
+   如果键值是字符串，那就是说hash表中只保存了字符串的起始地址，没有保存内容。
+2. dev_getcacheinfo函数中：
+   把局部字符数组地址做键值。
+至于为什么跨函数就不行了，
+原因应该是当调用get_operatorswitch2()时，get_operatorswitch()建立的栈就已经被破坏了（字符串内容也破坏了）
+而hash表中对应项的键还指向那个位置，所以在查找hash表，对比键时，总找不到名字相同的项。
+
+#+begin_src c
+   char key[256]; //这可是局部变量啊！！！
+   sprintf(key, "%s-%d", dev_name, dwCategory);
+   // ...
+   // 把局部字符数组地址做键值
+   mon_hash_set(cache_info, key, MON_HASH_KEY_STRING, unit);
+#+end_src
+** 定位方法
+   由于开发环境是VC，工程涉及的多个dll，我不知道如何调试。
+   我采用了最笨的方法，再代码中加printf查看调用过程，花费很长的时间！
+   如果可以的话，可以使用编译器调试的方式，提高效率。
+   还有对于跨函数的问题，背后的本质不理解。
+   如果从跨函数上，把方向定在局部变量的使用，估计定位时间会短一些。
+** 函数
+问题涉及的所以函数如下：
+#+begin_src c
+MYXFSAPI HRESULT dev_getcacheinfo(char *dev_name, DWORD dwCategory, LPWFSRESULT *lppResult)
+{
+    struct cache_unit_t *unit = NULL;
+    char key[256];
+    HRESULT hr = -1;
+    DWORD ticks = 0;
+    sprintf(key, "%s-%d", dev_name, dwCategory);
+    if(NULL == lppResult) return -1;
+    unit = mon_hash_get(cache_info, key, MON_HASH_KEY_STRING);
+    if(unit && unit->lpResult) {
+        ticks = GetTickCount();
+        /* 10秒内的数据有效*/
+        if(ticks <= unit->ticks+ 1000 * 10) {
+            *lppResult = unit->lpResult;
+            return WFS_SUCCESS;
+        }
+    }
+    hr = dev_getinfo(dev_name, dwCategory, lppResult);
+    if(WFS_SUCCESS == hr) {
+        if(NULL == unit) {
+            unit = malloc(sizeof(struct cache_unit_t));
+            memset(unit, 0, sizeof(struct cache_unit_t));
+        }
+        /* 释放之前存放的信息 */
+        if(unit->lpResult) {
+            XFS_FreeResult(unit->lpResult);
+        }
+        unit->ticks = GetTickCount();
+        unit->lpResult = *lppResult;
+        mon_hash_set(cache_info, key, MON_HASH_KEY_STRING, unit);
+    }
+    return hr;
+}
+
+void * mon_hash_get(mon_hash_t *ht, const void *key, int klen)
+{
+    mon_hash_entry_t *he;
+    he = *find_entry(ht, key, klen, NULL);
+    if (he) {
+        return (void *)he->val;
+    }
+    else {
+        return NULL;
+    }
+}
+
+void mon_hash_set(mon_hash_t *ht, const void *key, int klen, const void *val)
+{
+    mon_hash_entry_t **hep;
+    hep = find_entry(ht, key, klen, val);
+    if (*hep) {
+        if (!val) {
+	    /* 删除旧项 */
+            mon_hash_entry_t *old = *hep;
+            /* 如果旧项的键中保存了字符串，释放之。 */
+            if(old->isstr) {
+                if(old->key) free(old->key);
+                old->key = NULL;
+            }
+            *hep = (*hep)->next;
+            old->next = ht->free;
+            ht->free = old;
+            --ht->count;
+        }
+        else {
+	    /* 更新项 */
+            (*hep)->val = val;
+
+            if (ht->count > ht->max) {
+                expand_array(ht);
+            }
+        }
+    }
+}
+/*
+ * 如果val不等于NULL，而且哈希表中不存在指定的项，那么就创建该项。
+ */
+static mon_hash_entry_t **find_entry(mon_hash_t *ht,
+                                     const void *key,
+                                     int klen,
+                                     const void *val)
+{
+    mon_hash_entry_t **hep, *he;
+    unsigned int hash;
+
+    hash = ht->hash_func(key, &klen);
+    /* 遍历列表 */
+    for (hep = &ht->array[hash & ht->max], he = *hep;
+         he; hep = &he->next, he = *hep) {
+        if (he->hash == hash
+            && he->klen == klen
+            && memcmp(he->key, key, klen) == 0)
+            break;
+    }
+    /*  */
+    if (he || !val)
+        return hep;
+
+    /* 重用之前的释放的元素 */
+    if ((he = ht->free) != NULL) {
+        ht->free = he->next;
+    }
+    else {
+        he = malloc(sizeof(*he));
+    }
+    he->isstr = isstr;
+    he->next = NULL;
+    he->hash = hash;
+    he->key = (void *)key;
+    he->klen = klen;
+    he->val  = val;
+    *hep = he;
+    ht->count++;
+    return hep;
+}
+#+end_src
+* 误改返回值导致ATM重启
+#+begin_src c
+  HRESULT dev_getinfo(char *dev_name, DWORD dwCategory, LPWFSRESULT *lppResult)
+ {
+    HRESULT hr;
+    HSERVICE hService;
+
+    hr = dev_open(dev_name, &hService);
+    if(WFS_SUCCESS != hr) {
+        dlog(WARNING_TYPE, "%s: failed to dev_open %d", dev_name, hr);
+        return hr;
+    }
+    hr = XFS_GetInfo( hService, dwCategory, NULL, XFS_GETINFO_TIMEOUT, lppResult);
+    if(WFS_ERR_CANCELED == hr) {
+        ExitThread(0);
+    }
+    if (hr != WFS_SUCCESS) {
+        dlog(WARNING_TYPE, "%s: failed to dev_getinfo(dwCategory=%d)  hr=%d", dev_name, dwCategory, hr);
+    }
+    dev_close(hService);
+    return hr
+}
+
+//另一个模块:
+static LPWFSCIMPHCU get_cimunit(int index, LPWFSCIMCASHIN *lppUnit, HRESULT *phResult)
+{
+    HRESULT hr;
+    LPWFSRESULT lpResult;
+    int i = 0, j;
+    int count = 0;
+
+    *phResult = 0;
+
+    hr = CIM.getcacheinfo( CIM.module_params, WFS_INF_CIM_CASH_UNIT_INFO, &lpResult);
+    if (WFS_SUCCESS == hr) {
+        LPWFSCIMCASHINFO lpCashUnitInfo = (LPWFSCIMCASHINFO)lpResult->lpBuffer;
+        ....
+#+end_src
+
+后来为了加一个功能:
+ dev_getinfo最后改成了:
+#+begin_src c
+...
+ hr = dev_close(hService);
+ if(WFS_ERR_CANCELED == hr) {
+     ExitThread(0);
+ }
+ return hr;
+#+end_src
+
+由于dev_open成功打开,再调用dev_close返回值必定为SUCCESS.
+所以这个dev_getinfo只要逻辑设备能打开,无论能否XFS_GetInfo,都返回成功.
+这样问题就来.
+get_cimunit调用dev_getinfo,设备能打开,但是获取不了设备信息,lpResult为NULL.
+后续代码就异常了.
+
+教训:
+ hr = dev_close(hService);
+ 使用hr目的只是为了判定一下,dev_close,结果把返回值都修改了.
+ 对于函数的返回值特殊命名,不得乱赋值.
+ 对于这个案例,可以写成val = dev_close(hService);
+
+* 又一个全局变量引入的bug
+我写的一个接受文件的服务程序：
+部分代码：
+#+begin_src c
+int listenfd, connfd;
+...
+main() {
+    ....
+    for(;;) {
+        struct timeval tv;
+        int rc;
+        connfd = accept(listenfd, NULL, NULL);
+        tv.tv_sec = 45;
+        tv.tv_usec = 0;
+        rc = setsockopt(connfd, SOL_SOCKET, SO_RCVTIMEO, (char *)&tv,  sizeof tv);
+        printf("rc = %d\n", rc);
+        printf("accept a connection\n");
+        pthread_create(&thread, &attr, work, (void *)connfd);
+    }
+}
+
+void *work(void *p)
+{
+    connfd = (int )p;
+
+    if(...) {
+       ...
+       close(connfd);
+       retur NULL;
+    }
+    ...
+    close(connfd);
+    return NULL;
+}
+#+end_src
+在实际应用环境，运行netstat
+发现链接处于大量CLOSE_WAIT
+但是代码我都关闭socket链接啊。
+而且本地测试时，也没有问题。
+最后终于发现问题所在。
+work()居然没有定义connfd！
+而使用全局变量connfd
+当work()工作时，main()又收一个一个新请求。
+调用新的work()工作，将覆盖connfd.
+当旧work()退出时，把新的work()使用的链接给释放了，它自己的链接确没有释放。
+罪过啊。
+我都不记得什么时间定义了connfd这个全局变量。
+
+我的坏编程习惯：开始把变量堆在函数外面，当做全局变量，后续再慢慢移走。
+
+新习惯：所有变量统统定义为局部变量！
+
+这个问题还触发另一个发送文件客户端的BUG：
+客户端接受来自服务端的确认，
+通过服务端确认：发送内容的偏移值和内容长度，
+#+begin_src c
+/* 接受服务端确认信息 */
+if ((rlen = recvn(sock, &msg_head, sizeof(msg_head))) <= 0) {
+    closesocket(sock);
+    Sleep(60*1000);
+    goto RETRY;
+}
+else {
+    /* 根据确认信息，更新发送偏移值 */
+    sent_record.offset = msg_head.offset + msg_head.len;
+    strncpy(sent_record.timestamp, msg_head.timestamp, TIMESTAMP_SIZE);
+}
+#+end_src
+由于上一个全局变量BUG，会将一个正在工作的work()的链接关掉。
+所以很有可能revn接受的消息长度少于msg_head。
+但是客户端也没有判断这种情况，当时问题真的发生时。
+由于msg_head数据结构没有赋初始值，所以msg_head.ofset和msg_head.len
+中就是垃圾值。
+
+实际运行场景中真的出现了，sent_record.offset突然跳变为一个非法值的情况。
+
+教训：recvn如果确认接受消息长度的情况下，务必判断长度是否合法。
+#+begin_src c
+if ((rlen = recvn(sock, &msg_head, sizeof(msg_head))) < sizeof(msg_head)) {
+    /* 非法 */
+}
+#+end_src
+
+* exit
+
+#+begin_src c
+#include <stdio.h>
+#include <string.h>
+#include <stdlib.h>
+#include <pthread.h>
+
+
+pthread_attr_t attr;
+char *global;
+#define SIZE 1024
+void *t1(void *p)
+{
+    for(;;) {
+        memset(global, 1, SIZE);
+    }
+    return NULL;
+}
+
+int main(void)
+{
+    int i;
+    pthread_t tid;
+
+    global = malloc(SIZE);
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    for (i = 0; i < 100; i++)
+        pthread_create(&tid, &attr, t1, (void *)i);
+    sleep(5);
+    printf("exit111111111111\n");
+    free(global);
+    return 0;
+}
+#+end_src
+* 自动启动服务工作不正常
+  在suse中，/etc/init.d/boot.local:
+  加入
+  nohup /usr/app/trans_srv &
+  
+  其中trasn_srv是C编写的一个服务程序。
+  它使用system("java -cp \".:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar:$JAVA_HOME/jre/lib/rt.jar\" Db.class");
+  调用Db.class进行工作。
+  
+  结果发现，nonup.out中有sh: java command not found.
+  于是在开头加入：
+  export PATH=$PATH;/app/jdk/bin
+  结果还是不行。
+
+  最后，最后，才意识到：
+   export PATH=$PATH;/app/jdk/bin
+   其中把":"写称";"了。
+* SIGPIPE
+将SIGPIPE信号忽略后,
+在main.cpp
+signal(SIGPIPE, SIG_IGN);
+
+服务程序,还是会出现
+Program received signal SIGPIPE, Broken pipe.
+而被终止.
+
+原因是signal设置的信号句柄只能起一次作用,信号被捕获一次后,信号句柄就会被还原成默认值了. 
+应使用sigaction
+
+* 注册activeX控件成功后, 在网页中调用失败.
+regsvr32.exe xxx.ocx
+注册activeX控件成功后, 在网页中调用失败.
+
+Activex控件的“运行时许可证”的问题：
+
+在文章 ： 使 用ActiveX控件开发网页常见的问题中有这么一段话：
+ActiveX控件提供一套完整的保护机制，可以防止未经许可的用户在网页上使用 ActiveX控件。到目前为止，已经有一些开发工具支持这套机制，例如Visual Basic、Microsoft Access、和 Internet Explorer 3.0 beta2版。 现有的控件授权许可证机制有两种许可形式：开发许可证和运行使用许可证。开发许可证允许许可证的持有者使用控件，利用 VisualBasic，ActiveX ControlPad，以及其它有关的开发工具，从事以开发为目的活动。运行使用许可证只允许许可证的持有者在已有的应用或网页中显示控件，不允许将控件插入有关工具中，用于开发目的活动。支持许可证机制是独立控件开发上的工作。有些控件开发商选择了不支持许可证机制的开发策略，因此对任何用户来说，他们 开发的控件一旦被安装到本地机上，就可以用于开发。另一些控件开发商只提供免费的运行许可证，而在提供开发许可证时需要收费。需要在网上使用控件的用户， 应该详细地阅读控件开发商提供的许可证协议，以确定自己使用控件的权限。
+可是在此之前我并不明白什么运行时许可证的问题，因而，在开发控件的时候，新建工程我就把“运行时许可证”一项选中了，后来证明着给我的同事在使用的时候造成了麻烦，当我把程序生成的控件.ocx发给他的时候他遇到了这个问题：
+---------------------------
+Microsoft Visual Studio
+---------------------------
+创建组件“XXXX(注意保密O(∩_∩)O)”失败。
+错误消息为:  “System.ComponentModel.LicenseException: 您必须有许可证才能使用此 ActiveX 控件。  
+ 在 System.Windows.Forms.Design.DocumentDesigner.AxToolboxItem.CreateComponentsCore(IDesignerHost host)   
+在 System.Drawing.Design.ToolboxItem.CreateComponentsCore(IDesignerHost host, IDictionary defaultValues)   在 System.Drawing.Design.ToolboxItem.CreateComponents(IDesignerHost host, IDictionary defaultValues)   
+在 System.Windows.Forms.Design.OleDragDropHandler.CreateTool(ToolboxItem tool, Control parent, Int32 x, Int32 y, Int32 width, Int32 height, Boolean hasLocation, Boolean hasSize, ToolboxSnapDragDropEventArgs e)”
+---------------------------
+确定  
+---------------------------
+而当我把程序同时生成的license文件给他的时候，就可以运行了。
+当然，目前的问题是我想把这个东西去掉……
+去掉的办法是：
+1. 在项目的属性中选择:配置属性->生成事件->生成后事件，然后清空“命令行”一项中的内容，清空“说明”
+2. 在源文件中，找到Ctrl类，
+在头文件中去掉：
+        virtual BOOL VerifyUserLicense();
+        virtual BOOL GetLicenseKey(DWORD, BSTR FAR*);
+在源文件中去掉上述二者的函数体，还有去掉两个授权字符串：
+// 授权字符串
+static const TCHAR BASED_CODE _szLicFileName[] = _T("XXX(工程名).lic");
+static const WCHAR BASED_CODE _szLicString[] =  L"Copyright (c) 2010 ";
+之后。重新编译，就好了，这次就不会生成license文件(XXX(工程名).lic)，并且不需要授权文件了。
+* shell脚本“syntax error:unexpected end of file”
+  1、在windows编辑的脚本，然后在unix上运行，由于windows换行是\r\n，而unix是\n
+  所以就出问题了，可以用dos2unix转换为unix下的格式。
+  2、脚本语法有问题。
+  有人找我看一个profile文件，运行，报错syntax error:unexpected end of file
+  我开始怀疑是换行格式的问题了，看了半天，发现：
+  if xxxx
+     xxx
+  Fi
+  其中fi错写为Fi了。
+* socket system()
+  写了服务程序其中开一个端口,监听来客户端的请求.
+  收到请求后,使用system()调用外部程序.
+  当我把服务程序kill掉,重起时发现被调用起来的外部程序居然占用服务的端口.
+  方法:
+   fcntl(fd, SETFD, FD_CLOEXEC);
+   这样使用system()产生子进程就不会继承这个socket fd.
+   FD_CLOEXEC表示当程序执行exec函数时本fd将被系统自动关闭,表示不传递给exec创建的新进程.
+* nignix 做反向代理的,ip src address = dst address = 0.0.0.0
+  suse 11 sp1 升级到 suse 11 sp2后,24小时发生这个问题.
+  我基于ip的src地址不能为0.0.0.0,初步判断是内核问题.
+  后来看代码
+
+static int tcp_transmit_skb(struct sock *sk, struct sk_buff *skb, int clone_it,
+			    gfp_t gfp_mask)
+{
+        ...
+
+	inet = inet_sk(sk);
+        ...
+	err = icsk->icsk_af_ops->queue_xmit(skb, &inet->cork.fl);
+	if (likely(err <= 0))
+		return err;
+
+	tcp_enter_cwr(sk, 1);
+
+	return net_xmit_eval(err);
+}
+
+ip_queue_xmit():
+int ip_queue_xmit(struct sk_buff *skb, struct flowi *fl)
+{
+struct sock *sk = skb->sk;
+struct inet_sock *inet = inet_sk(sk);
+struct ip_options_rcu *inet_opt;
+struct flowi4 *fl4;
+struct rtable *rt;
+struct iphdr *iph;
+int res;
+ 
+/* Skip all of this if the packet is already routed,
+ * f.e. by something like SCTP.
+ */
+rcu_read_lock();
+inet_opt = rcu_dereference(inet->inet_opt);
+fl4 = &fl->u.ip4;
+rt = skb_rtable(skb);
+if (rt != NULL)
+goto packet_routed;
+....
+iph->ttl      = ip_select_ttl(inet, &rt->dst);
+iph->protocol = sk->sk_protocol;
+iph->saddr    = fl4->saddr;
+iph->daddr    = fl4->daddr;
+...
+如果fl4中fl4->saddr和fl4->daddr都是0,就会出现,目前遇到的问题.
+}
+
+于是你查找inet->cork.fl给赋值的代码
+找到cookie_v4_check
+
+struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
+			     struct ip_options *opt)
+{
+...
+	ret = get_cookie_sock(sk, skb, req, &rt->dst);
+	/* ip_queue_xmit() depends on our flow being setup
+	 * Normal sockets get it right from inet_csk_route_child_sock()
+	 */
+	if (ret)
+		inet_sk(ret)->cork.fl.u.ip4 = fl4;
+out:	return ret;
+}
+
+www.kernel.org
+
+/pub/linux/kernel/v3.x/patch-3.0.82.xz
+--- a/net/ipv4/syncookies.c
+
++++ b/net/ipv4/syncookies.c
+
+@@ -276,7 +276,8 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
+
+         int mss;
+
+         struct rtable *rt;
+
+         __u8 rcv_wscale;
+
+-        bool ecn_ok;
+
++        bool ecn_ok = false;
+
++        struct flowi4 fl4;
+
+ 
+
+         if (!sysctl_tcp_syncookies || !th->ack || th->rst)
+
+                 goto out;
+
+@@ -344,20 +345,16 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
+
+          * hasn't changed since we received the original syn, but I see
+
+          * no easy way to do this.
+
+          */
+
+-        {
+
+-                struct flowi4 fl4;
+
+-
+
+-                flowi4_init_output(&fl4, 0, sk->sk_mark, RT_CONN_FLAGS(sk),
+
+-                                   RT_SCOPE_UNIVERSE, IPPROTO_TCP,
+
+-                                   inet_sk_flowi_flags(sk),
+
+-                                   (opt && opt->srr) ? opt->faddr : ireq->rmt_addr,
+
+-                                   ireq->loc_addr, th->source, th->dest);
+
+-                security_req_classify_flow(req, flowi4_to_flowi(&fl4));
+
+-                rt = ip_route_output_key(sock_net(sk), &fl4);
+
+-                if (IS_ERR(rt)) {
+
+-                        reqsk_free(req);
+
+-                        goto out;
+
+-                }
+
++        flowi4_init_output(&fl4, sk->sk_bound_dev_if, sk->sk_mark,
+
++                           RT_CONN_FLAGS(sk), RT_SCOPE_UNIVERSE, IPPROTO_TCP,
+
++                           inet_sk_flowi_flags(sk),
+
++                           (opt && opt->srr) ? opt->faddr : ireq->rmt_addr,
+
++                           ireq->loc_addr, th->source, th->dest);
+
++        security_req_classify_flow(req, flowi4_to_flowi(&fl4));
+
++        rt = ip_route_output_key(sock_net(sk), &fl4);
+
++        if (IS_ERR(rt)) {
+
++                reqsk_free(req);
+
++                goto out;
+
+         }
+
+ 
+
+         /* Try to redo what tcp_v4_send_synack did. */
+
+@@ -371,5 +368,10 @@ struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
+
+         ireq->rcv_wscale  = rcv_wscale;
+
+ 
+
+         ret = get_cookie_sock(sk, skb, req, &rt->dst);
+
++        /* ip_queue_xmit() depends on our flow being setup
+
++         * Normal sockets get it right from inet_csk_route_child_sock()
+
++         */
+
++        if (ret)
+
++                inet_sk(ret)->cork.fl.u.ip4 = fl4;
+
+ out:    return ret;
+
+ }
+
+
+
+
+
+Date Wed, 21 Mar 2012 14:15:38 -0700 
+From Greg KH <> 
+Subject [ 6/9] tcp: fix syncookie regression 
+ 
+ 
+
+3.2-stable review patch.  If anyone has any objections, please let me know.
+
+------------------
+
+From: Eric Dumazet <eric.dumazet@gmail.com>
+
+[ Upstream commit dfd25ffffc132c00070eed64200e8950da5d7e9d ]
+commit ea4fc0d619 (ipv4: Don't use rt->rt_{src,dst} in ip_queue_xmit())
+added a serious regression on synflood handling.
+Simon Kirby discovered a successful connection was delayed by 20 seconds
+before being responsive.
+
+In my tests, I discovered that xmit frames were lost, and needed ~4
+retransmits and a socket dst rebuild before being really sent.
+
+In case of syncookie initiated connection, we use a different path to
+initialize the socket dst, and inet->cork.fl.u.ip4 is left cleared.
+
+As ip_queue_xmit() now depends on inet flow being setup, fix this by
+copying the temp flowi4 we use in cookie_v4_check().
+
+Reported-by: Simon Kirby <sim@netnation.com>
+Bisected-by: Simon Kirby <sim@netnation.com>
+Signed-off-by: Eric Dumazet <eric.dumazet@gmail.com>
+Tested-by: Eric Dumazet <eric.dumazet@gmail.com>
+Signed-off-by: David S. Miller <davem@davemloft.net>
+Signed-off-by: Greg Kroah-Hartman <gregkh@linuxfoundation.org>
+---
+ net/ipv4/syncookies.c |   30 ++++++++++++++++--------------
+ net/ipv4/tcp_ipv4.c   |   10 +++++++---
+ 2 files changed, 23 insertions(+), 17 deletions(-)
+--- a/net/ipv4/syncookies.c
++++ b/net/ipv4/syncookies.c
+@@ -278,6 +278,7 @@ struct sock *cookie_v4_check(struct sock
+ 	struct rtable *rt;
+ 	__u8 rcv_wscale;
+ 	bool ecn_ok = false;
++	struct flowi4 fl4;
+ 
+ 	if (!sysctl_tcp_syncookies || !th->ack || th->rst)
+ 		goto out;
+@@ -346,20 +347,16 @@ struct sock *cookie_v4_check(struct sock
+ 	 * hasn't changed since we received the original syn, but I see
+ 	 * no easy way to do this.
+ 	 */
+-	{
+-		struct flowi4 fl4;
+-
+-		flowi4_init_output(&fl4, 0, sk->sk_mark, RT_CONN_FLAGS(sk),
+-				   RT_SCOPE_UNIVERSE, IPPROTO_TCP,
+-				   inet_sk_flowi_flags(sk),
+-				   (opt && opt->srr) ? opt->faddr : ireq->rmt_addr,
+-				   ireq->loc_addr, th->source, th->dest);
+-		security_req_classify_flow(req, flowi4_to_flowi(&fl4));
+-		rt = ip_route_output_key(sock_net(sk), &fl4);
+-		if (IS_ERR(rt)) {
+-			reqsk_free(req);
+-			goto out;
+-		}
++	flowi4_init_output(&fl4, 0, sk->sk_mark, RT_CONN_FLAGS(sk),
++			   RT_SCOPE_UNIVERSE, IPPROTO_TCP,
++			   inet_sk_flowi_flags(sk),
++			   (opt && opt->srr) ? opt->faddr : ireq->rmt_addr,
++			   ireq->loc_addr, th->source, th->dest);
++	security_req_classify_flow(req, flowi4_to_flowi(&fl4));
++	rt = ip_route_output_key(sock_net(sk), &fl4);
++	if (IS_ERR(rt)) {
++		reqsk_free(req);
++		goto out;
+ 	}
+ 
+ 	/* Try to redo what tcp_v4_send_synack did. */
+@@ -373,5 +370,10 @@ struct sock *cookie_v4_check(struct sock
+ 	ireq->rcv_wscale  = rcv_wscale;
+ 
+ 	ret = get_cookie_sock(sk, skb, req, &rt->dst);
++	/* ip_queue_xmit() depends on our flow being setup
++	 * Normal sockets get it right from inet_csk_route_child_sock()
++	 */
++	if (ret)
++		inet_sk(ret)->cork.fl.u.ip4 = fl4;
+ out:	return ret;
+ }
+--- a/net/ipv4/tcp_ipv4.c
++++ b/net/ipv4/tcp_ipv4.c
+@@ -1465,9 +1465,13 @@ struct sock *tcp_v4_syn_recv_sock(struct
+ 		inet_csk(newsk)->icsk_ext_hdr_len = inet_opt->opt.optlen;
+ 	newinet->inet_id = newtp->write_seq ^ jiffies;
+ 
+-	if (!dst && (dst = inet_csk_route_child_sock(sk, newsk, req)) == NULL)
+-		goto put_and_exit;
+-
++	if (!dst) {
++		dst = inet_csk_route_child_sock(sk, newsk, req);
++		if (!dst)
++			goto put_and_exit;
++	} else {
++		/* syncookie case : see end of cookie_v4_check() */
++	}
+ 	sk_setup_caps(newsk, dst);
+ 
+ 	tcp_mtup_init(newsk);
+
+
+
+
+
+
+struct sock *cookie_v4_check(struct sock *sk, struct sk_buff *skb,
+     struct ip_options *opt)
+{
+....
+struct flowi4 fl4; 
+...
+//这里初始化fl4
+flowi4_init_output(&fl4, sk->sk_bound_dev_if, sk->sk_mark,
+   RT_CONN_FLAGS(sk), RT_SCOPE_UNIVERSE, IPPROTO_TCP,
+   inet_sk_flowi_flags(sk),
+   (opt && opt->srr) ? opt->faddr : ireq->rmt_addr,
+   ireq->loc_addr, th->source, th->dest);
+...
+ret = get_cookie_sock(sk, skb, req, &rt->dst);
+/* ip_queue_xmit() depends on our flow being setup
+ * Normal sockets get it right from inet_csk_route_child_sock()
+ */
+if (ret) //这一处必须要加上.
+inet_sk(ret)->cork.fl.u.ip4 = fl4;
+out: return ret;
+}
+ 
+static inline struct sock *get_cookie_sock(struct sock *sk, struct sk_buff *skb,
+   struct request_sock *req,
+   struct dst_entry *dst)
+{
+struct inet_connection_sock *icsk = inet_csk(sk);
+struct sock *child;
+ 
+child = icsk->icsk_af_ops->syn_recv_sock(sk, skb, req, dst);
+if (child)
+inet_csk_reqsk_queue_add(sk, req, child);
+else
+reqsk_free(req);
+ 
+return child;
+}
+ 
+/*
+ * The three way handshake has completed - we got a valid synack -
+ * now create the new socket.
+ */
+struct sock *tcp_v4_syn_recv_sock(struct sock *sk, struct sk_buff *skb,
+  struct request_sock *req,
+  struct dst_entry *dst)
+{
+...
+if (!dst) {
+dst = inet_csk_route_child_sock(sk, newsk, req);//该函数会给inet->cork.fl.u.ip4赋值
+if (!dst)
+goto put_and_exit;
+} else { //dst不为null时, 是cookie_v4_check()调用get_cookie_sock,然后再调用tcp_v4_syn_recv_sock
+           //从这里可以看出cookie_v4_check()的流程中inet->cork.fl.u.ip4必须要赋值
+/* syncookie case : see end of cookie_v4_check() */ 
+}
+...
+}
+ 
+ 
+ 
+struct dst_entry *inet_csk_route_child_sock(struct sock *sk,
+    struct sock *newsk,
+    const struct request_sock *req)
+{
+const struct inet_request_sock *ireq = inet_rsk(req);
+struct inet_sock *newinet = inet_sk(newsk);
+struct ip_options_rcu *opt = ireq->opt;
+struct net *net = sock_net(sk);
+struct flowi4 *fl4;
+struct rtable *rt;
+ 
+//给cork.fl.u.ip4赋值
+fl4 = &newinet->cork.fl.u.ip4;
+flowi4_init_output(fl4, sk->sk_bound_dev_if, sk->sk_mark,
+   RT_CONN_FLAGS(sk), RT_SCOPE_UNIVERSE,
+   sk->sk_protocol, inet_sk_flowi_flags(sk),
+   (opt && opt->opt.srr) ? opt->opt.faddr : ireq->rmt_addr,
+   ireq->loc_addr, ireq->rmt_port, inet_sk(sk)->inet_sport);
+security_req_classify_flow(req, flowi4_to_flowi(fl4));
+rt = ip_route_output_flow(net, fl4, sk);
+if (IS_ERR(rt))
+goto no_route;
+if (opt && opt->opt.is_strictroute && fl4->daddr != rt->rt_gateway)
+goto route_err;
+return &rt->dst;
+ 
+route_err:
+ip_rt_put(rt);
+no_route:
+IP_INC_STATS_BH(net, IPSTATS_MIB_OUTNOROUTES);
+return NULL;
+}
+
+* 发现大量的链接处于SEND_RCV状态
+   并发syn数：170左右，同时TCP 已建连接数：100以下，cpu利用率1%，内存仍有3G左右。系统日志中无异常信息。
+   从统计图上看，当时出现多次ping超过500ms的情况，怀疑当时系统网络或者本地网络拥塞，
+
+多次运行 ss -ant | grep SYN-RCV | wc -l
+
+发现处于SYN_RCV状态的链接数从100多，快速增加2000左右；
+然后再降到100左右；
+使用tcpdump抓包，发现在突然发送大量的SNDACK包
+10:20:36.586168 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48273825 4294923162,nop,wscale 7>
+10:20:36.586172 IP 123.103.18.129.http-alt > 27.186.199.90.17183: S 55393697:55393697(0) ack 3551054505 win 14480 <mss 1460,sackOK,timestamp 48273825 4294924632,nop,wscale 7>
+10:20:36.586176 IP 123.103.18.129.http-alt > 222.142.248.251.13748: S 2663570460:2663570460(0) ack 516814793 win 14480 <mss 1460,sackOK,timestamp 48273825 4294937831,nop,wscale 7>
+10:20:36.586179 IP 123.103.18.129.http-alt > 223.88.47.191.34532: S 1243551141:1243551141(0) ack 3209509052 win 14480 <mss 1460,sackOK,timestamp 48273825 4294914337,nop,wscale 7>
+10:20:36.586184 IP 123.103.18.129.http-alt > 1.206.58.53.8862: S 2571985368:2571985368(0) ack 88928714 win 14480 <mss 1460,sackOK,timestamp 48273825 4294936780,nop,wscale 7>
+10:20:36.586190 IP 123.103.18.129.http-alt > 223.247.106.96.38126: S 2856521832:2856521832(0) ack 3590760487 win 14480 <mss 1460,sackOK,timestamp 48273825 4294917562,nop,wscale 7>
+10:20:36.586193 IP 123.103.18.129.http-alt > 182.37.59.237.dossier: S 4005109446:4005109446(0) ack 1917750051 win 14480 <mss 1460,sackOK,timestamp 48273825 4294925817,nop,wscale 7>
+10:20:36.586196 IP 123.103.18.129.http-alt > 221.232.39.241.progistics: S 3806352953:3806352953(0) ack 344657780 win 14480 <mss 1460,sackOK,timestamp 48273825 299427,nop,wscale 7>
+10:20:36.586201 IP 123.103.18.129.http-alt > 171.105.41.219.9638: S 2041619521:2041619521(0) ack 663833983 win 14480 <mss 1460,sackOK,timestamp 48273825 3596802,nop,wscale 7>
+10:20:36.586205 IP 123.103.18.129.http-alt > 111.127.6.205.34959: S 1015346154:1015346154(0) ack 664982089 win 14480 <mss 1460,sackOK,timestamp 48273825 3770211,nop,wscale 7>
+10:20:36.586209 IP 123.103.18.129.http-alt > 175.153.198.94.14951: S 2417466839:2417466839(0) ack 1782648372 win 14480 <mss 1460,sackOK,timestamp 48273825 4294913486,nop,wscale 7>
+10:20:36.586213 IP 123.103.18.129.http-alt > 222.75.228.159.43008: S 1555022631:1555022631(0) ack 3268700846 win 14480 <mss 1460,sackOK,timestamp 48273825 7939634,nop,wscale 7>
+10:20:36.586218 IP 123.103.18.129.http-alt > 106.8.166.63.9716: S 3024222476:3024222476(0) ack 3321547315 win 14480 <mss 1460,sackOK,timestamp 48273825 1163946,nop,wscale 7>
+10:20:36.586222 IP 123.103.18.129.http-alt > 115.153.187.40.31183: S 3062004217:3062004217(0) ack 1838085789 win 14480 <mss 1460,sackOK,timestamp 48273825 4294914380,nop,wscale 7>
+10:20:36.586229 IP 123.103.18.129.http-alt > 114.232.38.74.16608: S 2359021672:2359021672(0) ack 506986907 win 14480 <mss 1460,sackOK,timestamp 48273825 4294916009,nop,wscale 7>
+10:20:36.586232 IP 123.103.18.129.http-alt > 113.121.109.104.19405: S 1162268174:1162268174(0) ack 238141524 win 14480 <mss 1460,sackOK,timestamp 48273825 4294923927,nop,wscale 7>
+10:20:36.586236 IP 123.103.18.129.http-alt > 116.11.168.52.9183: S 1050817569:1050817569(0) ack 4115176365 win 14480 <mss 1460,sackOK,timestamp 48273825 0,nop,wscale 7>
+10:20:36.586241 IP 123.103.18.129.http-alt > 59.173.168.148.30583: S 1371249872:1371249872(0) ack 3577838620 win 14480 <mss 1460,sackOK,timestamp 48273825 4294923827,nop,wscale 7>
+10:20:36.586245 IP 123.103.18.129.http-alt > 221.197.55.96.20478: S 2418725162:2418725162(0) ack 2117844143 win 14480 <mss 1460,sackOK,timestamp 48273825 5197409,nop,wscale 7>
+10:20:36.586249 IP 123.103.18.129.http-alt > 112.194.149.81.16419: S 3667608011:3667608011(0) ack 1869692403 win 14480 <mss 1460,sackOK,timestamp 48273825 4294912562,nop,wscale 7>
+
+开始怀疑是内核没有及时处理接受的SYN请求。
+看了ip接受到tcp发送synack的代码流程
+网卡驱动--->netif_rx()--->netif_receive_skb()->deliver_skb()->packet_type.func
+
+-> ip_rcv -> ip_rcv_finish -> dst_input -> ip_local_deliver -> ip_local_deliver_finish -> tcp_v4_rcv
+
+tcp_v4_do_rcv -> tcp_rcv_state_process -> conn_request
+tcp_v4_conn_request -> tcp_v4_send_synack -> ip_local_out -> dst_output
+
+ip_output -> ip_finish_output -> ip_finish_output2->neigh_hh_output -> dev_queue_xmit
+  第一流程->    __dev_xmit_skb  ...       -> __netif_reschedule -> .. qdisc_run -> 软中断-> net_tx_action ...->第二流程
+  第二流程->dev_hard_start_xmit-> dev_queue_xmit_nit(抓包点）
+
+于是认为是qdisc_run的流程没有及时发送synack包。
+并且查到类似的kernel bug
+
+但是后来Tony,使用ss -anoi|grep SY
+查看链接信息：
+#+begin_example
+\#ss -anoi|grep SY
+SYN-RECV 0   0    123.103.18.129：8080   223.8.185.227：12950  time(on,2.904ms, 0)
+SYN-RECV 0   0    123.103.18.129：8080   119.179.94.61：28197  time(on,2.480ms, 0)
+SYN-RECV 0   0    123.103.18.129：8080   112.243.175.217：46771  time(on,7.120ms, 3)
+SYN-RECV 0   0    123.103.18.129：8080   42.225.194.114：50249  time(on,10sec, 3)
+SYN-RECV 0   0    123.103.18.129：8080   114.236.150.154：16522  time(on,13
+sec, 3)
+...
+#+end_example
+等
+发现SYNACK是再重传。
+
+我再仔细看了一个抓包记录
+仔细看了几条数据，表明是TCP在重传SYNACK,
+第一次SYN
+10:20:27.376689 IP 123.103.18.136 > Nginx-a.site: IP 123.165.208.24.57376 > 123.103.18.129.http-alt: S 3619930744:3619930744(0) win 14600 <mss 1380,sackOK,timestamp 4294923162 0,nop,wscale 6> (ipip-proto-4)
+第二次SYN
+10:20:30.385987 IP 123.103.18.136 > Nginx-a.site: IP 123.165.208.24.57376 > 123.103.18.129.http-alt: S 3619930744:3619930744(0) win 14600 <mss 1380,sackOK,timestamp 4294923764 0,nop,wscale 6> (ipip-proto-4)
+ 
+第一次回应SYN/ACK
+10:20:27.376705 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48271522 4294923162,nop,wscale 7>
+下面两条 一条是收到10:20:30.385987的SYN,触发另一个流程发送的SYNACK；一条是定时器触发的
+10:20:30.386000 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48272274 4294923162,nop,wscale 7>
+10:20:30.582128 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48272324 4294923162,nop,wscale 7>
+6秒超时发送SYN/ACK
+10:20:36.586168 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48273825 4294923162,nop,wscale 7>
+
+很多几条记录都和上面的类似。
+现在基本可以确定SYN处理慢是由于网络问题引起的。 
+
+* kernel: nf_conntrack: table full, dropping packet
+  一个同事测试一个服务的并发性。
+  测试环境：一个台server，两个模拟客户端。
+  一个客户端并发50000个链接，没有问题。
+  另一个客户端并发14000左右就出现链接不成功的问题。
+  
+  开始我怀疑是第二个客户端自身的问题。
+  但是当出现问题后，在第一个客户端上执行telnet sever_ip 8080
+  也经常会出现链接超时。
+
+  在看了一下cpu等没有问题。
+  看了ulimit -a 最大允许的文件句柄，很大，没有问题。
+  后来dmesg，看到server上有大量的
+  kernel: nf_conntrack: table full, dropping packet
+  
+  于是上网查找对应问题，发现需要配置sysctl:
+  net.nf_conntrack_max=655350
+  net.netfilter.nf_conntrack_max=655350
+  net.netfilter.nf_conntrack_tcp_timeout_established = 1200
+  但是我看了cat /etc/sysctl.conf，发现这个几个值是增大的。没有问题。
+
+  后来执行sysctl -a | grep conntrack，发现实际起作用的
+  net.nf_conntrack_max=65535
+  net.netfilter.nf_conntrack_max=65535
+
+  于是我执行了sysctl -p使用/etc/sysctl.conf的参数。
+  问题就没有了。
+
+

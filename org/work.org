@@ -1,0 +1,34 @@
+#+STARTUP: showall
+#+TODO: TODO START | DONE
+#+TAGS: computer(c) nocomputer(n) either(e)
+#+TAGS: immediately(i) wait(w) action(a)
+#+STARTUP: hidestars
+
+
+假设所有的被监控主机都是linux系统。
+
+一个client的在server端有对应的version文件，
+命名规则：clientip_version.txt
+
+
+插件放置规则：
+通用的插件名字:check_xxx
+两个client的插件，功能相同的，但是二进制不一样的情况，暂不考虑。
+
+
+
+对于更新的命令
+在server端更新后，执行update命令，扫描最近变动的文件。
+根据各个client的配置，分别更新他们的version文件
+
+
+对于新增的命令。
+执行update命令，扫描servers/下的配置文件，发现每个client需要新增的命令，
+后然后，再更新他们的version文件。
+
+
+
+
+升级流程：
+    server定时调用check_version命令，轮询每个client
+    check_version向client发送具体版本号。

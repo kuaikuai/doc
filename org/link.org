@@ -1,0 +1,20 @@
+#+OPTIONS: "\n:t"
+
+* 需要关注的网址
+  http://www.gtdstudy.com
+  http://mindhacks.cn/
+  http://www.geekonomics10000.com/
+  http://www.tektalk.org
+ 外刊IT评论  http://www.aqee.net/ 有一些好的技术心得
+ Robert Sedgewick http://www.cs.princeton.edu/~rs/
+ 李杀网的elisp http://xahlee.org/emacs/elisp.html
+ i'm hjp http://hjp.im/
+ emacs中文网 http://emacser.com/
+ 水木 http://www.newsmth.net/mainpage.html
+ emacsWiki http://www.emacswiki.org
+ emacs lisp learning http://www.emacswiki.org/emacs-zh/CategoryCode
+ 浏忙博客 http://blog.waterlin.org/
+ 周爱民博客 http://blog.csdn.net/aimingoo
+ 刘爱贵的专栏 存储 http://blog.csdn.net/liuben
+ http://www.nowamagic.net/librarys/veda/cate/Program
+ 酷壳

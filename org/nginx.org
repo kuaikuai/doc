@@ -1,0 +1,31 @@
+
+* proxy_set_header
+配置如下：
+#+begin_example
+    upstream search_server {
+        server 10.0.64.244:8080;
+    }
+    server {
+        listen       8000;
+        location / {
+           #proxy_set_header Host $host;
+           proxy_pass http://search_server;
+        }
+    }
+#+end_example
+请求http://localhost:8000
+抓包：
+#+begin_example
+GET / HTTP/1.0
+Host: search_server
+Connection: close
+#+end_example
+发现HTTP报文头中Host是search_server。
+
+把proxy_set_header Host $host;前的注释去掉后。
+再请求：
+#+begin_example
+GET / HTTP/1.0
+Host: localhost
+Connection: close
+#+end_example

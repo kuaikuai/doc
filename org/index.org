@@ -1,0 +1,18 @@
+﻿我的个人知识库
+
+我的邮箱：3wdays@gmail.com
+
+* [[file:notes.org][随记]]
+* [[file:record.org][工作日志]]
+* [[file:think.org][想法]]
+* [[file:linux_command.org][命令工具]]
+* [[file:tools.org][其他工具]]
+* [[file:sourcecode.org][源码阅读]]
+* [[file:link.org][好的站点]]
+* [[file:bug.org][捉虫记]]
+* [[file:perl.org][perl与小技]]
+* [[file:booklist.org][我的书库]]
+* [[file:emacs.org][emacs]]
+* [[file:kernel.org][linux内核代码]]
+* [[file:notes.org][乱记]]
+* [[file:dream.org][梦]]

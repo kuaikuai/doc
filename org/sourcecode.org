@@ -1,0 +1,744 @@
+#+OPTIONS: "\n:t"
+#+STARTUP: hidestars
+
+* 方法论
+** 学习使用它
+** 画出它的主要数据结构关系
+** 跟踪其数据流
+** 从main函数入手，抓大流程
+* nagios 代码阅读
+** 主流程
+  event_execution_loop()主流程，一个大循环。
+  根据当前时间判断没有事件到期，如果到期则执行handle_timed_event()
+
+  handle_timed_event()->根据不同的类型调用不同的函数。
+  event.c:
+#+begin_src c
+  int handle_timed_event(timed_event *event) {
+	/* how should we handle the event? */
+	switch(event->event_type) {
+		case EVENT_SERVICE_CHECK:
+			/* get check latency */
+			gettimeofday(&tv, NULL);
+			latency = (double)((double)(tv.tv_sec - event->run_time) + (double)(tv.tv_usec / 1000) / 1000.0);
+			/* run the service check */
+			temp_service = (service *)event->event_data;
+			run_scheduled_service_check(temp_service, event->event_options, latency);
+			break;
+		case EVENT_HOST_CHECK:
+			temp_host = (host *)event->event_data;
+			/* get check latency */
+			gettimeofday(&tv, NULL);
+			latency = (double)((double)(tv.tv_sec - event->run_time) + (double)(tv.tv_usec / 1000) / 1000.0);
+			/* run the host check */
+			perform_scheduled_host_check(temp_host, event->event_options, latency);
+			break;
+               ...
+        }
+  }
+#+end_src
+  如服务检查
+  run_scheduled_service_check()
+
+  如主机检查
+  perform_scheduled_host_check()
+
+  运行监查命令时，使用fork产生新进程，运行检查命令
+  命令产生结果，放到临时文件。
+  启动专门的流程，查看这些临时文件。
+  reap_check_results()
+
+** 定时事件机制
+  事件机制实现比较朴素。
+#+begin_src c
+/* TIMED_EVENT structure */
+typedef struct timed_event_struct {
+	int event_type;
+	time_t run_time;
+	int recurring;
+	unsigned long event_interval;
+	int compensate_for_time_change;
+	void *timing_func;
+	void *event_data;
+	void *event_args;
+	int event_options;
+	struct timed_event_struct *next;
+	struct timed_event_struct *prev;
+} timed_event;
+#+end_src
+timed_event根据run_time的先后依次链接在一个双链表中。
+
+#+CAPTION: event接口
+| schedule_new_event | 调度新事件（添加新事件） |
+| reschedule_event   | 重新调度事件（已有事件） |
+| add_event          | 将事件插入事件链表       |
+
+** 配置解释
+   代码基本都在xodtemplate.c中
+
+   读取主配置文件nagios.cfg
+   代码虽然罗嗦，但是有一些值得借鉴的地方。
+   read_main_config_file()：
+#+begin_src c
+           while(1) {
+		/* read the next line */
+		if((input = mmap_fgets_multiline(thefile)) == NULL)
+			break;
+		/* get the variable name */
+		if((temp_ptr = my_strtok(input, "=")) == NULL) {
+			asprintf(&error_message, "NULL variable");
+			error = TRUE;
+			break;
+			}
+		if((variable = (char *)strdup(temp_ptr)) == NULL) {
+			asprintf(&error_message, "malloc() error");
+			error = TRUE;
+			break;
+			}
+
+		/* get the value */
+		if((temp_ptr = my_strtok(NULL, "\n")) == NULL) {
+			asprintf(&error_message, "NULL value");
+			error = TRUE;
+			break;
+			}
+		if((value = (char *)strdup(temp_ptr)) == NULL) {
+			asprintf(&error_message, "malloc() error");
+			error = TRUE;
+			break;
+			}
+
+                /* 获取每个配置的值 */
+                if(....) {
+                ....
+                else if(!strcmp(variable, "debug_level"))
+		        debug_level = atoi(value);
+                else if(!strcmp(variable, xxxxxx)) {
+                .....
+             }
+
+#+end_src
+
+*** read_all_object_data()->
+/* read in all host configuration data from external sources */
+read_object_config_data() -> xodtemplate_read_config_data()
+#+begin_src c
+while(1) {
+  获取每一行
+  cfg_file=xxx,则调用xodtemplate_process_config_file(xxx)
+  cfg_dir=xxx,则调用xodtemplate_process_config_dir(xxx)
+}
+....
+xodtemplate_resolve_objects();
+...
+xodtemplate_recombobulate_hostgroups();
+...
+xodtemplate_duplicate_services()
+...
+xodtemplate_recombobulate_servicegroups();
+#+end_src
+
+
+*** xodtemplate_process_config_file():
+读取除了主配置这外的各种objects配置
+#+begin_example
+ define { : xodtemplate_begin_object_definition()
+    : xodtemplate_add_object_property()
+  } : xodtemplate_end_object_definition()
+如果文件中有include_file=xxx,则递归调用xodtemplate_process_config_file(xxx)
+如果文件中有include_dir=xxx,则递归调用xodtemplate_process_config_dir(xxx)
+#+end_example
+
+*** xodtemplate_add_object_property()
+解释object的属性配置，并为object的属性赋值
+所有object的属性都由这个函数处理
+
+*** xodtemplate_resolve_objects():
+通过查找xodtemplate_process_config_file生成的list
+解释use的模板
+#+begin_src c
+        /* resolve all timeperiod objects */
+        ...
+	/* resolve all command objects */
+	for(temp_command = xodtemplate_command_list; temp_command != NULL; temp_command = temp_command->next) {
+		if(xodtemplate_resolve_command(temp_command) == ERROR)
+			return ERROR;
+		}
+        /* resolve all contactgroup objects */
+        ...
+        ...
+#+end_src
+
+
+*** xodtemplate_resolve_command(xodtemplate_command *this_command):
+/* resolves a command object */
+#+begin_src c
+	/* return if this command has already been resolved */
+	if(this_command->has_been_resolved == TRUE)
+		return OK;
+
+	/* set the resolved flag */
+	this_command->has_been_resolved = TRUE;
+
+	/* return if we have no template */
+	if(this_command->template == NULL)
+		return OK;
+
+	if((template_names = (char *)strdup(this_command->template)) == NULL)
+		return ERROR;
+
+	/* apply all templates */
+	template_name_ptr = template_names;
+        /* 这里我们可以看到，同时使用多个模板，模板名字之间用“，”分割 */
+	for(temp_ptr = my_strsep(&template_name_ptr, ","); temp_ptr != NULL; temp_ptr = my_strsep(&template_name_ptr, ",")) {
+
+		template_command = xodtemplate_find_command(temp_ptr);
+		if(template_command == NULL) {
+			logit(NSLOG_CONFIG_ERROR, TRUE, "Error: Template '%s' specified in command definition could not be not found (config file '%s', starting on line %d)\n", temp_ptr, xodtemplate_config_file_name(this_command->_config_file), this_command->_start_line);
+			my_free(template_names);
+			return ERROR;
+			}
+
+		/* resolve the template command... */
+                /* 这里我们可以看到，代码支持递归解释，模板还可以使用别的模板*/
+		xodtemplate_resolve_command(template_command);
+
+		/* apply missing properties from template command... */
+		if(this_command->command_name == NULL && template_command->command_name != NULL)
+			this_command->command_name = (char *)strdup(template_command->command_name);
+		if(this_command->command_line == NULL && template_command->command_line != NULL)
+			this_command->command_line = (char *)strdup(template_command->command_line);
+		}
+
+	my_free(template_names);
+
+	return OK;
+	}
+#+end_src
+
+*** xodtemplate_recombobulate_hostgroups()
+#+begin_src c
+        /*
+                define host {
+                  host_name host_n
+                  hostgroups group1,group2
+                }
+             遍历每个host，将其host_name加入对应hostgroup->members列表中。
+             通过这一段代码，我们可以推测出，配置hostgroup时其实可以不用指定members，在配置host时，指定其对应的hostgroup即可。
+        */
+	/* This should happen before we expand hostgroup members, to avoid duplicate host memberships 01/07/2006 EG */
+	/* process all hosts that have hostgroup directives */
+	for(temp_host = xodtemplate_host_list; temp_host != NULL; temp_host = temp_host->next) {
+
+		/* skip hosts without hostgroup directives or host names */
+		if(temp_host->host_groups == NULL || temp_host->host_name == NULL)
+			continue;
+
+		/* skip hosts that shouldn't be registered */
+		if(temp_host->register_object == FALSE)
+			continue;
+
+		/* preprocess the hostgroup list, to change "grp1,grp2,grp3,!grp2" into "grp1,grp3" */
+                /* 包含了将 "*" 拓展为所有hostgroup的动作 */
+		if((hostgroup_names = xodtemplate_process_hostgroup_names(temp_host->host_groups, temp_host->_config_file, temp_host->_start_line)) == NULL)
+			return ERROR;
+
+		/* process the list of hostgroups */
+		for(temp_ptr = strtok(hostgroup_names, ","); temp_ptr; temp_ptr = strtok(NULL, ",")) {
+
+			/* strip trailing spaces */
+			strip(temp_ptr);
+
+			/* find the hostgroup */
+			temp_hostgroup = xodtemplate_find_real_hostgroup(temp_ptr);
+                        /*略*/
+			/* add this list to the hostgroup members directive */
+			if(temp_hostgroup->members == NULL)
+				temp_hostgroup->members = (char *)strdup(temp_host->host_name);
+			else {
+				new_members = (char *)realloc(temp_hostgroup->members, strlen(temp_hostgroup->members) + strlen(temp_host->host_name) + 2);
+				if(new_members != NULL) {
+					temp_hostgroup->members = new_members;
+					strcat(temp_hostgroup->members, ",");
+					strcat(temp_hostgroup->members, temp_host->host_name);
+					}
+				}
+			}
+
+		/* free memory */
+		my_free(hostgroup_names);
+		}
+
+	/* expand subgroup membership recursively */
+	for(temp_hostgroup = xodtemplate_hostgroup_list; temp_hostgroup; temp_hostgroup = temp_hostgroup->next)
+		xodtemplate_recombobulate_hostgroup_subgroups(temp_hostgroup, NULL);
+
+        /* 根据上面操作的结果，进行第二拓展处理 */
+	/* expand members of all hostgroups - this could be done in xodtemplate_register_hostgroup(), but we can save the CGIs some work if we do it here */
+	for(temp_hostgroup = xodtemplate_hostgroup_list; temp_hostgroup; temp_hostgroup = temp_hostgroup->next) {
+
+		if(temp_hostgroup->members == NULL && temp_hostgroup->hostgroup_members == NULL)
+			continue;
+
+		/* skip hostgroups that shouldn't be registered */
+		if(temp_hostgroup->register_object == FALSE)
+			continue;
+
+		/* get list of hosts in the hostgroup */
+		temp_memberlist = xodtemplate_expand_hostgroups_and_hosts(NULL, temp_hostgroup->members, temp_hostgroup->_config_file, temp_hostgroup->_start_line);
+		/* add all members to the host group */
+		my_free(temp_hostgroup->members);
+		for(this_memberlist = temp_memberlist; this_memberlist; this_memberlist = this_memberlist->next) {
+
+			/* add this host to the hostgroup members directive */
+			if(temp_hostgroup->members == NULL)
+				temp_hostgroup->members = (char *)strdup(this_memberlist->name1);
+			else {
+				new_members = (char *)realloc(temp_hostgroup->members, strlen(temp_hostgroup->members) + strlen(this_memberlist->name1) + 2);
+				if(new_members != NULL) {
+					temp_hostgroup->members = new_members;
+					strcat(temp_hostgroup->members, ",");
+					strcat(temp_hostgroup->members, this_memberlist->name1);
+					}
+				}
+			}
+		xodtemplate_free_memberlist(&temp_memberlist);
+		}
+
+	}
+
+#+end_src
+
+*** xodtemplate_duplicate_services()
+#+begin_src c
+	/****** DUPLICATE SERVICE DEFINITIONS WITH ONE OR MORE HOSTGROUP AND/OR HOST NAMES ******/
+	for(temp_service = xodtemplate_service_list; temp_service != NULL; temp_service = temp_service->next) {
+
+		/* skip services that shouldn't be registered */
+		if(temp_service->register_object == FALSE)
+			continue;
+                ...
+		/* get list of hosts */
+                /* 获取hostrgroups 或者hosts指定的hostname列表 */
+		temp_memberlist = xodtemplate_expand_hostgroups_and_hosts(temp_service->hostgroup_name, temp_service->host_name, temp_service->_config_file, temp_service->_start_line);
+                ...
+
+		/* add a copy of the service for every host in the hostgroup/host name list */
+                /* 为每一个hostname生成一个server的copy插入xodtemplate_service_list链表*/
+		first_item = TRUE;
+		for(this_memberlist = temp_memberlist; this_memberlist != NULL; this_memberlist = this_memberlist->next) {
+
+			/* if this is the first duplication, use the existing entry */
+			if(first_item == TRUE) {
+
+				my_free(temp_service->host_name);
+				temp_service->host_name = (char *)strdup(this_memberlist->name1);
+				if(temp_service->host_name == NULL) {
+					xodtemplate_free_memberlist(&temp_memberlist);
+					return ERROR;
+					}
+
+				first_item = FALSE;
+				continue;
+				}
+
+			/* duplicate service definition */
+			result = xodtemplate_duplicate_service(temp_service, this_memberlist->name1);
+
+			/* exit on error */
+			if(result == ERROR) {
+				my_free(host_name);
+				return ERROR;
+				}
+			}
+
+		/* free memory we used for host list */
+		xodtemplate_free_memberlist(&temp_memberlist);
+		}
+
+
+	/***************************************/
+	/* SKIPLIST STUFF FOR FAST SORT/SEARCH */
+	/***************************************/
+        /* 将上面生成的server列表的server，插入skiplist中 */
+	/* First loop for single host service definition*/
+	for(temp_service = xodtemplate_service_list; temp_service != NULL; temp_service = temp_service->next) {
+
+		/* skip services that shouldn't be registered */
+		if(temp_service->register_object == FALSE)
+			continue;
+
+		/* skip service definitions without enough data */
+		if(temp_service->host_name == NULL || temp_service->service_description == NULL)
+			continue;
+
+		if(xodtemplate_is_service_is_from_hostgroup(temp_service)) {
+			continue;
+			}
+
+
+		result = skiplist_insert(xobject_skiplists[X_SERVICE_SKIPLIST], (void *)temp_service);
+		switch(result) {
+			case SKIPLIST_ERROR_DUPLICATE:
+				logit(NSLOG_CONFIG_WARNING, TRUE, "Warning: Duplicate definition found for service '%s' on host '%s' (config file '%s', starting on line %d)\n", temp_service->service_description, temp_service->host_name, xodtemplate_config_file_name(temp_service->_config_file), temp_service->_start_line);
+				result = ERROR;
+				break;
+			case SKIPLIST_OK:
+				result = OK;
+				break;
+			default:
+				result = ERROR;
+				break;
+			}
+		}
+
+
+	/* second loop for host group service definition*/
+	/* add services to skiplist for fast searches */
+	for(temp_service = xodtemplate_service_list; temp_service != NULL; temp_service = temp_service->next) {
+
+		/* skip services that shouldn't be registered */
+		if(temp_service->register_object == FALSE)
+			continue;
+
+		/* skip service definitions without enough data */
+		if(temp_service->host_name == NULL || temp_service->service_description == NULL)
+			continue;
+
+		if(!xodtemplate_is_service_is_from_hostgroup(temp_service)) {
+			continue;
+			}
+		/*The flag X_SERVICE_IS_FROM_HOSTGROUP is set, unset it*/
+		xodtemplate_unset_service_is_from_hostgroup(temp_service);
+
+		result = skiplist_insert(xobject_skiplists[X_SERVICE_SKIPLIST], (void *)temp_service);
+		switch(result) {
+			case SKIPLIST_ERROR_DUPLICATE:
+				logit(NSLOG_CONFIG_WARNING, TRUE, "Warning: Duplicate definition found for service '%s' on host '%s' (config file '%s', starting on line %d)\n", temp_service->service_description, temp_service->host_name, xodtemplate_config_file_name(temp_service->_config_file), temp_service->_start_line);
+				result = ERROR;
+				break;
+			case SKIPLIST_OK:
+				result = OK;
+				break;
+			default:
+				result = ERROR;
+				break;
+			}
+		}
+
+	return OK;
+	}
+#+end_src
+
+*** xodtemplate_recombobulate_servicegroups
+逻辑与xodtemplate_recombobulate_hostgroups类似
+
+//读取resouce文件配置$USERn宏的定义
+*** read_resource_file()
+
+
+
+dirname()
+
+** 状态日志
+   logging.c
+   /* write a service problem/recovery to the nagios log file */
+   int log_service_event(service *svc)
+   /* write a host problem/recovery to the log file */
+   int log_host_event(host *hst)
+** 模块回调机制
+   broker
+   调用指定类型消息注册的回调函数
+   int neb_make_callbacks(int callback_type, void *data)
+* nohup 代码
+nohup 实现原来如此简单
+#+begin_src c
+int
+fd_reopen (int desired_fd, char const *file, int flags, mode_t mode)
+{
+  int fd = open (file, flags, mode);
+
+  if (fd == desired_fd || fd < 0)
+    return fd;
+  else
+    {
+      int fd2 = dup2 (fd, desired_fd);
+      int saved_errno = errno;
+      close (fd);
+      errno = saved_errno;
+      return fd2;
+    }
+}
+#+end_src
+
+#+begin_src c
+  ignoring_input = isatty (STDIN_FILENO);
+  redirecting_stdout = isatty (STDOUT_FILENO);
+  stdout_is_closed = (!redirecting_stdout && errno == EBADF);
+  redirecting_stderr = isatty (STDERR_FILENO);
+
+  /* If standard input is a tty, replace it with /dev/null if possible.
+     Note that it is deliberately opened for *writing*,
+     to ensure any read evokes an error.  */
+  /* 忽略输入时，将标准输入的fd设置为/dev/null */
+  if (ignoring_input)
+    {
+      if (fd_reopen (STDIN_FILENO, "/dev/null", O_WRONLY, 0) < 0)
+        {
+          error (0, errno, _("failed to render standard input unusable"));
+          exit (exit_internal_failure);
+        }
+      if (!redirecting_stdout && !redirecting_stderr)
+        error (0, 0, _("ignoring input"));
+    }
+
+  /* If standard output is a tty, redirect it (appending) to a file.
+     First try nohup.out, then $HOME/nohup.out.  If standard error is
+     a tty and standard output is closed, open nohup.out or
+     $HOME/nohup.out without redirecting anything.  */
+ /* 输出是tty时，将STDOUT的fd设置为nohup.out文件的fd 
+    如果当前目录下nohup.out打开失败，那么尝试打开$HOME/nohup.out
+ */
+  if (redirecting_stdout || (redirecting_stderr && stdout_is_closed))
+    {
+      char *in_home = NULL;
+      char const *file = "nohup.out";
+      int flags = O_CREAT | O_WRONLY | O_APPEND;
+      mode_t mode = S_IRUSR | S_IWUSR;
+      mode_t umask_value = umask (~mode);
+      out_fd = (redirecting_stdout
+                ? fd_reopen (STDOUT_FILENO, file, flags, mode)
+                : open (file, flags, mode));
+
+      if (out_fd < 0)
+        {
+          int saved_errno = errno;
+          char const *home = getenv ("HOME");
+          if (home)
+            {
+              in_home = file_name_concat (home, file, NULL);
+              out_fd = (redirecting_stdout
+                        ? fd_reopen (STDOUT_FILENO, in_home, flags, mode)
+                        : open (in_home, flags, mode));
+            }
+          if (out_fd < 0)
+            {
+              int saved_errno2 = errno;
+              error (0, saved_errno, _("failed to open %s"), quote (file));
+              if (in_home)
+                error (0, saved_errno2, _("failed to open %s"),
+                       quote (in_home));
+              exit (exit_internal_failure);
+            }
+          file = in_home;
+        }
+
+      umask (umask_value);
+      error (0, 0,
+             _(ignoring_input
+               ? N_("ignoring input and appending output to %s")
+               : N_("appending output to %s")),
+             quote (file));
+      free (in_home);
+    }
+
+  /* If standard error is a tty, redirect it.  */
+  if (redirecting_stderr)
+    {
+      /* Save a copy of stderr before redirecting, so we can use the original
+         if execve fails.  It's no big deal if this dup fails.  It might
+         not change anything, and at worst, it'll lead to suppression of
+         the post-failed-execve diagnostic.  */
+      saved_stderr_fd = dup (STDERR_FILENO);
+
+      if (0 <= saved_stderr_fd
+          && set_cloexec_flag (saved_stderr_fd, true) != 0)
+        error (exit_internal_failure, errno,
+               _("failed to set the copy of stderr to close on exec"));
+
+      if (!redirecting_stdout)
+        error (0, 0,
+               _(ignoring_input
+                 ? N_("ignoring input and redirecting stderr to stdout")
+                 : N_("redirecting stderr to stdout")));
+
+      if (dup2 (out_fd, STDERR_FILENO) < 0)
+        error (exit_internal_failure, errno,
+               _("failed to redirect standard error"));
+
+      if (stdout_is_closed)
+        close (out_fd);
+    }
+
+  /* error() flushes stderr, but does not check for write failure.
+     Normally, we would catch this via our atexit() hook of
+     close_stdout, but execvp() gets in the way.  If stderr
+     encountered a write failure, there is no need to try calling
+     error() again, particularly since we may have just changed the
+     underlying fd out from under stderr.  */
+  if (ferror (stderr))
+    exit (exit_internal_failure);
+
+  signal (SIGHUP, SIG_IGN);
+
+  {
+    int exit_status;
+    int saved_errno;
+    char **cmd = argv + optind;
+
+    execvp (*cmd, cmd);
+    exit_status = (errno == ENOENT ? EXIT_ENOENT : EXIT_CANNOT_INVOKE);
+    saved_errno = errno;
+
+    /* The execve failed.  Output a diagnostic to stderr only if:
+       - stderr was initially redirected to a non-tty, or
+       - stderr was initially directed to a tty, and we
+         can dup2 it to point back to that same tty.
+       In other words, output the diagnostic if possible, but only if
+       it will go to the original stderr.  */
+    if (dup2 (saved_stderr_fd, STDERR_FILENO) == STDERR_FILENO)
+      error (0, saved_errno, _("failed to run command %s"), quote (*cmd));
+
+    exit (exit_status);
+  }
+}
+
+#+end_src
+* ossec 
+AgentdStart()->receive_msg()
+
+
+
+send_msg_to_agent()->
+
+
+
+remoted <-> agentd
+
+
+代理检查主线程
+run_check.c:
+start_daemon()
+
+
+analysisd.c:
+OS_ReadMSG()
+* [[file:lvs_source.org][lvs源码分析]]
+* skbuff
+- pskb_may_pull
+  int pskb_may_pull(struct sk_buff *skb, unsigned int len)
+  保证skb的线性区长度大于等于len，如果headlen < len，那么从非线性区pull到线性区来
+
+* netfilter 简单分析
+** 数据结构
+#+begin_src c
+  struct list_head nf_hooks[NPROTO][NF_MAX_HOOKS];
+#+end_src
+  nf_hooks二维链表数组，
+  第一个维度是协议，第二维度是hooknum
+
+** 注册钩子
+   
+#+begin_src c
+  struct nf_hook_ops
+  {
+	struct list_head list;
+
+	/* User fills in from here down. */
+	nf_hookfn *hook;
+	struct module *owner;
+	int pf;
+	int hooknum;
+	/* Hooks are ordered in ascending priority. */
+	int priority;
+  };
+#+end_src
+
+  根据nf_hook_ops中的pf和hooknum找到对应的链表，根据优先级值由高到低顺序插入链表
+#+begin_src c
+int nf_register_hook(struct nf_hook_ops *reg)
+{
+	struct list_head *i;
+
+	spin_lock_bh(&nf_hook_lock);
+	list_for_each(i, &nf_hooks[reg->pf][reg->hooknum]) {
+		if (reg->priority < ((struct nf_hook_ops *)i)->priority)
+			break;
+	}
+	list_add_rcu(&reg->list, i->prev);
+	spin_unlock_bh(&nf_hook_lock);
+
+	synchronize_net();
+	return 0;
+}
+#+end_src
+
+** 调用钩子
+#+begin_src c
+static inline int nf_hook_thresh(int pf, unsigned int hook,
+				 struct sk_buff **pskb,
+				 struct net_device *indev,
+				 struct net_device *outdev,
+				 int (*okfn)(struct sk_buff *), int thresh,
+				 int cond)
+{
+	if (!cond)
+		return 1;
+#ifndef CONFIG_NETFILTER_DEBUG
+	if (list_empty(&nf_hooks[pf][hook]))
+		return 1;
+#endif
+	return nf_hook_slow(pf, hook, pskb, indev, outdev, okfn, thresh);
+}
+#+end_src
+通过注释我们可以看到当nf_hook_slow返回1时，函数的调用者会调用okfn函数，
+（见NF_HOOK_THRESH宏的实现)
+#+begin_src c
+/* Returns 1 if okfn() needs to be executed by the caller,
+ * -EPERM for NF_DROP, 0 otherwise. */
+int nf_hook_slow(int pf, unsigned int hook, struct sk_buff **pskb,
+		 struct net_device *indev,
+		 struct net_device *outdev,
+		 int (*okfn)(struct sk_buff *),
+		 int hook_thresh)
+{
+	struct list_head *elem;
+	unsigned int verdict;
+	int ret = 0;
+
+	/* We may already have this, but read-locks nest anyway */
+	rcu_read_lock();
+
+	elem = &nf_hooks[pf][hook];
+next_hook:
+	verdict = nf_iterate(&nf_hooks[pf][hook], pskb, hook, indev,
+			     outdev, &elem, okfn, hook_thresh);
+	if (verdict == NF_ACCEPT || verdict == NF_STOP) {
+		ret = 1;
+		goto unlock;
+	} else if (verdict == NF_DROP) {
+		kfree_skb(*pskb);
+		ret = -EPERM;
+	} else if ((verdict & NF_VERDICT_MASK)  == NF_QUEUE) {
+                ...
+	}
+unlock:
+	rcu_read_unlock();
+	return ret;
+}
+
+#+end_src
+
+nf_iterate 作用遍历调用指定链表上注册的钩子函数，但是不调用 优先级低于hook_thresh的钩子
+** 外部接口
+netfilter.h
+#+begin_src c
+#define NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, thresh)	       \
+({int __ret;								       \
+if ((__ret=nf_hook_thresh(pf, hook, &(skb), indev, outdev, okfn, thresh, 1)) == 1)\
+	__ret = (okfn)(skb);						       \
+__ret;})
+
+#define NF_HOOK(pf, hook, skb, indev, outdev, okfn) \
+	NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, INT_MIN)
+#+end_src

@@ -1,0 +1,175 @@
+分布式一致性Paxos算法学习笔记（二）：算法详解
+
+    阅读本文前最好能先阅读参考文献[2]。最近在写毕业论文，导致这边学习笔记也写得很生硬........ 大家轻拍。文章为本人对paxos算法(basic paxos)的理解，水平有限难免有理解不到位的地方，欢迎批评。      
+
+ 
+
+一、简介
+
+1.1Paxos算法处理的问题
+
+    Paxos 算法解决的问题是一个分布式系统如何就某个值(决议)达成一致。一个典型的场景是，在一个分布式数据库系统中，如果各节点的初始状态一致，每个节点都执行相同的操作序列，那么他们最后能得到一个一致的状态。为保证每个节点执行相同的命令序列，需要在每一条指令上执行"一致性算法"以保证每个节点看到的指令一致。节点通信存在两种模型：共享内存（Shared memory）和消息传递（Messages passing）。Paxos 算法就是一种基于消息传递模型的一致性算法[1]。
+
+ 
+
+1.2算法简介及一致性问题场景
+
+    为描述 Paxos 算法，Lamport 虚拟了一个叫做 Paxos 的希腊城邦，这个岛按照议会民主制的政治模式制订法律，但是没有人愿意将自己的全部时间和精力放在这种事情上。所以无论是议员，议长或者传递纸条的服务员都不能承诺别人需要时一定会出现，也无法承诺批准决议或者传递消息的时间。但是这里假设没有拜占庭将军问题（Byzantine failure，即虽然有可能一个消息被传递了两次，但是绝对不会出现错误的消息）；只要等待足够的时间，消息就会被传到。另外，Paxos 岛上的议员是不会反对其他议员提出的决议的[1]。
+
+    对应于分布式系统，议员对应于各个节点，制定的法律对应于系统的状态。各个节点需要进入一个一致的状态，例如在独立Cache的对称多处理器系统中，各个处理器读内存的某个字节时，必须读到同样的一个值，否则系统就违背了一致性的要求。一致性要求对应于法律条文只能有一个版本。议员和服务员的不确定性对应于节点和消息传递通道的不可靠性[1]。
+
+    场景一：C/S模式的冗余备份的系统，C={C1,C2,C3,........,Cn}代表n个客户端，S= {S1,S2,S3,........,Sm}代表m个服务器。在这样的冗余系统中要完成这样的任务：让任何一个Cx提出的请求(提交的数据)，能在这m 个服务器上都执行(保存)一遍，最终所有的服务器达到一个一致的状态（也就是说每个server相当于一个“replica”，而外部看来似乎只有一个 server提够服务，这样设计主要是为了容灾考虑）。这时问题就产生了，由于client与server、server与server之间是用网络连接的，则由网络协议带来的不可靠、不确定性将会影响这m个server到达一个一致状态。例如：C1、C2先后提出请求，C1要求更新value1，C2要求删除value1。由于网络的不确定，这两个请求到达server的顺序可能是 S1（requestC1，requestC2），S2（requestC2、requestC1）.....等等，使得操作序列在m个服务器可能各不相同，如果S中的每一个server执行了不同的合法操作序列，将会导致整个系统的不一致问题，所以一致性算法的任务就是保证S中每个处于正常工作的 server都将执行一个相同的操作序列，如（requestC1、requestC2）。C/S模式的冗余备份 系统常常有两种形式：1.每一个client和所有的server连接（如图1）。2.所有的client和一个server连接（相当于server中的leader），再由这个leader与其他冗余server连接。不管是那种形式都会受到网络不确定性的影响从而产生操作序列不一致问题。
+
+    场景二：系统中各节点是对等关系，互为client/server,当一节点发生改变时，其他所有节点也要发生相同的改变。比如在ATC（空中交通管制系统）中有五台供管制员使用的席位(即五台主机)，在实际应用中会遇到这样的情况：管制员G1在席位1对参数value1做相应的操作，而几乎同时管制员 G2在席位2上也对value1做操作。由于网络传输的不确定性可能会导致这五台主机最终的显示结果不尽相同，产生不一致性的问题。paxos算法就是用来解决这类问题。
+
+ 
+
+二、算法详解
+
+2.1一致性算法
+
+    一个一致性算法需要保证：一次选举中只批准一个决议(value)，只有被提出(proposed)的决议才能被批准，只有已经被批准的决议才能被学习 (即可以执行或保存这个决定的内容)。Paxos算法为了完成这样的选举过程将参与者分为：proposers，acceptors，和 learners。proposers 提出决议，acceptors 批准决议，learners“学习”决议。划分为三类角色后，一致性算法的要求可以更精确的表述为：
+
+    1.决议（value）只有在被 proposers 提出后才能批准（未经批准的决议称为“提案（proposal）”）；
+
+    2.在一次 Paxos 算法的执行实例中，只批准一个 Value；
+
+    3.learners 只能获得被批准（chosen）的 Value。
+
+    这样的表述看似简单，但实际的证明过程还是很复杂的，而在三条中最为重要的是第二条作者Lamport在Paxos made simple[2]中花大量的篇幅来加强第二条的约束，从而总结出一个paxos实例的两个阶段及三类角色各自的工作。如何保证在一个paxos中只选出一个value的推导过程建议阅读原文或Fastpaxos[3]的The Basic Algorithm章节尤其在注意Picking a Value in Phase 2a，在本学习笔记后续文章中有较为工程化的描述，可能比较好理解一些。
+
+    分布式领域的许多算法由于先决条件过于苛刻导致工程实现上的困难，相比较而言Paxos算法的先决条件要弱很多。as follow：
+
+（1）.Paxos算法应当执行在一个可靠的通讯环境中，即在异步通讯过程中不会出现被篡改的情况(non-Byzantine model)，但允许发送的数据出现丢失、延迟、重复的情况。则个角色可工作在任意速度、允许停止和重启的错误。可重启(restart)性质就要求各角色"随时"保存自己的当前状态，换句话说就是要把状态写入硬盘，所以在Paxos算法学习笔记（一）中提到的diskles paxos让我很疑惑，有时间在研究。
+
+（2）.任何一个算法的运行实体不会出现拜占庭将军问题[4]，可以简单的理解为结点群的决议序列没有受到病毒、黑客的影响。
+
+
+2.2算法的内容
+
+    一个Paxos算法执行实例只能批准一个决议(value)，以下描述的算法内容都是指在一个paxos实例中。
+
+        可以这样理解：现在有C1、C2要提出保存key1、key2两数据的请求，他们分别向server结点群发出请求，server结点群可以由一个 leader(也可以是结点群中每一个server)负责处理这两个请求然后发起两个paxos执行实例，也就是提出两个不同的决议(value)，待 acceptors进行表决。这两个paxos实例是相互独立的，它们分别独立的执行paxos过程(round)的两个阶段，最终两个实例得到通过后，在server结点群的每一台server上按一定顺序保存key1、key2(不一定是按请求到达的顺序)。
+
+    理解一个paxos实例只能批准一个决议是很重要的，因为这点非常容易和paxos算法阶段一的“picking a value”[3]混淆，在看论文的时候也很容易出现理解偏差。
+
+    当一个请求到来后，由proposer或leader发起新的paxos执行实例，这时proposer会选择一个“新”的实例id(instance id)用于和别的决议(value)进行区分，使得这个提案能独立的进行paxos round。前面提到的“新”实例id，之所以新字用引号是因为这个实例id可能已经被别的proposer使用。如果这个id已经被别的 proposer使用，那么一个paxos实例中就有两个value进行表决，这与一致性算法的第二条要求有冲突，为了保证一致性算法的性质，paxos 算法的第一阶段才有了一个叫“picking a value”的过程。对于同一个paxos实例来说执行多少次都只会“pick”相同的value，以证第二条要求。
+
+ 
+
+2.2.1通过一个决议
+
+    新的paxos执行实例发起后，接下来就是执行paxos算法，算法每执行一遍叫一个paxos过程(paoxs round)，一个value的批准可能经历多个paxos过程。下面是paxos算法的具体过程，或者说是一个paxos round的执行过程。
+
+    proposer 提出一个提案前，首先要和足以形成多数派的 acceptors 进行通信，获得他们进行的最近一次批准活动的编号（prepare 过程），之后根据回收的信息决定这次提案的 value，形成提案开始投票。当获得多数 acceptors 批准后，提案获得通过，由 proposer 将这个消息告知 learner。这个简略的过程经过进一步细化后就形成了 Paxos 算法：
+
+    通过一个决议分为两个阶段[1]：
+
+    Phase1.准备阶段：
+
+        (a)proposer 选择一个提案编号 n 并将 prepare 请求发送给 acceptors 中的一个多数派；
+
+        (b)acceptor 收到 prepare 消息后，如果提案的编号大于它已经回复的所有 prepare 消息，则 acceptor 将自己上次的批准回复给 proposer，         并承诺不再批准小于 n 的提案；
+
+    Phase2. 批准阶段：
+
+        (a)当一个 proposor 收到了多数 acceptors 对 prepare 的回复后，就进入批准阶段。它要向回复 prepare 请求的acceptors 发送 accept 请         求，包括编号 n 和根据 P2c 决定的 value（如果根据 P2c 没有决定 value，那么它可以自由决定 value）。
+
+        (b)在不违背自己向其他 proposer 的承诺的前提下，acceptor 收到 accept 请求后即批准这个请求。
+
+    这个过程在任何时候中断都可以保证正确性。例如如果一个 proposer 发现已经有其他 proposers 提出了编号更高的提案，则有必要中断这个过程。因此为了优化，在上述 prepare 过程中，如果一个 acceptor 发现存在一个更高编号的"草案"，则需要通知 proposer，提醒其中断这次提案。
+
+
+    两阶段的消息传递过程可由下图表示[5]：
+
+    Message flow: Basic Paxos
+    (one instance, one successful round)
+     Client   Proposer      Acceptor     Learner
+       |         |          |  |  |       |  |
+       X-------->|          |  |  |       |  |  Request
+       |         X--------->|->|->|       |  |  Prepare(N)
+       |         |<---------X--X--X       |  |  Promise(N,{Va,Vb,Vc})
+       |         X--------->|->|->|       |  |  Accept!(N,Vn)
+       |         |<---------X--X--X------>|->|  Accepted(N,Vn)
+       |<---------------------------------X--X  Response
+       |         |          |  |  |       |  |
+
+    以上引用是Paxos made simple[2]“Choosing a Value”的文字描述，过程看起来是很简单的，但实现时有很多细节需要注意，而更详细的描述将放在本学习笔记的下一篇《Paxos算法的工程描述》，届时将给出各个角色在这两阶段中的工作及涉及的变量。
+
+ 
+
+2.2.2学习一个决议
+
+    Paxos made simple中同样用很大的篇幅来描述如何"Learning a Chosen Value"，并强调Learners学习过程中可能出现决议的“gap”(详情参照原文)。实际上可以这样理解：现在有两个已经执行完上面P2b过程的 value1和value2，即这两个决议已经被批准(accepted)，接下来系统中有五个learner要学习这两个决议，由于learners之间还是基于网络的通讯，则value1和value2到达learners的顺序可能是不一样的，存在不一致的问题。怎么解决这个问题？怎么区分 value1和value2的先后？可以回想一下，这两个决议是分别由两个不同paxos实例选举得出，那么就可以使用实例id(instance id)来区分两个决议的先后。规定learner必须按照实例id从小到大依次学习各决议，从而保证决议序列在所有learner上一致的，每一个paxos实例只能批准一个决议，这样操作系列的一致就不言而喻。所以工程实现时如何设计这个单增的实例id(instance id)是一个关键点！假定value1的instance id是100，value2是101，那么learners必须学习完value1之后才能学习value2，即使value2先于value1被大部分accept通过，也不能被learners学习。
+
+    再看看learner学习过程中的“gap”是如何形成的，在2F+1个结点的系统中，paxos算法允许最多F个结点同时出现故障。假设系统中有五台参与执行paxos算法的主机S1，.....，S5，每台主机都同时扮演proposer、accepter和learner的角色，系统开始时所有主机都能正常运行，当决议134号刚被所有learner学习后，S4突然掉电，系统继续正常运行，一段时间后S4重新启动，这时系统中其他learner 已经学习到191号决议，如果不做任何处理，S4将再也不能学习任何正在进行的决议，因为S4必须先学习135~191号决议，这就是所谓的“gap”。可以回想一下本篇文章的开头描述的经典场景“在一个分布式数据库系统中，如果各节点的初始状态一致，每个节点都执行相同的操作序列，那么他们最后能得到一个一致的状态”。必须是在初始状态一致的情况下才有效，因此S4必须先先学习135~191号决议待状态和其他四台主机一致后，才能参与到paxos的表决过程中。学习135~191决议弥补“gap”的机制也被称为catch-up机制，在工程实现时有使用日志方式、BerkeleyBD、快照等等。
+
+ 
+
+三、算法总结
+
+    Paxos算法利用Majority机制的投票形式保证2F+1的容错能力，即2F+1个结点的系统最多允许F个结点同时出现故障。使得各角色之间的结构、联系比较松散，加之很弱的先决条件，让paxos算法在实际工程中易于实现。使用单增的实例id来标识决议的方式，使得整个算法的并行性更好(id号大的决议可以先于id号小的决议被批准，不会影响决议序列的顺序)。总得来说paxos算法是很巧妙的，Lamport严谨的证明也保证了算法的正确性。在Basic paxos算法基础上发展而来的fastpaxos只用两次消息传递就能通过一个value，比传统的一致性算法减少了一次消息传递。
+
+    这几年，paxos算法的广泛使用很好的证明了算法的价值。
+
+ 
+
+ 
+
+后续：“分布式一致性Paxos算法学习笔记（三）：算法的工程描述”
+
+    学习笔记三侧重实用，使用较为工程化的语言描述算法的过程、给出消息传递过程中所使用到的变量的定义及三类角色在两个阶段中的任务。
+
+ 
+
+References
+
+[1]中文维基百科：http://zh.wikipedia.org/zh-cn/Paxos算法
+
+[2]Leslie Lamport. Paxos made simple.2001,11,1
+
+[3]Leslie Lamport.Fastpaxos. DistributedComputing,19(2):79–103,2006.
+
+[4]Leslie Lamport. The Part-Time Parliament[J].ACM Transactions on Computer Systems,16,2(May 1998),133-169.
+
+[5]http://en.wikipedia.org/wiki/Paxos_algorithm
+
+ 
+
+以下文字出自小夏同学的论文：
+
+2.1.3 Proposer行为分析 
+
+(1.1) 向所有的Acceptors发送Prepare(N_A)请求；
+
+(1.2) 如果收到Reject(N_H)信息，那么重新发送Prepare(N_H+1)；
+
+(2.1) 如果收到Acceptors集合的任意一个Majority的Promise(N_A, V_A)回复，那么如果所有的V_A均为空，Proposer自由选取一个V_A’，回发Accept(N_A, V_A’)；否则回发Accept(N_A, V_i)；
+
+(2.2) 如果收到Nack(N_H)，回到(1.1)过程，发送Prepare(N_H+1)；
+
+(3.1) 如果收到任意一个Majority所有成员的Accepted信息（表明选举完成），向所有Proposers发送自身成为leader的消息；
+
+(3.2) 向Learner发送value值。其中：
+
+N_A为该次提案的编号；
+
+N_H为当前提案的最高编号；
+
+V_i为V_A中提案编号最高的value；
+2.1.4 Acceptor行为描述 
+
+(1.1)接收Prepare(N_A)，如果N_A>N_H，那么回复Promise(N_A, V_A)，并置N_H=N_A；否则回复Reject(N_H)
+
+(2.1)接收Accept(N_A, V_A)，如果N_A<N_H，那么回复Nack(N_H)信息（暗示了该Proposer提完案后至少有一个其余的Proposer广播了具有更高编号的提案）；否则设置this.V_A=V_A，并且回复Accepted信息。其中：
+
+Promise(N_A, V_A)：向Proposer保证不再接受编号不大于N_H的提案；
+
+Accepted向Proposer发送提案被通过信息；
+
+V_A为Acceptor之前审批过的提案（允许为空）；
+
+N_H为Acceptor之前接收提案的最高编号。
+2.1.5 Learner行为描述 
+
+相对来说，Learner的行为理解更简单一些：学习value，开始执行任务。

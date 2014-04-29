@@ -1,0 +1,3517 @@
+﻿#+OPTIONS: "\n:t"
+#+STARTUP: hidestars
+知识随记
+*一寸光阴，一寸命光*
+/思考才是进步的本质/
+
+* http://blog.zhenghui.org 冒号空间
+* Rabin-Karp 字符串搜索算法
+根据算法导论上描述，
+
+写的实例代码如下：
+其中关于模计算，自己还有疑惑，回头学以下。
+#+begin_src c
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+
+int mod(int p,int q)
+{
+    if(p>=0)
+        return p % q;
+    else 
+        return (q+p%q);
+}
+
+int rabin_karp(char *T, char *P, int d, int q)
+{
+    int n = strlen(T);
+    int m = strlen(P);
+    int h = (long)(pow(10, m-1)) % q;
+    int p = 0;
+    int t = 0;
+    int i, j;
+    int s, t0;
+    for(i = 0; i < m; i++) {
+        p = mod((d * p + P[i]), q);
+        printf("p: %d\n", p);
+        t = mod((d * t + T[i]), q);
+    }
+    t0 = t;
+    for(s = 0; s <= n - m; s++) {
+        printf("p: %d, t: %d, t0: %d\n", p, t, t0);
+        if(p == t) {
+            for(i = s, j = 0; j < m; i++, j++) {
+                if(P[j] != T[i]) break;
+            }
+            if(j == m) {
+                printf("match s = %d\n", s);
+            }
+        }
+        if(s < n - m) {
+            t = mod((d * (t - (T[s]) * h) + T[s + m]), q);
+        }
+    }
+    return 0;
+}
+
+int main(int argc, char *argv[])
+{
+ rabin_karp("123412341234", "34", 10, 31);
+ return 0;
+}
+#+end_src
+
+* linux PATH环境变量
+　PATH的值是一系列目录，当您运行一个程序时，Linux在这些目录下进行搜寻。用以下命令可以看到PATH的值。
+　　$ echo $PATH
+　　例如，在主机中，用户yogin的PATH值为：
+　　/opt/kde/bin:/usr/local/bin:/bin:/usr/bin:/usr/X11R6/bin:/home/yogin/bin
+　　其中“:”为分隔符。所以，上面的一串目录可以看成是如下的目录列表。
+　　/opt/kde/bin
+　　/usr/local/bin
+　　/bin:/usr/bin
+　　/usr/X11R6/bin
+　　/home/yogin/bin
+　　同样，也是主机中，用户root的PATH值为：
+　　/opt/kde/bin:/sbin:/bin:/usr/sbin:/usr/bin:/usr/X11R6/bin:/root/bin
+　　要修改所有用户的PATH值，您可以以root身份编辑/etc/profile文件，修改其中包含“PATH=”的一行。
+　　例如，您可以使用pico编辑器打开/etc/profile文件。
+　　$ pico -w /etc/profile
+　　pico是一个文本编辑器，而-w选项关闭了长行回绕功能。
+　　只有在用户重新注册后，PATH的新值才会生效。如果只是要修改某一个用户的PATH值，就应该编辑该用户主目录中的.bash-profile文件。
+　　如果您想将当前目录加入到PATH中，则将“.”加入PATH中，此时PATH的设定如下：
+　　PATH="$PATH:/usr/X11R6/bin:."
+　　export PATH
+　　注意：在修改了PATH值或任何环境变量后，都要用export将其输出，新的PATH值才能生效。
+* 翻墙
+在windows可以直接用freegate
+linux下我使用wine运行freegate总不行。
+
+在www.cjb.net注册一个ssh账号
+[ork@localhost free]$ sudo ssh -D 127.0.0.1:7070 3wdays@shell.cjb.net
+[ork@localhost free]$ sudo ssh -D 127.0.0.1:7070 3wdays@216.194.70.6
+然后在firefox设置代理socketv5 127.0.0.1 7070
+OK
+* linux下看chm
+  一些经典的技术书有许多是chm的。
+  用xchm 或者
+  emacs + emacs-w3m + archimg
+* linux qq 1.0老自动退出
+只要修改一下qq配置文件(/usr/bin/qq)就可以了。具体如下。
+1. 打开qq配置文件：在终端输入命令代码：sudo gedit /usr/bin/qq
+2. 在打开的qq配置文件中，在#!bin/sh下面一行，cd /usr/share/tencent/qq/前面一行的位置插入代码：
+export GDK_NATIVE_WINDOWS=true
+3. 最终修改后的QQ脚本配置文件如下，保存关闭即可。
+#!/bin/sh
+export GDK_NATIVE_WINDOWS=true
+cd /usr/share/tencent/qq/
+./qq
+ 4. 重启QQ，qq不再自动退出和关闭了。
+* 0BB40E64Eh security cookie（防止栈溢出的cookie检查）
+
+dword_10047564   dd 0BB40E64Eh
+由于调用msxfs.dll中WFSOpen函数总返回WFS_ERR_INTERNAL_ERROR
+文档中没有详细描述，
+于是下载了 IDA，尝试逆向分析这个文件（IDA真是很强的东西！可以用来加深对程序的理解）
+使用IDA时，反汇编发现每个函数开头都类似一段代码
+mov     eax, dword_10047564
+xor     eax, ebp
+mov     [ebp+var_18], eax
+
+0BB40E64Eh = 3141592654 圆周率的前几位数字。
+微软编译器对于栈溢出进行检测的参数
+32位系统中 #define DEFAULT_SECURITY_COOKIE 0xBB40E64E
+
+函数返回之前，再计算出这个magic number，
+调用sub_1001A39E
+
+mov     ecx, [ebp+var_18]
+xor     ecx, ebp
+call    sub_1001A39E
+mov     esp, ebp
+pop     ebp
+retn    24h
+WFSOpen endp
+
+
+sub_1001A39E proc near
+cmp     ecx, dword_10047564   <-----比较计算结果是否相等
+jnz     short loc_1001A3A8
+
+loc_1001A3A8:
+jmp     ___report_gsfailure
+sub_1001A39E endp
+
+* 水木一个人的签名
+中国人的梦似乎从来是民族梦，而这所谓“民族梦”，无非就是过去那个“君临万方”的天朝，跟小民没有多少相干。中国历史上的英雄，也就是建立了一个“四夷宾服”的天朝的圣主。草民当然也可做自己出人头地的梦，但这“出人头地”其实是“骑人头上”，圆梦的方式不是如爱迪生、福特辈那样靠自己的聪明才智去为个人也为社会创造财富，而是靠阴谋诡计加暴力搞内斗，把骑在自己头上的主子搞倒了，自己翻身骑上去。骑的人越多，你也就越成功。如果不但骑了全体国民，还能威加四海，打出“敢犯强汉，虽远必诛”的大汉天威来，则那人就是旷世圣主。不但他本人威风凛凛，而且全体国民也陪着风光体面，因为全民的梦境就是“骑人头上”，如果没有制度制造出来的“阶级敌人”可骑，起码要有制度制造出来的乡下贱民可骑。如果没有乡下贱民可骑，起码要有少数民族可骑。如果没有少数民族可骑，起码要有外国鬼子可骑。如果不能在现实中骑，起码要能在想象中骑。能满足人民这些要求的政府就是好政府，实行的制度就是天底下最优越的制度。
+
+一个过门一年的媳妇饿得半夜醒来，再也无法入睡，摸摸身旁已不见丈夫的踪影，
+怀疑丈夫和阿公阿婆在背过她偷吃，就蹑手蹑脚溜到阿婆的窗根下偷听墙根儿，
+听见阿公阿婆和丈夫正商量着要杀她煮食。阿公说：“你放心，度过饥馑爸再给你
+娶一房，要不咱爷儿们都得饿死，别说媳妇，连香火都断了！”新媳妇吓得软瘫，
+连夜逃回娘家告知父母。被母亲哄慰睡下，又从梦中惊醒听见父亲和母亲正在说话：
+“与其让人家杀了，不如咱自家杀了吃！”这女人吓得从床上跳下来就疯了。
+
+* fedora 13 配置java环境变量
+默认/usr/bin/java，我把它删除了。
+
+具体说来，就是配置jdk环境变量。本文就介绍在linux下配置jdk环境变量的几种常用方法。
+
+首先在linux下安装jdk，如果出现提示权限不够(且root下也提示权限不够)，可用#ls -l filename命令查看一下，如果显示类似如：
+
+-rw-rw-rw- 1 root root ….
+
+则表示任何用户都没有可执行权限（即使是root用户）。
+
+解决方法：
+
+#chmod a+x filename
+
+这样，安装好后，就可以接下来进行环境变量的配置了。这里给出三种可选方法：
+
+一、修改/etc/profile文件
+
+当本机仅仅作为开发使用时推荐使用这种方法，因为此种配置时所有用户的 shell都有权使用这些环境变量，可能会给系统带来安全性问题。
+
+用文本编辑器打开/etc/profile，在profile文件末尾加入：
+
+JAVA_HOME=/usr/share/jdk1.5.0_05
+PATH=$JAVA_HOME/bin:$PATH
+CLASSPATH=.:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
+export JAVA_HOME
+export PATH
+export CLASSPATH
+
+重新登录即可。
+
+二、修改.bashrc文件
+
+这种方法更为安全，它可以把使用这些环境变量的权限控制到用户级别，如果需要给某个用户权限使用这些环境变量，只需要修改其个人用户主目录下 的.bashrc文件就可以了。
+
+用文本编辑器打开用户目录下的.bashrc文件，在.bashrc文件末尾加入：
+
+set JAVA_HOME=/usr/share/jdk1.5.0_05
+export JAVA_HOME
+set PATH=$JAVA_HOME/bin:$PATH
+export PATH
+set CLASSPATH=.:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
+export CLASSPATH
+
+重新登录。
+
+三、直接在shell下设置变量
+
+不推荐使用这种方法，因为换个shell，该设置就无效了。这种方法仅仅是临时使用，以后要使用的时候又要重新设置，比较麻烦。
+
+只需在shell终端执行下列命令：
+
+export JAVA_HOME=/usr/share/jdk1.5.0_05
+export PATH=$JAVA_HOME/bin:$PATH
+export CLASSPATH=.:$JAVA_HOME/lib/dt.jar:$JAVA_HOME/lib/tools.jar
+
+注意：
+
+1.要将 /usr/share/jdk1.5.0_05jdk 改为*实际的jdk安装目录*
+2. linux下用冒号”:”来分隔路径
+3. $PATH / $CLASSPATH / $JAVA_HOME 是用来引用原来的环境变量的值在设置环境变量时特别要注意不能把原来的值给覆盖掉了。
+4. CLASSPATH中当前目录”.”不能丢掉。
+5. export是把这三个变量导出为全局变量。
+6. 大小写必须严格区分。
+
+PS:其实我发现即使不配环境变量，我的JDK也能正常使用，不知道是不是安装的时候自动给配了
+* linux parted 扩展分区
+在给客户部署Linux虚拟机时，我一般都会单独做出一个分区来存储客户的所有数据，并取名为data。/data分区的默认大小为35G，随着时间的发展，有的客户提出扩大/data分区的需求。下面是我在ESX4.0上的实施步骤：
+注：在生产环境中一定要先做好备份再做操作！
+
+1）关掉Linux虚拟机，运行vmkfstools命令扩展vmdk文件。原大小为50G，现在扩展为65G。
+
+vmkfstools -X 65G CentOS53.vmdk
+
+2）开启Linux虚拟机，可以通过以下命令可以查看新增的可用空间。
+
+[root@CentOS53 ~]# parted
+GNU Parted 1.8.1
+Using /dev/sda
+Welcome to GNU Parted! Type 'help' to view a list of commands.
+(parted) print free
+
+Model: VMware Virtual disk (scsi)
+Disk /dev/sda: 69.8GB
+Sector size (logical/physical): 512B/512B
+Partition Table: msdos
+
+Number  Start   End     Size    Type      File system  Flags
+1      32.3kB  107MB   107MB   primary   ext3         boot
+2      107MB   4401MB  4294MB  primary   ext3
+3      4401MB  6547MB  2147MB  primary   linux-swap
+4      6547MB  53.7GB  47.1GB  extended
+5      6547MB  8694MB  2147MB  logical   ext3
+6      8694MB  10.8GB  2147MB  logical   ext3
+7      10.8GB  11.9GB  1077MB  logical   ext3
+8      11.9GB  13.0GB  1077MB  logical   ext3
+9      13.0GB  53.7GB  40.7GB  logical   ext3
+        53.7GB  69.8GB  16.1GB            Free Space
+
+3）运行disk /dev/sda后输入P查看分区结果如下，并记录下来(/dev/sda9加载在/data分区上)。可见总共有8485个cylinder，但最后一个分区只是到6527就结束了。这说明后面还有硬盘空间。
+
+Disk /dev/sda: 69.7 GB, 69793218560 bytes
+255 heads, 63 sectors/track, 8485 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1          13      104391   83  Linux
+/dev/sda2              14         535     4192965   83  Linux
+/dev/sda3             536         796     2096482+  82  Linux swap / Solaris
+/dev/sda4             797        6527    46034257+   5  Extended
+/dev/sda5             797        1057     2096451   83  Linux
+/dev/sda6            1058        1318     2096451   83  Linux
+/dev/sda7            1319        1449     1052226   83  Linux
+/dev/sda8            1450        1580     1052226   83  Linux
+/dev/sda9            1581        6527    39736746   83  Linux
+
+4）输入d删除扩展分区/dev/sda4，这样所有的逻辑分区就从分区表中消失了（不要害怕，呵呵）。
+
+5）输入n创建新的扩展分区，并创建原来（/dev/sda9除外）所有的逻辑分区并保持原来的起始、结束cylinder地址不变。/dev/sda9的起始地址不变，结束地址改为8485。新的分区表如下。确认无误后输入w已保存生效。
+
+Command (m for help): p
+
+Disk /dev/sda: 69.7 GB, 69793218560 bytes
+255 heads, 63 sectors/track, 8485 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1          13      104391   83  Linux
+/dev/sda2              14         535     4192965   83  Linux
+/dev/sda3             536         796     2096482+  82  Linux swap / Solaris
+/dev/sda4             797        8485    61761892+   5  Extended
+/dev/sda5             797        1057     2096451   83  Linux
+/dev/sda6            1058        1318     2096451   83  Linux
+/dev/sda7            1319        1449     1052226   83  Linux
+/dev/sda8            1450        1580     1052226   83  Linux
+/dev/sda9            1581        8485    55464381   83  Linux
+
+6）查看改动后的分区大小。到目前为止，/data分区大小仍未改变。
+
+[root@CentOS53 ~]# df -h
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/sda8             996M  235M  710M  25% /
+/dev/sda9              37G  177M   35G   1% /data
+/dev/sda7             996M   34M  911M   4% /home
+/dev/sda6             2.0G   76M  1.8G   5% /var
+/dev/sda2             3.9G  1.4G  2.4G  38% /usr
+/dev/sda5             2.0G   36M  1.9G   2% /usr/local
+/dev/sda1              99M   17M   78M  18% /boot
+tmpfs                 506M     0  506M   0% /dev/shm
+
+7）运行resize2fs /dev/sda9已扩展/data分区。（在2.6.X内核里无需先umount）
+
+[root@CentOS53 ~]# resize2fs /dev/sda9
+resize2fs 1.39 (29-May-2006)
+Filesystem at /dev/sda9 is mounted on /apps; on-line resizing required
+Performing an on-line resize of /dev/sda9 to 13866095 (4k) blocks.
+The filesystem on /dev/sda9 is now 13866095 blocks long.
+
+8）再次查看分区大小。成功，哦耶！
+
+[root@CentOS53 ~]# df -h
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/sda8             996M  235M  710M  25% /
+/dev/sda9              52G  180M   49G   1% /data
+/dev/sda7             996M   34M  911M   4% /home
+/dev/sda6             2.0G   76M  1.8G   5% /var
+/dev/sda2             3.9G  1.4G  2.4G  38% /usr
+/dev/sda5             2.0G   36M  1.9G   2% /usr/local
+/dev/sda1              99M   17M   78M  18% /boot
+tmpfs                 506M     0  506M   0% /dev/shm
+
+* linux tomcat 信息输出的控制台
+  ./catalina.sh   run
+  不要用./startup.sh 
+  startup.sh 报错时总来不及看输出信息。
+* 查看目录占用的硬盘大小
+  du -s du -k
+  查看占用空间最大
+  du -S | sort -n
+
+* 主分区 扩展分区和逻辑分区 关系 ？                                :question:
+* ORACLE
+** 链接oracle connection refuse
+  我修改了主机的IP
+  结果发现jdbc连接oracle失败。
+  查找网上说需要修改/opt/oracle/product/xx/db/network/admin/listener.ora
+  和tnsnames.ora中的localhost为真正主机名或者实际的ip地址。
+  修改后问题依旧，
+  后修改了listener.ora加入了(SID_DES = (SID_NAME = orcl) ...
+  启动监听，结果发现可以链接了。
+  
+SID_LIST_LISTENER = (SID_LIST =     
+                      (SID_DESC =       
+                        (SID_NAME = PLSExtProc)      
+                          (ORACLE_HOME = /usr/u01/app/oracle/product/10.2.0.1)       
+                          (PROGRAM = extproc)     
+                      )     
+                      (SID_DESC =       
+                          (SID_NAME = orcl)       
+                            (ORACLE_HOME = /usr/u01/app/oracle/product/10.2.0.1)     
+                      )   ) 
+  后来出现一次，
+  由于ip已经修改，而java程序的配置文件中使用ip还是旧的IP所以一直链接不上。
+
+** sqlplus执行sql语句
+  用户名sys as sysdba
+  password: oracle
+ 
+Oracle执行外部文件：
+db为服务名？
+c:>sqlplus user/pwd@db
+sql>@new.sql
+
+** sqlplus查询乱码
+   设置环境变量：export NLS_LANG=AMERICAN_AMERICA.ZHS16GBK
+   他们数据就是这样的编码
+* gnome使用紧凑视图
+  使用默认的视图，图标太大，影响肉眼查找文件。
+  在系统-》首选项-》文件管理--》设置 紧凑视图
+
+* insmode 报错Unknown symbol __umoddi3
+
+If you've encountered an error message like this
+
+Unknown symbol __udivdi3
+Unknown symbol __umoddi3
+Unresolved symbol __udivdi3
+Unresolved symbol __umoddi3
+
+you most likely want to make a 64 bit division, which is not supported by default in linux kernel space.
+
+To solve this problem, you need to use the do_div macro available in asm/div64.h:
+
+#include <asm/div64.h>
+unsigned long long x, y, result;
+unsigned long mod;
+mod = do_div(x, y);
+result = x;
+
+If you want to calculate x / y with do_div(x, y), the result of the division is in x, the remainder is returned from the do_div function.
+
+Since do_div is just an asm (assembler) macro, it doesn't break real time determinism, so it's also suitable for use in RTAI classic, 
+RTAI fusion and ADEOS/ADEOS-IPIPE applications. 
+
+我把代码中的涉及的u64的除法和取余的操作（% /)都用do_div宏代替后，加载成功。
+
+* fedora 下安装latex及中文支持
+用latex来写编辑模板，以前都是在windows下解决的，今天在fedora下安装了一个。fedora的一些版本都会自带texlive软件，
+但只支持英文，如果你仅仅使用英文的话那就简单了，直接用下面命令即可。
+#sudo yum install texlive*
+
+但我们一般需要latex中文支持，那么按照中文的步骤如下所示。
+
+一、安装latex
+
+   1. 下载texlive,可以直接到ctan下载。
+   2. 下载过来的是一个lzma压缩文件，所以先解压缩文件，得到安装的ISO文件。
+   3. 挂载此ISO文件到一个目录,假设你把ISO文件名为texlive2008-20080822.iso,放在/root目录下,需要挂载到/mnt /cdrom目录下
+      #mount -t iso9660 -o loop /root/texlive2008-20080822.iso /mnt/cdrom
+   4. 运行 /mnt/cdrom 目录中的 install-tl.sh 脚本
+      #./install-tl.sh
+
+      进入 TeXLive 安装选单,然后按下面顺序操作：
+      输入 S，选择 full 安装，然后输入 R 返回主选单。
+       输入 L，选择安装的语言: 输入 -，所有的语言均不选中 
+      输入 d，选择Chinese, Japan, Kerean 输入 R，返回主菜单 输入 I，开始安装。
+   5. 安装结束后，修改系统的bash配置中的路径。
+      $ vi ~/.bash_profile
+
+      修改PATH为:
+      PATH=/usr/local/texlive/2008/bin/i386-linux:$PATH:$HOME/bin
+
+      注意这里的2008可能跟你的texlive的出版年份有关，请根据你的文件目录修改。
+   6. 请现重启一下你的fedora操作系统或者退出再登录，因为修改过的bash_profile需要重新加载设置才有效。
+
+二、安装中文支持
+
+   1. 下载中文库包,下载地址为：~hugang下载文件 YueWang-zhfonts-final_1.01.tar.bz2
+   2. 解压缩文件，并将解压缩出的texmf-var文件夹拷贝到/usr/local/texlive/目录下，备份/usr/local /texlive/下的texmf-local文件夹，
+      同时将该目录下刚才拷贝texmf-var文件夹重命名为texmf-local即可
+      #tar jxvf YueWang-zhfonts-final_1.01.tar.bz2
+      #cp -rf texmf-var /usr/local/texlive
+      #cd /usr/local/texlive
+      #mv texmf-local texmf-local.backup
+      #mv texmf-var texmf-local
+   3. 创建 ls-R数据库
+      #texhash
+
+三、latex测试
+
+就这么安装，简单吧^_^. 现在来测试一下. 使vi或editor创建一个test.tex文件,输入如下latex代码：
+\documentclass{article}
+\usepackage{CJKutf8}
+\begin{document}
+\begin{CJK}{UTF8}{hei}
+Hello , Latex !
+你好，Latex
+\end{CJK}
+\end{document}
+
+保存退出,然后
+$ latex test.tex
+$ dvipdfm test.dvi
+
+如果生成了test.pdf文件并且正常显示中文就成功了. 后记：这种方法操作起来相对网上的一些安装方法，相对简单。
+但因为选择了全模式的安装，所以需求的硬盘空间也就大了，需要1G~2G的空间^_^。 如果有什么问题，请留言交流。
+
+* gdb
+** 用GDB查看core dump
+  有的程序可以通过编译, 但在运行时会出现Segment fault(段错误). 这通常都是指针错误引起的.
+  但这不像编译错误一样会提示到文件->行, 而是没有任何信息, 使得我们的调试变得困难起来.
+
+2. gdb:
+有一种办法是, 我们用gdb的step, 一步一步寻找.
+这放在短小的代码中是可行的, 但要让你step一个上万行的代码, 我想你会从此厌恶程序员这个名字, 而把他叫做调试员.
+我们还有更好的办法, 这就是core file.
+
+3. ulimit:
+如果想让系统在信号中断造成的错误时产生core文件, 我们需要在shell中按如下设置:
+#设置core大小为无限
+ulimit -c unlimited
+#设置文件大小为无限
+ulimit unlimited
+
+这些需要有root权限, 在ubuntu下每次重新打开中断都需要重新输入上面的第一条命令, 来设置core大小为无限.
+
+4. 用gdb查看core文件:
+下面我们可以在发生运行时信号引起的错误时发生core dump了.
+发生core dump之后, 用gdb进行查看core文件的内容, 以定位文件中引发core dump的行.
+gdb [exec file] [core file]
+如:
+gdb ./test test.core
+在进入gdb后, 用bt命令查看backtrace以检查发生程序运行到哪里, 来定位core dump的文件->行.
+
+5. 用gdb实时观察某进程crash信息
+启动进程
+gdb -p PID
+c
+运行进程至crash
+gdb会显示crash信息
+bt
+
+** gdb调试带参数的程序
+  gdb --args ./testprg arg1 arg2 ....
+  或者
+  r arg1 arg2
+  OR
+  set arg arg1 arg2
+  run
+
+** gdb 察看内存
+可以使用examine命令(简写是x)来查看内存地址中的值。x命令的语法如下所示：
+
+x/<n/f/u> <addr>
+
+n、f、u是可选的参数。
+
+n 是一个正整数，表示显示内存的长度，也就是说从当前地址向后显示几个地址的内容。
+f 表示显示的格式，参见上面。如果地址所指的是字符串，那么格式可以是s，如果地十是指令地址，那么格式可以是i。
+u 表示从当前地址往后请求的字节数，如果不指定的话，GDB默认是4个bytes。u参数可以用下面的字符来代替，b表示单字节，h表示双字节，w表示四字 节，g表示八字节。当我们指定了字节长度后，GDB会从指内存定的内存地址开始，读写指定字节，并把其当作一个值取出来。
+
+<addr>表示一个内存地址。
+n/f/u三个参数可以一起使用。例如：
+
+命令：x/3uh 0x54320 表示，从内存地址0x54320读取内容，h表示以双字节为一个单位，3表示输出三个单位，u表示按十六进制显示。
+
+输出格式
+一般来说，GDB会根据变量的类型输出变量的值。但你也可以自定义GDB的输出的格式。例如，你想输出一个整数的十六进制，或是二进制来查看这个整型变量的中的位的情况。要做到这样，你可以使用GDB的数据显示格式：
+
+x 按十六进制格式显示变量。
+d 按十进制格式显示变量。
+u 按十六进制格式显示无符号整型。
+o 按八进制格式显示变量。
+t 按二进制格式显示变量。
+a 按十六进制格式显示变量。
+c 按字符格式显示变量。
+f 按浮点数格式显示变量。
+
+** gdb 调试已经运行的程序
+   gdb
+   使用attach 命令
+   (gdb) attach 进程id
+* 使用firefox 的 Christian Anti-Porn和Adblock Plus联合防止浏览不健康网站
+  ok
+* 使用iptables进行内容过滤
+ 安装iptables
+ iptables规则在/etc/iptables里面，把simple_firewall.rules重命名为iptables.rules，然后自己在里面添加规则。
+ rc.conf在daemon中加入iptables就可以了。
+ 例如我要封住含有股市的页面：
+#每个词都用baidu和google识别出来gbk编码和utf-8编码的字串，全封住。
+sudo iptables -A FORWARD -m string --algo bm --string "股市" -j DROP
+sudo iptables -A FORWARD -m string --algo bm --string "%E8%82%A1%E5%B8%82" -j DROP
+sudo iptables -A FORWARD -m string --algo bm --string "%B9%C9%CA%D0" -j DROP
+
+sudo iptables -A INPUT -m string --algo bm --string "股市" -j DROP
+sudo iptables -A INPUT -m string --algo bm --string "%E8%82%A1%E5%B8%82" -j DROP
+sudo iptables -A INPUT -m string --algo bm --string "%B9%C9%CA%D0" -j DROP
+
+sudo iptables -A OUTPUT -m string --algo bm --string "股市" -j DROP
+sudo iptables -A OUTPUT -m string --algo bm --string "%E8%82%A1%E5%B8%82" -j DROP
+sudo iptables -A OUTPUT -m string --algo bm --string "%B9%C9%CA%D0" -j DROP
+
+然后
+sudo /etc/rc.d/iptables save
+把新增规则保存下来。
+sudo /etc/rc.d/iptables restart
+
+* 省钱办法
+
+  尽量网购
+  我在超市发买了一个电饭煲458元，同样的在当当上仅售250，我真个250啊。妈的整整多花了200。
+  绝不在超市里买小家电。
+
+* DNS                                                              :protocol:
+  DNS Cache Poisoning DNS污染
+  DNS劫持
+
+  小区宽带经常上网很慢，用视频网站的客户端看视频就很快。
+  原因就是电信网通等的DNS太弱了！还总污染，放广告。很可耻
+
+  windows 上加速DNS解释办法
+  有一个不错的软件 TreeWalk，安装后作为服务启动
+  就可以不依赖运营商DNS服务器。
+  一般情况安装完，无需配置，就可以很好的使用了。
+
+ 但是TreeWalk文档实在太少。
+ 于是换成了Al DNS,就和简单，配置文件里有详细的说明。
+
+  在linux可以安装dnsmasq，作为DNS缓存服务器
+  但是dnsmasq只将解释结果放在内存中，而大部分DNS映射很稳定。
+  所以又找到pdnsd，作为DNS缓存服务器。
+  我下载源码，编译安装的。
+  修改配置文件：
+  sudo vi /usr/local/etc/pdnsd.conf
+ 修改为
+global {
+	perm_cache=2048; this is in kB, increase it if you want more disk cacheing 
+	cache_dir="/var/cache/pdnsd";
+        min_ttl=172800;  最短保留两天
+	max_ttl=604800;  最长保留一周
+	run_as="nobody";
+	paranoid=on;
+	server_port=53;
+	server_ip="127.0.0.1";
+}
+
+server {
+        label="openDNS_googleDNS";
+        ip="208.67.222.222,208.67.220.220,8.8.8.8";
+        timeout=30;
+        interval=30;
+        uptest=ping;
+        ping_timeout=50;
+        purge_cache=off;
+}
+
+其它默认，不修改
+然后：
+ sudo /usr/local/sbin/pdnsd -d
+ 启动服务
+* NFS                                                              :protocol:
+  NFS Illustrated
+* linux邮件客户端
+  我用Thunderbird
+  
+  Mew 的地址簿默认是 ~/Mail/Addrbook 这个文件，里面有两种信息：扩展规则和个人信息。 
+  我使用个人信息格式：
+    <shortname> <address1>[, <address2>, <address3>, ...] <nickname> <fullname>
+
+* python
+** 使用python线程池心得
+
+conn_ip函数定义
+def conn_ip:
+sleep(0.5）
+
+对比了两种情况的耗时情况
+一、
+for i in range(20):
+    创建10个线程
+    每个线程执行conn_ip函数
+    撤销这个10个线程--join
+    sleep(1)
+二、
+用线程池，来满足要求
+创建一个包含5个线程的线程池
+for i in range(20):
+    调用线程池，让线程执行conn_ip函数10次
+    sleep(1)
+
+结果：
+情况一耗时30秒
+情况二耗时20秒
+
+方法一之所以耗时长主要原因是由于主线程必须等待子线程退出。
+而方法二主线程在休眠时，子线程可能还在工作，有好的并发行
+
+** 安装cx_Oracle
+设置环境变量
+export ORACLE_HOME=/usr/lib/oracle/10.2.0.4/client
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ORACLE_HOME/lib
+同时写入~/.bashrc中
+
+在http://cx-oracle.sourceforge.net/，
+找到对应版本的“Source Code only”,下载
+        python setup.py build
+        python setup.py install
+
+python 
+import cx_Oracle
+报错：
+ error while loading shared libraries: /usr/local/oracle/product/10.2.0/lib/libnnz10.so: cannot restore segment prot after reloc: Permission denied
+或者：
+error while loading shared libraries: /usr/local/oracle/product/10.2.0/lib/libclntsh.so.10.1: cannot restore segment prot after reloc: Permission denied
+解决办法是用chcon命令把相应文件的属性改一下即可，如：
+chcon -t texrel_shlib_t   /usr/local/oracle/product/10.2.0/lib/libnnz10.so
+chcon -t texrel_shlib_t  /usr/local/oracle/product/10.2.0/lib/libclntsh.so.10.1
+
+
+如果出现：
+ImportError: libclntsh.so.10.1: cannot open shared object file: No such file or directory
+经过查找发现是oracle的路径没有设置
+
+输入:
+locate libclntsh.so.10.1
+获取对于路径
+/app/oracle/oracle/product/10.2.0/db_1/lib/libclntsh.so.10.1
+
+编辑/etc/ld.so.conf
+ 在最后一行输入获取的路径
+/oracle/product/10.2.0/db_1/lib/
+
+执行
+ldconfig
+
+
+后来使用新用户运行python
+结果发现又出现了ImportError: libclntsh.so.10.1
+修改其环境变量后，仍然出现这个问题。
+
+最后发现问题是
+新用户没有这个目录的访问权限。
+ /usr/local/oracle/product/10.2.0/lib/
+
+运行：
+usermod -a -G oinstall username
+把用户加入oracle组后，问题解决。
+
+** python cx_Oracle插入数据乱码
+  我们数据库的编码是ZHS16GBK
+  解决办法:
+  #1、设置环境变量
+  import os
+  os.environ['NLS_LANG'] = 'SIMPLIFIED CHINESE_CHINA.ZHS16GBK'
+  #2、sql语句编码为GBK
+  sql= unicode(sql,'utf8').encode('GBK')
+** python 静态分析工具
+  python这类脚本有一个要命的一点，可能也是优点，就是代码运行不到，
+  即便有很明显错误，解释器也不会告诉你。
+  只有代码分支跑到了，程序崩了，错误才告诉你。
+  为了检查低级错误，写完代码后，需要 pylint，先检查一下代码。
+  确保没有低级错误，再进行功能测试。
+
+** 安装PyYaml
+  安装之前需要安装libyaml
+  下载libyaml,configure -> make -> make install
+  然后下载PyYAML，
+  python setup.py build
+  python setup.py install
+** python 2~3.0中快速拼装字符串的方法
+  a = "123"
+  b = "456"
+  c = a+b
+  这种方式是最慢的。
+  下面方式最快
+  l = ['123', '456']
+  c = "".join(l)
+  当涉及大量字符串拼接时，如生成大量的XML文件，性能差距就看出来了。
+
+* IBM 红皮书有许多有用的资料                                           :tips:
+* 办公室政治
+** 保持中立
+** 拒绝人生攻击
+* emacs上IRC
+  M-x erc-select
+
+服务器：irc.freenode.net
+端口：6665，6666，6667，7000，7070，8000，8001，8002，8004
+频道：#lfs-cn
+其他中文频道：#debian-cn #fedora-cn #gentoo-cn #kde-cn #ubuntu-cn #ppmm
+字符编码：UTF-8
+
+* Ecryptfs使用
+Ecryptfs 可以让你放心的把一些重要的、机密的或者私人的文件资料放入一个文件夹，如果没有管理员的密码，不可以进入这个文件夹浏览，其他非保护的文件夹不受影响。
+
+Ecryptfs 软件包非常小巧，可以快速的使用更新源进行安装。其安全等级非常高，算法复杂，据说即使是硬盘给人偷取，也无法读取其中的资料。
+
+   Ubuntu 8.10 Intrepid Ibex 带来有趣的、新的安全特性，桌面用户和服务器用户都适用 Encrypted ~/Private Directory.
+
+   一、建立你的私人文件夹
+
+   1、安装ecryptfs-utils
+
+     sudo apt-get install ecryptfs-utils
+
+   2、建立私人文件夹（不要sudo）
+
+     ecryptfs-setup-private
+
+   3、输入你的登陆密码，然后输入一个挂载密码或者（不输）随机产生一个 （在安全位置记好这两个密码，你手动恢复时要用到。）
+
+   4、注销，然后再登陆，建立挂载点
+
+     挂载私人文件夹:
+sudo mount -t ecryptfs /home/username/.Private /home/username/Private
+
+* linux io状态 使用iostat
+  也可以用/proc/diskstats查看，由diskstats_show（）函数显示
+
+系统只有一块硬盘，硬盘有6个分区：hda1…hda6。可以参看代码genhd.c中的函数 diskstats_show()
+# cat /proc/diskstat
+3 0 hda 32618 4686 1280392 369680 52350 18007 8192864 19727372 0 303656 20097096
+3 1 hda1 601 12310 464 59632
+3 2 hda2 667 673 0 0
+3 3 hda3 35145 1265570 69915 8133232
+3 4 hda4 1 2 0 0
+3 5 hda5 169 676 0 0
+3 6 hda6 667 673 0 0
+22 0 hdc 0 0 0 0 0 0 0 0 0 0 0
+2 0 fd0 0 0 0 0 0 0 0 0 0 0 0
+9 0 md0 0 0 0 0 0 0 0 0 0 0 0
+
+
+第一行参数（major minor name rio rmerge rsect ruse wio wmerge wsect wuse running use aveq）的值是通过genhd.c中的diskstats_show()来获得，具体解释如下：
+值 变量 描述
+3 major 主设备号。3 代表 had
+0 minor 次设备号。7 代表 第7 分区
+hda name 设备名称
+32618 rio 自系统启动以来，完成的读 I/O 设备总次数。这里指真正向 I/O 设备发起并完成的读操作数目，也就是那些放到 I/O 队列中的读请求，并不是每个 read() 调用都引起一个 I/O 请求，很多进程发起的读操作(read())很可能会和其它的读操作进行 merge。
+4686 rmerge 自系统启动以来，进行了 merge 读操作的次数
+1280392 rsect 自系统启动以来，一共读的扇区总数 (512 bytes/sector)
+369680 ruseT 自系统启动以来，全部的从进入读队列到读操作完成的时间总和 (毫秒)。上面的例子显示从开机开始，读 hda 操作共享了约369680秒
+52350 Wio 自系统启动以来，完成的写 I/O 设备总次数
+18007 wmerge 自系统启动以来，进行了 merge 写操作的次数
+8192864 Wsect 自系统启动以来，一共写的扇区总数
+19727372 wuseT 自系统启动以来，全部的从进入写队列到写操作完成的时间累积 (毫秒)
+0 running 采样时，已进入 I/O 请求队列的正等待进行设备操作的请求总数。上面的例子显示 hda 上的请求队列长度为 0。
+303656 useT 自系统启动以来，等待I/O操作完成的等待时间（毫秒）。扣除重复等待时间的净等待时间 (毫秒)。一般比 (ruseT+wuseT) 要小。比如 10 个读请求同时等待了 1 毫秒，那么 ruseT值为10ms, 而 useT值为1ms。因此useT可以理解为I/O队列处于不为空状态的总时间。hda的I/O队列非空时间为 303656 秒，大约5分钟。
+20097096 queueT 自系统启动以来，在队列中总的等待时间累积 (毫秒) (约等于ruseT+wuseT)。为什么是“约等于”而不是等于呢？让我们看看queueT, ruseT, wuseT的计算方式，这些量一般是在I/O完成后进行更新的：
+queueT += in_flight * (now - disk->stamp);
+ruseT += jiffies - req->start_time; // 如果是读操作的话
+wuseT += jiffies - req->start_time; // 如果是写操作的话
+注意aveq计算中的 in_flight，这是当前还在队列中的I/O请求数目。这些I/O还没有完成，所以不能计算到ruseT或wuseT中。理论上，只有在I/O全部完成后，queueT才会等于ruseT+wuseT。
+
+第二行参数（3 3 hda3 35145 1265570 69915 8133232）的解释如下：
+3 major 主设备号。3 代表 had
+3 minor 次设备号。7 代表 第7 分区
+hda3 name 设备名称
+35145 rio 自系统启动以来，该扇区完成的读 I/O 设备总次数。
+1265570 read sectors 自系统启动以来，一共从该扇区读的总数
+69915 write 自系统启动以来，该扇区完成的写I/O 设备总次数。
+8133232 write sectors 自系统启动以来，一共从该扇区写的总数
+* mapReduce [TODO]
+* python cx_Oracle插入数据乱码
+  我们数据库的编码是ZHS16GBK
+  解决办法:
+  #1、设置环境变量
+  import os
+  os.environ['NLS_LANG'] = 'SIMPLIFIED CHINESE_CHINA.ZHS16GBK'
+  #2、sql语句编码为GBK
+  sql= unicode(sql,'utf8').encode('GBK')
+* fcntl文件锁，对于线程无效.?
+  python test found
+* 一个关于fork问题
+
+for(i = 0; i < 10; i++) {
+   fork();
+}
+一共产生多少个进程？
+简单的想法
+                  9
+                8   8
+             7        7
+          6    .        6
+       5     .    .       5
+     .
+    .
+
+共2^10-1个。
+
+* 函数参数约定
+
+在参数传递中，有两个很重要的问题必须得到明确说明：
+
+   1. 按照什么顺序把参数压入堆栈
+   2. 函数调用后，由谁来把堆栈恢复原状
+
+在高级语言中，通过函数调用约定来说明这两个问题。常见的调用约定有：
+
+    * stdcall
+    * cdecl
+    * fastcall
+    * thiscall
+    * naked call
+
+** stdcall
+
+stdcall很多时候被称为pascal调用约定，因为pascal是早期很常见的一种教学用计算机程序设计语言，其语法严谨，使用的函数调用约定就是stdcall。
+在Microsoft C++系列的C/C++编译器中，常常用PASCAL宏来声明这个调用约定，类似的宏还有WINAPI和CALLBACK。
+
+声明stdcall调用约定 (以前文的那个函数为例）：
+
+int __stdcall function(int a, int b);
+
+stdcall的调用约定意味着：
+
+   1. 参数从右向左压入堆栈
+   2. 函数自身修改堆栈
+   3. 函数名自动加前导的下划线，后面跟一个@符号，其后紧跟着参数的总字节数，形如_function@number
+
+以上述这个函数为例，参数b首先被压栈，然后是参数a，函数调用function(1,2)调用处翻译成汇编语言将变成：
+#+BEGIN_SRC
+push 2                ;第二个参数入栈
+push 1                ;第一个参数入栈
+call function         ;调用参数，注意此时自动把cs:eip入栈
+#+END_SRC
+
+而对于函数自身，则可以翻译为：
+#+BEGIN_SRC
+push ebp              ;保存ebp寄存器，该寄存器将用来保存堆栈的栈顶指针，可以在函数退出时恢复
+mov ebp,esp           ;保存堆栈指针
+mov eax,[ebp + 8H]    ;堆栈中ebp指向位置之前依次保存有ebp,cs:eip,a,b,ebp +8指向a
+add eax,[ebp + 0CH]   ;堆栈中ebp + 12处保存了b
+mov esp,ebp           ;恢复esp
+pop ebp
+ret 8
+#+END_SRC
+而在编译时，这个函数的名字被翻译成_function@8
+
+注意不同编译器会插入自己的汇编代码以提供编译的通用性，但是大体代码如此。其中在函数开始处保留esp到ebp中，在函数结束恢复是编译器常用的方法。
+
+从函数调用看，2和1依次被push进堆栈，而在函数中又通过相对于ebp(即刚进函数时的堆栈指针）的偏移量存取参数。函数结束后，ret 8表示清理8个字节的堆栈，函数自己恢复了堆栈。
+
+** cdecl
+
+cdecl调用约定又称为C调用约定，是C语言缺省的调用约定。cdecl意味着：
+
+   1. 参数从右向左压入堆栈
+   2. 调用者负责清理堆栈
+   3. 按C编译方式，_cdecl调用约定仅在输出函数名前面加下划线，形如_function
+
+它的定义语法是：
+
+int function (int a ,int b);        //不加修饰就是C调用约定
+int __cdecl function(int a,int b);  //明确指出C调用约定
+
+cdecl调用约定的参数压栈顺序是和stdcall是一样的，所不同的是由于每一个调用它的函数都包含清空堆栈的代码，所以产生的可执行文件大小会比调用_stdcall函数的大。也正由于这种变化，C调用约定允许函数的参数的个数是不固定的，这是C语言的一大特色。对于前面的 function函数，使用cdecl后的汇编码变成：
+#+BEGIN_SRC
+;调用处
+push 2
+push 1
+call function
+add esp, 8             ;注意：这里主调函数负责恢复堆栈
+
+;被调用函数_function处
+push ebp               ;保存ebp寄存器，该寄存器将用来保存堆栈的栈顶指针，可以在函数退出时恢复
+mov ebp,esp            ;保存堆栈指针
+mov eax, [ebp + 8H]    ;堆栈中ebp指向位置之前依次保存有ebp,cs:eip,a,b,ebp +8指向a
+add eax, [ebp + 0CH]   ;堆栈中ebp + 12处保存了b
+mov esp,ebp            ;恢复esp
+pop ebp
+ret                    ;注意，这里没有修改堆栈
+#+END_SRC
+由于参数按照从右向左顺序压栈，因此最开始的参数在最接近栈顶的位置，因此当采用不定个数参数时，第一个参数在栈中的位置肯定能知道，只要不定的参数个数能够根据第一个后者后续的明确的参数确定下来，就可以使用不定参数，例如对于CRT中的sprintf函数，定义为：
+
+int sprintf(char* buffer,const char* format,...);
+
+由于所有的不定参数都可以通过format确定，因此使用不定个数的参数是没有问题的。
+
+** fastcall
+
+fastcall 调用约定和stdcall类似，不过调用的速度更快，因为它通过寄存器传递参数。它意味着：
+
+   1. 函数的第一个和第二个双字（DWORD）或尺寸更小的参数通过ECX和EDX传递，其他参数通过从右向左的顺序压栈传送
+   2. 被调用函数清理堆栈
+   3. 按 C编译方式，fastcall调用约定在输出函数名前面加“@”符号，后面加“@”符号和参数的字节数，形如@function@number
+
+其声明语法为：
+
+int fastcall function(int a,int b);
+
+** thiscall
+
+thiscall是唯一一个不能明确指明的函数修饰，因为thiscall不是关键字。它是C++ 类成员函数缺省的调用约定。由于成员函数调用还有一个this指针，因此必须特殊处理，thiscall意味着：
+
+   1. 参数从右向左入栈
+   2. 如果参数个数确定，this指针通过ECX传递给被调用者，函数自己清理堆栈
+   3. 如果参数个数不确定，this指针在所有参数压栈后被压入堆栈，调用者清理堆栈
+
+为了说明这个调用约定，定义如下类和使用代码：
+#+BEGIN_SRC 
+class A
+{
+public:
+    int function1(int a, int b);
+    int function2(int a, ...);
+};
+
+int A::function1(int a, int b)
+{
+    return a + b;
+}
+
+int A::function2(int a, ...)
+{
+    va_list ap;
+    va_start(ap,a);
+    int i;
+    int result = 0;
+    for (i = 0 ; i < a ; i ++)
+    {
+        result += va_arg(ap,int);
+    }
+    return result;
+}
+
+void caller()
+{
+    A a;
+    a.function1(1, 2);
+    a.function2(3, 1, 2, 3);
+}
+#+END_SRC
+
+caller函数被翻译成汇编后就变成：
+#+BEGIN_SRC
+;函数function1调用
+push 2
+push 1
+lea ecx, [ebp-8]
+call function1         ;注意，这里this没有被入栈
+;函数function2调用
+push 3
+push 2
+push 1
+push 3
+lea eax, [ebp-8]       ;这里引入this指针
+push eax
+call function2
+add esp, 14h
+#+END_SRC
+可见，对于参数个数固定情况下，它类似于stdcall，不定时则类似cdecl
+** naked call
+
+这是一个很少见的调用约定，一般程序设计者建议不要使用。编译器不会给这种函数增加初始化和清理代码，更特殊的是，你不能用return返回返回值，只能用插入汇编返回结果。这种调用方式定义的函数不可以充当类的成员函数，必须独立出来编写。
+
+这一般用于实模式驱动程序设计，假设定义一个求和的加法程序，可以定义为：
+
+//naked 调用约定。用户自己清理堆栈。不能进行原型声明，否则错误。?add@@YAHHH@Z
+__declspec(naked) int add(int a,int b)
+{
+    __asm push ebp //必须加上两句修改栈帧，否则引用了错误的数据
+    __asm mov ebp, esp
+    __asm mov eax, a
+    __asm add eax, b
+    __asm pop ebp
+    __asm ret
+}
+
+注意，这个函数没有显式的return返回值，通过eax寄存器实现结果返回，而且连退出函数的ret指令都必须显式插入。上面代码被翻译成汇编以后变成：
+
+push ebp
+mov ebp,esp
+mov eax, dword ptr [ebp+8]
+add eax, dword ptr [ebp+0Ch]
+pop ebp
+ret
+
+注意这个修饰是和__stdcall及cdecl结合使用的，前面是它和cdecl结合使用的代码，对于和stdcall结合的代码，则变成：
+
+__declspec(naked) int __stdcall function(int a,int b) //?add@@YGHHH@Z
+{
+    __asm mov eax, a
+    __asm add eax, b
+    __asm ret 8 //注意后面的8
+}
+
+至于这种函数被调用，则和普通的cdecl及stdcall调用函数一致。
+函数调用约定导致的常见问题
+
+如果定义的约定和使用的约定不一致，则将导致堆栈被破坏，导致严重问题，下面是两种常见的问题：
+
+   1. 函数原型声明和函数体定义不一致
+   2. DLL 导入函数时声明了不同的函数约定
+
+以后者为例，假设我们在DLL中声明了一种函数为：
+
+__declspec(dllexport) int func(int a, int b); //注意，这里没有stdcall，使用的是cdecl
+
+使用时代码为：
+
+typedef int (*WINAPI DLLFUNC)func(int a, int b);
+hLib = LoadLibrary(...);
+DLLFUNC func = (DLLFUNC)GetProcAddress(...); //这里修改了调用约定，变成了WINAPI
+result = func(1,2); //导致错误
+
+由于调用者没有理解WINAPI的含义错误的增加了这个修饰，上述代码必然导致堆栈被破坏，编译时插入的checkesp函数将告诉你，堆栈被破坏了。因此必须查明宏WINAPI到底是什么意思才行(stdcall)。
+
+* 多问一句
+  为什么要这样呢？
+  如果不这样呢？
+  有其他的解决方法吗？
+
+* gcc while(1) VS for(;;)
+  通过gcc -S test.c 
+  产生的汇编来看两者是一样的作用。
+.LC0:
+	.string	"hello"
+	.text
+       ...
+.L2:
+	movl	$.LC0, (%esp)
+	call	puts
+	jmp	.L2
+
+  从语义上来讲，
+  for：中间语句都是空的,自然编译成无条件的跳转。
+  while ： 每次循环都需要判断。
+
+  具体编辑器具体分析
+
+* linux下杀毒软件
+  antivir
+* python 静态分析工具
+  python这类脚本有一个要命的一点，可能也是优点，就是代码运行不到，
+  即便有很明显错误，解释器也不会告诉你。
+  只有代码分支跑到了，程序崩了，错误才告诉你。
+  为了检查低级错误，写完代码后，需要 pylint，先检查一下代码。
+  确保没有低级错误，再进行功能测试。
+
+* XP 软路由
+XP的软路由是在注册表中的HKEY_LOCAL_MACHINE\SYSTEM\CurrentControlSet\Services\Tcpip \Parameters下的参数IPEnableRouter控制，
+取值0即不开启软路由，取1则开启。只要将IPEnableRouter的值改为1，就可以让XP变成网内一台“路由器”。
+
+然后启动Routing and Remote Access 服务
+
+* 本机代码版本管理
+  公司级别的SVN、CVS等由于往往提交受限，而且个人版本控制使用SVN或者CVS有些大而不当。
+  所以我采用RCS管理提交的服务器之前修改的代码。
+  在代码目录中，执行如下命令：
+#+begin_example
+  mkdir RCS
+  ci xxx.c
+  co xxx.c
+#+end_example
+  然后代码就提交到RCS中。
+
+* TCP keepalive选项
+
+  steven书中讲过，但是没有亲身测试过。
+  现在有一台机器上面运行了代理程序监控TCP 8800端口。
+  运行命令：netstat -tn
+tcp        0      0 172.18.0.4:8800         192.168.8.183:26540     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:44543     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:51459     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:33408     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:31136     ESTABLISHED 
+tcp       52      0 172.18.0.4:8800         192.168.8.183:20416     CLOSE_WAIT  
+tcp        0      0 172.18.0.4:8800         192.168.8.183:24668     ESTABLISHED 
+tcp       52      0 172.18.0.4:8800         192.168.8.183:54621     CLOSE_WAIT  
+tcp        0      0 172.18.0.4:8800         192.168.8.183:22808     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:35825     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:50449     ESTABLISHED 
+tcp        0      0 172.18.0.4:8800         192.168.8.183:11755     ESTABLISHED
+....
+共374条。
+由于实际应用场景不可能同时出现这么连接，所以可以断定有连接属于half-open.
+而运行： netstat -tno
+tcp        0      0 172.18.0.4:8800         192.168.8.183:12969     ESTABLISHED off (0.00/0/0)
+tcp        0      0 172.18.0.4:8800         192.168.8.183:30917     ESTABLISHED off (0.00/0/0)
+tcp        0      0 172.18.0.4:8800         192.168.8.183:8366      ESTABLISHED off (0.00/0/0)
+tcp       53      0 172.18.0.4:8800         192.168.8.183:4650      CLOSE_WAIT  off (0.00/0/0)
+tcp        0      0 172.18.0.4:8800         192.168.8.183:64988     ESTABLISHED off (0.00/0/0)
+tcp        0      0 172.18.0.4:8800         192.168.8.183:19732     ESTABLISHED off (0.00/0/0)
+tcp        0      0 172.18.0.4:8800         192.168.8.183:33209     ESTABLISHED off (0.00/0/0)
+......
+没有keeplive标识。
+
+初步推测是前几天软路由有问题，导致192.168.8.183的FIN没有发送到172.18.0.4。
+
+* 广域网模拟器WANem
+  一个简化般的linux
+
+* java 规则引擎 Drools
+* java ANTLR 实现DSL
+  见《《Language Implementation Patterns》
+* 闭包
+  在实现深约束时，需要创建一个能显式表示引用环境的东西，并将它与相关的子程序捆绑在一起，这样捆绑起来的整体被称为闭包
+   这个东西和对象很象了，就是简化版的对象。可以闭包模仿lisp之类语言的特性。
+   《High Order Perl》对于闭包的解释很到位。
+#+BEGIN_SRC C
+sub make_counter {
+  my $n = shift;
+  return sub { print "n is ", $n++ };
+}
+my $x = make_counter(7);
+my $y = make_counter(20);
+#+END_SRC
+$x->() 结果为7
+$x->() 结果为8
+$y->() 结果为20
+$y->() 结果为21
+
+python 对闭包支持没有perl到位
+3.0之前需要使用list之类mutable的东西，到达类似的目的。
+#+BEGIN_SRC C
+def counter(start_at = 0):  
+    def incr():  
+        incr.count += 1  
+        return incr.count
+    incr.count = start_at
+    return incr  
+print counter(1)()
+#+END_SRC
+3.0以后，也需要使用
+#+BEGIN_SRC C
+def counter(start_at = 0): 
+    count = start_at
+    def incr():  
+        nonlocal count
+        count += 1  
+        return count
+    return incr  
+#+END_SRC
+* sql like中的单引号
+  使用like语句查询带单引号的字符串总不管用。
+  mesg like '%'word'%'
+  应该：
+  mesg like '%''word''%'
+* python 2~3.0中快速拼装字符串的方法
+  a = "123"
+  b = "456"
+  c = a+b
+  这种方式是最慢的。
+  下面方式最快
+  l = ['123', '456']
+  c = "".join(l)
+  当涉及大量字符串拼接时，如生成大量的XML文件，性能差距就看出来了。
+* graphviz
+  我一直为生成合适的树状图，头疼，
+  使用ascci码，对齐太累，还老弄不清，没有得出合适的节点间距公式。
+  今天忽然想到<land of lisp>书使用graphviz生成游戏地图的事情。
+  哈哈，生成树状图，也就轻松了，有了它，可以轻松查看，各种树操作运行的结果，对于算法直观可见
+* 疫苗误区
+It is believed that when the body is injected with a small amount of a germ or virus, this stimulates the body’s natural immune system to make antibodies against the germ/virus. The desired outcome is that any time in the future the body comes in contact with that particular germ/virus it will be recognized and destroyed by the antibodies formed from the vaccination given.
+
+“It is dangerously misleading, and indeed, the exact opposite of truth, to claim that a vaccine makes us ‘immune’ or protects against disease. In fact, it only drives the disease deeper into the interior and causes us to harbor it chronically, with the result that our responses to it become progressively weaker and show less tendency to heal or restore themselves spontaneously. Richard Moshowitz, MD”
+* java手机全屏
+  java手机的程序底部总有一个虚拟键盘，
+  对于触摸屏手机，这个键盘没有用处，占用宝贵的屏幕空间。
+  下载的程序是jar格式的，可以用rar解压。
+  进入META-INF子目录，记事本编辑MANIFEST.MF
+  补充一行
+  MIDlet-Touch-Support: True
+  再重装一次就可以了。
+
+* tcpdump用法
+  tcpdump相比较wireshark是很轻量的东东，而且机器一般默认安装又不需要图形界面。
+  需要注意tcpdump默认获取一个包的前96字节，如果你想看更多，需要使用-s 选项。建议使用-s 0， 会获取所有的数据。
+  常用的选项：
+-i any : Listen on all interfaces just to see if you're seeing any traffic.
+-n : Don't resolve hostnames.
+-nn : Don't resolve hostnames or port names.
+-X : Show the packet's contents in both hex and ASCII.
+-XX : Same as -X, but also shows the ethernet header.
+-v, -vv, -vvv : Increase the amount of packet information you get back.
+-c : Only get x number of packets and then stop.
+-s : Define the size of the capture (use -s0 unless you are intentionally capturing less.)
+-S : Print absolute sequence numbers.
+-e : Get the ethernet header as well.
+-q : Show less protocol information.
+-E : Decrypt IPSEC traffic by providing an encryption key.
+-s : Set the snaplength, i.e. the amount of data that is being captured in bytes
+-c : Only capture x number of packets, e.g. 'tcpdump -c 3'
+基本用法：
+1. Basic communication
+#+begin_src c
+   #tcpdump -nS
+#+end_src
+
+2. Basic communication (very verbose)
+   不再名字解释，
+#+begin_example
+   #tcpdump -nnvvS
+#+end_example
+3. A deeper look at the traffic
+#+begin_example
+   #tcpdump -nnvvXS
+#+end_example
+4. Heavy packet viewing
+//最后's'增加抓取长度，抓取整个包
+#+begin_example
+#tcpdump -nnvvXSs 1514
+#+end_example
+
+下面我们使用上面的选项，仅抓取两个(-c2)ICMP包。
+#+begin_example
+hermes root # tcpdump -nnvXSs 0 -c2 icmp
+tcpdump: listening on eth0, link-type EN10MB (Ethernet), 23:11:10.370321 IP 
+(tos 0x20, ttl  48, id 34859, offset 0, flags [none], length: 84) 
+69.254.213.43 > 72.21.34.42: icmp 64: echo request seq 0
+
+        0x0000:  4520 0054 882b 0000 3001 7cf5 45fe d52b  E..T.+..0.|.E..+
+        0x0010:  4815 222a 0800 3530 272a 0000 25ff d744  H."*..50'*..%..D
+        0x0020:  ae5e 0500 0809 0a0b 0c0d 0e0f 1011 1213  .^..............
+        0x0030:  1415 1617 1819 1a1b 1c1d 1e1f 2021 2223  .............!"#
+        0x0040:  2425 2627 2829 2a2b 2c2d 2e2f 3031 3233  $%&'()*+,-./0123
+        0x0050:  3435 3637                                4567
+23:11:10.370344 IP (tos 0x20, ttl  64, id 35612, offset 0, flags [none], 
+length: 84) 72.21.34.42 > 69.254.213.43: icmp 64: echo reply seq 0
+        0x0000:  4520 0054 8b1c 0000 4001 6a04 4815 222a  E..T....@.j.H."*
+        0x0010:  45fe d52b 0000 3d30 272a 0000 25ff d744  E..+..=0'*..%..D
+        0x0020:  ae5e 0500 0809 0a0b 0c0d 0e0f 1011 1213  .^..............
+        0x0030:  1415 1617 1819 1a1b 1c1d 1e1f 2021 2223  .............!"#
+        0x0040:  2425 2627 2829 2a2b 2c2d 2e2f 3031 3233  $%&'()*+,-./0123
+        0x0050:  3435 3637                                4567
+2 packets captured
+2 packets received by filter
+0 packets dropped by kernel
+hermes root # 
+#+end_example
+
+Common Syntax
+表达式允许你trim out不同的数据通讯，准确找到你需要的数据。
+掌握表达式并且学会创造性组合。
+有三种类型的表达式：type、dir、proto
+type的选项：host，net, port
+dir的选项： src, dst, src or dst, src and dst
+
+host //查看这个IP相关的通讯
+#+begin_example
+#tcpdump host 1.2.3.4
+#+end_example
+
+src, dst //查看指定来源或者目的通讯（排除了另一个方向的通讯）
+#+begin_example
+#tcpdump src 2.3.4.5
+#tcpdump dst 3.4.5.6
+#+end_example
+
+net //获取这个网络，使用CIDR表示法
+#+begin_example
+#tcpdump net 1.2.3.0/24
+#+end_example
+
+proto // 用于tcp, udp, icmp
+#+begin_example
+# tcpdump icmp
+#+end_example
+
+src port, dst port //使用源端口或者目的端口过滤
+#+begin_example
+# tcpdump src port 1025 
+# tcpdump dst port 389
+#+end_example
+
+src/dst, port, protocol //组合三种
+#+begin_example
+#tcpdump src port 1025 and tcp 
+#tcpdump udp and src port 53
+#+end_example
+
+你也可以过滤端口范围
+Port Ranges //see traffic to any port in a range
+#+begin_example
+tcpdump portrange 21-23
+#+end_example
+
+Packet Size Filter //只能看小于某个值，或者大于某个值的包（单位bytes)
+#+begin_example
+tcpdump less 32
+tcpdump greater 128
+tcpdump > 32
+tcpdump <= 128
+#+end_example
+
+写到文件中：
+tcpdump使用-w选项：允许你把抓取的数据写到一个文件中，
+然后使用-r选项，读取文件。
+
+捕获所有80端的通讯数据到一个文件
+#+begin_example
+#tcpdump -s 1514 port 80 -w capture_file
+#+end_example
+
+读取通讯数据到tcpdump中
+#+begin_example
+#tcpdump -r capture_file
+#+end_example
+
+逻辑表达式
+1. 与: and &&
+2. 或: or ||
+3. 非: not !
+
+例子
+#+begin_example
+//源 10.5.2.3 目的端口 3389
+tcpdump -nnvvS and src 10.5.2.3 and dst port 3389
+// 从192.168 网络发往 10或者172.16网络
+tcpdump -nvX src net 192.168.0.0/16 and dst net 10.0.0.0/8 or 172.16.0.0/16
+// 从 172.16网络发往 192.168.0.2的非ICMP
+tcpdump -nvvXSs 1514 dst 192.168.0.2 and src net 172.16.0.0/16 and not icmp
+
+tcpdump -vv src mars and not dst port 22
+#+end_example
+
+Grouping
+下面是不对的。
+# Traffic that's from 10.0.2.4 AND destined for ports 3389 or 22 (incorrect)
+tcpdump src 10.0.2.4 and (dst port 3389 or 22)
+需要使用\转义小括号，或者使用单引号，如下
+tcpdump 'src 10.0.2.4 and (dst port 3389 or 22)'
+
+高级
+//显示所有的URGENT包
+#+begin_example
+#tcpdump 'tcp[13] & 32!=0'
+#+end_example
+//显示所有的ACK报
+#+begin_example
+#tcpdump 'tcp[13] & 16!=0'
+#+end_example
+//显示所有PUSH的包
+#+begin_example
+# tcpdump 'tcp[13] & 8!=0'
+#+end_example
+Show me all RESET (RST) packets...
+#+begin_example
+# tcpdump 'tcp[13] & 4!=0'
+#+end_example
+Show me all SYNCHRONIZE (SYN) packets...
+#+begin_example
+# tcpdump 'tcp[13] & 2!=0'
+#+end_example
+Show me all FINISH (FIN) packets...
+#+begin_example
+# tcpdump 'tcp[13] & 1!=0'
+#+end_example
+Show me all SYNCHRONIZE/ACKNOWLEDGE (SYNACK) packets...
+#+begin_example
+# tcpdump 'tcp[13] & =18'
+#+end_example
+tcp[ 13 ]: TCP头中13位偏移
+
+* wireshark 
+  用wireshark帮助学习TCP/IP
+* tinyperl
+  可以学习tinyperl的裁减通用版的perl
+  可以把perl精简为3M左右
+
+* 安装cx_Oracle
+设置环境变量
+export ORACLE_HOME=/usr/lib/oracle/10.2.0.4/client
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$ORACLE_HOME/lib
+同时写入~/.bashrc中
+
+在http://cx-oracle.sourceforge.net/，
+找到对应版本的“Source Code only”,下载
+        python setup.py build
+        python setup.py install
+
+python 
+import cx_Oracle
+报错：
+ error while loading shared libraries: /usr/local/oracle/product/10.2.0/lib/libnnz10.so: cannot restore segment prot after reloc: Permission denied
+或者：
+error while loading shared libraries: /usr/local/oracle/product/10.2.0/lib/libclntsh.so.10.1: cannot restore segment prot after reloc: Permission denied
+解决办法是用chcon命令把相应文件的属性改一下即可，如：
+chcon -t texrel_shlib_t   /usr/local/oracle/product/10.2.0/lib/libnnz10.so
+chcon -t texrel_shlib_t  /usr/local/oracle/product/10.2.0/lib/libclntsh.so.10.1
+
+
+如果出现：
+ImportError: libclntsh.so.10.1: cannot open shared object file: No such file or directory
+经过查找发现是oracle的路径没有设置
+
+输入:
+locate libclntsh.so.10.1
+获取对于路径
+/app/oracle/oracle/product/10.2.0/db_1/lib/libclntsh.so.10.1
+
+编辑/etc/ld.so.conf
+ 在最后一行输入获取的路径
+/oracle/product/10.2.0/db_1/lib/
+
+执行
+ldconfig
+
+
+后来使用新用户运行python
+结果发现又出现了ImportError: libclntsh.so.10.1
+修改其环境变量后，仍然出现这个问题。
+
+最后发现问题是
+新用户没有这个目录的访问权限。
+ /usr/local/oracle/product/10.2.0/lib/
+
+运行：
+usermod -a -G oinstall username
+把用户加入oracle组后，问题解决。
+
+* 安装PyYaml
+  安装之前需要安装libyaml
+  下载libyaml,configure -> make -> make install
+  然后下载PyYAML，
+  python setup.py build
+  python setup.py install
+* 使用TELNET操作STMP/POP收发邮件
+  [ork@localhost ~]$ perl -MMIME::Base64 -e 'print encode_base64("test\@sohu.com");'
+  dGVzdEBzb2h1LmNvbQ==
+  [ork@localhost ~]$ perl -MMIME::Base64 -e 'print encode_base64("mypassword");
+  bXlwYXNzd29yZA==
+
+  [ork@localhost ~]$ telnet mail.sohu.com 25
+  Trying 61.135.132.99...
+  Connected to mail.sohu.com.
+  Escape character is '^]'.
+  220 smtp.sohu.com ESMTP ready
+  EHLO MYNAME
+  250-smtp.sohu.com
+  250-AUTH PLAIN LOGIN
+  250 STARTTLS
+  auth login
+  334 VXNlcm5hbWU6     <-- Username:的base64编码
+  dGVzdEBzb2h1LmNvbQ== <-- 用户名的base64编码
+  334 UGFzc3dvcmQ6     <--- Password:的base64编码
+  bXlwYXNzd29yZA==     <--- 密码的base64编码
+  250 OK
+  DATA                             # 邮件体内容
+  354 Please start mail input.
+  TO: test@sohu.com            # 此处的TO，FROM，等内容，可以随便
+  FROM: test@sohu.com
+  SUBJECT: test title
+  
+  test, just a test.                                             # 邮件正文内容，与Header部分空一行开始写
+  .                                                              # 邮件写完，以一个句点加回车结果。
+  250 Mail OK queued as smtp10,wKjADQ2ApxRnnqBE0CWaEw==.38326S3  # 返回250 表示发送成功。
+  NOOP                                                           # 空语句，不执行任何操作，一般用来保持和服务器连接，不要掉线
+  250 OK
+  QUIT                                                           # 退出
+
+  [ork@localhost ~]$ telnet mail.sohu.com 110
+  Trying 61.135.132.99...
+  Connected to mail.sohu.com.
+  Escape character is '^]'.
+  +OK POP3 ready
+  USER test@sohu.com
+  +OK
+  PASS mypassword
+  +OK Authentication succeeded
+  STAT           # 查看邮箱状态
+  +OK 467 7895670
+  LIST           # 查看邮件列表
+  +OK 467
+  1 36812
+  2 20233
+  3 10486
+  4 19392
+  5 4981
+  6 9634
+  
+  RETR 1 # 获取第一封邮件
+  ....
+* tar 压缩
+  压缩为gz格式
+  tar zcvf xxx.tgz xxx
+  压缩为bz2格式
+  tar jcvf xxx.bz xxx
+  压缩为lzma格式
+  tar lzmacvf xxx.lzma xxx
+  其中以lzma格式压缩比最高, gz压缩比最低，压缩和解压速度最快
+* icmp捕捉不到
+  学习TCP/IP协议时，想捕捉到Unreachable Destinations。
+  使用ping，ping一个局域网中不存在的IP时，
+  ping返回
+  From 192.168.8.70 icmp_seq=1 Destination Host Unreachable
+  From 192.168.8.70 icmp_seq=2 Destination Host Unreachable
+  ...
+  我使用抓包工具，确一个icmp包也抓不到。
+  
+  原因：
+  由于本地不到这个不存在IP的mac地址，所以发送icmp包之前，
+  先使用arp企图获取该IP对应的mac,但是该ip不存在，所以一直获取不了mac。
+  也一直没有发送ICMP包。
+  
+* AIX md5sum
+  AIX上没有md5sum这个工具，但是有csum
+  csum -h MD5 tmp.txt
+* ip alias & secondary IP addresses
+  ip别名（IP aliases）和辅助ip（secondary IP addresses）
+  ip alias 可以通过ifconfig命令配置和查看。
+  secondary ip address 通过ip addr show命令查看
+
+  它们的作用大致一样吧。
+  我们局域网中有一台主机装了，主机中装了虚拟机，该虚拟机IP为192.168.3.201，应该是桥接方式的。
+  局域网网段为192.168.8.0.
+  为了能够连上改虚拟机，我在机器上加了一个secondary ip address: 192.168.3.233
+* ip checksum 为什么使用反码(ones' complement)?
+ones' complement: 正数=原码,负数=反码 
+two's complement: 指的就是通常所指的补码
+
+IP checksum definition
+
+The IP checksum is the 16 bit one's complement of the one's complement sum of all 16 bit words in the header.
+
+One question many people may ask is "What is the 1's complement sum ?".
+This is because all computers utilize the 2's complement representation and the 1's complement is not used. 
+The following gives a short introduction.
+
+2's complement fixed point integers (8-bit)
+Binary	Decimal	Hex
+0000 0000	0	00
+0000 0001	1	01
+0000 0010	2	02
+0000 0011	3	03
+1111 1111	-1	FF
+1111 1110	-2	FE
+1111 1101	-3	FD
+
+Let's add two intergers: 
+-3 + 5 = 2 
+FD + 05 = 01 02
+Discarding the carry (01) gives the correct result.
+
+1's complement fixed point integers (8-bit)
+Binary	Decimal	Hex
+0000 0000	0	00
+0000 0001	1	01
+0000 0010	2	02
+0000 0011	3	03
+1111 1111	-0	FF
+1111 1110	-1	FE
+1111 1101	-2	FD
+1111 1100	-3	FC
+
+
+Add the same numbers: 
+-3 + 5 = 2
+FC + 05 = 01 01
+Adding the carry (01) to the LSB (01) gives the correct result:
+01 + 01 = 02
+
+So, the 1's complement sum is done by summing the numbers and adding the carry (or carries) to the result..
+
+Simple Internet checksum example
+
+Suppose we have an 8-bit, 2's complement, machine and send the packet 
+FE 05 00 
+where 00 is the checksum field.
+
+Let's calculate and verify the Internet checksum.
+ FE + 05  =  01 03
+
+This is the result of the normal (2's complement) addition. The 1's complement sum requires the addition of the carry to the 8-bit word (even though we will not get the same result)
+ 03 + 01 = 04   
+
+so the 1's complement sum of FE + 05 is 04.
+
+The 1's complement of the 1's complement sum (Internet checksum) will be  
+~04  = FB 
+
+and the packet will be sent as
+FE 05 FB  
+
+Now, at the receiving end we add all the received bytes, including the checksum (again using the 2's complement representation)
+FE + 05 + FB  = 01 FE   
+
+The 1's complement sum is   
+ FE + 01 = FF = -0   
+
+which checks that the transmission was OK (see below).
+
+A more complex example (32-bit machine)
+
+As shown in RFC 1071, the checksum calculation is done in the following way:
+
+(1) Adjacent octets to be checksummed are paired to form 16-bit integers, and the 1's complement sum of these 16-bit integers is formed.
+
+(2) To generate a checksum, the checksum field itself is cleared, the 16-bit 1's complement sum is computed over the octets concerned, and the 1's complement of this sum is placed in the checksum field. 
+
+(3) To check a checksum, the 1's complement sum is computed over the same set of octets, including the checksum field. If the result is all 1 bits (-0 in 1's complement arithmetic), the check succeeds. 
+
+Packet
+01 00 F2 03 F4 F5 F6 F7 00 00 
+(00 00 is the checksum field)
+
+Form the 16-bit words
+0100 F203 F4F5 F6F7
+
+Calculate 2's complement sum
+0100 + F203 + F4F5 + F6F7 = 0002 DEEF (store the sum in a 32-bit word)
+
+Add the carries (0002) to get the 16-bit 1's complement sum
+DEEF + 002 = DEF1
+
+Calculate 1's complement of the 1's complement sum 
+~DEF1 = 210E
+
+We send the packet including the checksum 21 0E
+01 00 F2 03 F4 F5 F6 F7 21 0E
+
+At the receiving
+0100 + F203 + F4F5 + F6F7 + 210E = 0002 FFFD
+FFFD + 0002 = FFFF
+
+which checks OK.
+
+Comments
+_It may look awkword to use a 1's complement addition on 2's complement machines._
+This method however has its own benefits.
+
+*Probably the most important is that it is endian independent. Little Endian computers store hex numbers with the LSB last (Intel processors for example). Big Endian computers put the LSB first (IBM mainframes for example). When carry is added to the LSB to form the 1's complement sum (see the example) it doesn't matter if we add 03 + 01 or 01 + 03. The result is the same.*
+
+*Other benefits include the easiness of checking the transmission and the checksum calculation plus a variety of ways to speed up the calculation by updating only IP fields that have changed.*
+
+The IP Header Checksum is computed on the header fields only. 
+Before starting the calculation, the checksum fields (octets 11 and 12) 
+are made equal to zero. 
+
+In the example code, 
+#+BEGIN_SRC C
+unsigned short cksum(struct ip *ip, int len)
+{
+        long sum = 0;   /* assume 32 bit long, 16 bit short */
+        
+        while (len > 1) {
+             sum += *((unsigned short *) ip)++;
+             if (sum & 0x80000000)
+                sum = (sum & 0xFFFF) + (sum >> 16)
+             len -= 2
+        }
+
+        if (len)       /* take care of left over byte */
+            sum += (unsigned short) *(unsigned char *) ip;
+        // take only 16 bits out of the 32 bit sum and add up the carries
+        while (sum>>16)
+                sum = (sum & 0xFFFF)+(sum >> 16);
+
+        // one's complement the result
+        sum = ~sum;
+
+        return ((unsigned short) sum);
+}
+#+END_SRC
+* opera 在www.google.com.hk CPU高
+  由于www.google.com.hk页面上的js, opera解释的问题。
+  我直接把opera的javascript关掉了。
+  发现象www.csdn.net对javascript依赖严重。
+  
+  在www.google.com.hk页面上（左手鼠标）左击，
+  弹出菜单->编辑站点首选项->去掉javascript，呵呵。很好。
+  “编辑站点首选项”这个功能很好。
+* 制作光盘的ISO文件
+  在Linux系统中，我们可以通过拷贝命令，将光驱上的内容拷贝到一个 ISO 文件中，如： cp /dev/cdrom xxx.iso
+  但是这样好像不能制作启动盘，待确定。
+* 管道命令与重定向区别 
+1、左边的命令应该有标准输出 | 右边的命令应该接受标准输入
+   左边的命令应该有标准输出 > 右边只能是文件
+   左边的命令应该需要标准输入 < 右边只能是文件 
+2、管道触发两个子进程执行"|"两边的程序；而重定向是在一个进程内执行
+* TODO 复制后文件uid和gid如何处理？
+* 为什么TCP中SYN和FIN报文都占一个序列号呢?
+  我的理解是SYN和FIN都是有意义的报文,
+  它们单独占用的一序号的目的,在于对方可以通过ACK方式确认SYN和FIN报文是否接受成功.
+  这样实现简单,有效,可靠, 和其它数据报文处理机制一致.
+
+  如果没有它们不占用序号呢?
+  发送SYN时带的序号为下次发送数据用到的序号,对方怎么确认SYN呢?通过特殊报文?
+  增加实现复杂度,增加两种特殊情况.
+* TCP 拥塞控制
+  《Congestion Avoidance and Control》 Van Jacobson 1988经典论文，是理解TCP精髓的基础文章。仅仅看steven书还是不行的。
+  以下摘自别人的博客，我认为总结的很好。
+为了防止网络的拥塞现象，TCP提出了一系列的拥塞控制机制。最初由V. Jacobson在1988年的论文中提出的TCP的拥塞控制由“慢启动(Slow start)”和“拥塞避免(Congestion avoidance)”组成，后来TCP Reno版本中又针对性的加入了“快速重传(Fast retransmit)”、“快速恢复(Fast Recovery)”算法，再后来在TCP NewReno中又对“快速恢复”算法进行了改进，近些年又出现了选择性应答( selective acknowledgement,SACK)算法，还有其他方面的大大小小的改进，成为网络研究的一个热点。
+　　TCP的拥塞控制主要原理依赖于一个拥塞窗口(cwnd)来控制，在之前我们还讨论过TCP还有一个对端通告的接收窗口(rwnd)用于流量控制。窗口值的大小就代表能够发送出去的但还没有收到ACK的最大数据报文段，显然窗口越大那么数据发送的速度也就越快，但是也有越可能使得网络出现拥塞，如果窗口值为1，那么就简化为一个停等协议，每发送一个数据，都要等到对方的确认才能发送第二个数据包，显然数据传输效率低下。TCP的拥塞控制算法就是要在这两者之间权衡，选取最好的cwnd值，从而使得网络吞吐量最大化且不产生拥塞。
+　　由于需要考虑拥塞控制和流量控制两个方面的内容，因此TCP的真正的发送窗口=min(rwnd, cwnd)。但是rwnd是由对端确定的，网络环境对其没有影响，所以在考虑拥塞的时候我们一般不考虑rwnd的值，我们暂时只讨论如何确定cwnd值的大小。关于cwnd的单位，在TCP中是以字节来做单位的，我们假设TCP每次传输都是按照MSS大小来发送数据的，因此你可以认为cwnd按照数据包个数来做单位也可以理解，所以有时我们说cwnd增加1也就是相当于字节数增加1个MSS大小。
+
+** 慢启动
+最初的TCP在连接建立成功后会向网络中发送大量的数据包，这样很容易导致网络中路由器缓存空间耗尽，从而发生拥塞。因此新建立的连接不能够一开始就大量发送数据包，而只能根据网络情况逐步增加每次发送的数据量，以避免上述现象的发生。具体来说，当新建连接时，cwnd初始化为1个最大报文段(MSS)大小，发送端开始按照拥塞窗口大小发送数据，每当有一个报文段被确认，cwnd就增加1个MSS大小。这样cwnd的值就随着网络往返时间(Round Trip Time,RTT)呈指数级增长，事实上，慢启动的速度一点也不慢，只是它的起点比较低一点而已。我们可以简单计算下：
+
+   开始           --->     cwnd = 1
+
+   经过1个RTT后   --->     cwnd = 2*1 = 2
+
+   经过2个RTT后   --->     cwnd = 2*2= 4
+
+   经过3个RTT后   --->     cwnd = 4*2 = 8
+
+如果带宽为W，那么经过RTT*log2W时间就可以占满带宽。
+
+** 拥塞避免
+从慢启动可以看到，cwnd可以很快的增长上来，从而最大程度利用网络带宽资源，但是cwnd不能一直这样无限增长下去，一定需要某个限制。TCP使用了一个叫慢启动门限(ssthresh)的变量，当cwnd超过该值后，慢启动过程结束，进入拥塞避免阶段。对于大多数TCP实现来说，ssthresh的值是65536(同样以字节计算)。拥塞避免的主要思想是加法增大，也就是cwnd的值不再指数级往上升，开始加法增加。此时当窗口中所有的报文段都被确认时，cwnd的大小加1，cwnd的值就随着RTT开始线性增加，这样就可以避免增长过快导致网络拥塞，慢慢的增加调整到网络的最佳值。
+
+上面讨论的两个机制都是没有检测到拥塞的情况下的行为，那么当发现拥塞了cwnd又该怎样去调整呢？
+
+首先来看TCP是如何确定网络进入了拥塞状态的，TCP认为网络拥塞的主要依据是它重传了一个报文段。上面提到过，TCP对每一个报文段都有一个定时器，称为重传定时器(RTO)，当RTO超时且还没有得到数据确认，那么TCP就会对该报文段进行重传，当发生超时时，那么出现拥塞的可能性就很大，某个报文段可能在网络中某处丢失，并且后续的报文段也没有了消息，在这种情况下，TCP反应比较“强烈”：
+
+1.把ssthresh降低为cwnd值的一半
+
+2.把cwnd重新设置为1
+
+3.重新进入慢启动过程。
+
+从整体上来讲，TCP拥塞控制窗口变化的原则是AIMD原则，即加法增大、乘法减小。可以看出TCP的该原则可以较好地保证流之间的公平性，因为一旦出现丢包，那么立即减半退避，可以给其他新建的流留有足够的空间，从而保证整个的公平性。
+
+其实TCP还有一种情况会进行重传：那就是收到3个相同的ACK。TCP在收到乱序到达包时就会立即发送ACK，TCP利用3个相同的ACK来判定数据包的丢失，此时进行快速重传，快速重传做的事情有：
+
+1.把ssthresh设置为cwnd的一半
+
+2.把cwnd再设置为ssthresh的值(具体实现有些为ssthresh+3)
+
+3.重新进入拥塞避免阶段。
+
+后来的“快速恢复”算法是在上述的“快速重传”算法后添加的，当收到3个重复ACK时，TCP最后进入的不是拥塞避免阶段，而是快速恢复阶段。快速重传和快速恢复算法一般同时使用。快速恢复的思想是*数据包守恒*原则，即同一个时刻在网络中的数据包数量是恒定的，只有当“老”数据包离开了网络后，才能向网络中发送一个“新”的数据包，如果发送方收到一个重复的ACK，那么根据TCP的ACK机制就表明有一个数据包离开了网络，于是cwnd加1。如果能够严格按照该原则那么网络中很少会发生拥塞，事实上拥塞控制的目的也就在修正违反该原则的地方。
+
+具体来说快速恢复的主要步骤是：
+
+1.当收到3个重复ACK时，把ssthresh设置为cwnd的一半，把cwnd设置为ssthresh的值加3，然后重传丢失的报文段，加3的原因是因为收到3个重复的ACK，表明有3个“老”的数据包离开了网络。 
+
+2.再收到重复的ACK时，拥塞窗口增加1。
+
+3.当收到新的数据包的ACK时，把cwnd设置为第一步中的ssthresh的值。原因是因为该ACK确认了新的数据，说明从重复ACK时的数据都已收到，该恢复过程已经结束，可以回到恢复之前的状态了，也即再次进入拥塞避免状态。
+
+快速重传算法首次出现在4.3BSD的Tahoe版本，快速恢复首次出现在4.3BSD的Reno版本，也称之为Reno版的TCP拥塞控制算法。
+
+可以看出Reno的快速重传算法是针对一个包的重传情况的，然而在实际中，一个重传超时可能导致许多的数据包的重传，因此当多个数据包从一个数据窗口中丢失时并且触发快速重传和快速恢复算法时，问题就产生了。因此NewReno出现了，它在Reno快速恢复的基础上稍加了修改，可以恢复一个窗口内多个包丢失的情况。具体来讲就是：Reno在收到一个新的数据的ACK时就退出了快速恢复状态了，而NewReno需要收到该窗口内所有数据包的确认后才会退出快速恢复状态，从而更一步提高吞吐量。
+
+SACK就是改变TCP的确认机制，最初的TCP只确认当前已连续收到的数据，SACK则把乱序等信息会全部告诉对方，从而减少数据发送方重传的盲目性。比如说序号1，2，3，5，7的数据收到了，那么普通的ACK只会确认序列号4，而SACK会把当前的5，7已经收到的信息在SACK选项里面告知对端，从而提高性能，当使用SACK的时候，NewReno算法可以不使用，因为SACK本身携带的信息就可以使得发送方有足够的信息来知道需要重传哪些包，而不需要重传哪些包。
+* swap 分区扩容  
+一 环境信息
+--1.1 测试环境
+平台：虚拟机
+系统：Red Hat Enterprise Linux Server release 6.2 
+
+--1.2 查看 swap 使用情况
+[root@redhat6 ~]# free -m
+             total       used       free     shared    buffers     cached
+Mem:           714        665         49          0         38        460
+-/+ buffers/cache:        165        549
+Swap:         1439          0       1439
+
+  备注：swap 分区目前为 1439 MB。
+  
+  
+--1.3 查看硬盘使用情况
+[root@redhat6 ~]# df -hv
+Filesystem            Size  Used Avail Use% Mounted on
+/dev/mapper/vg_redhat6-lv_root
+                       13G  3.5G  8.8G  29% /
+tmpfs                 292M  100K  292M   1% /dev/shm
+/dev/sda1             485M   31M  429M   7% /boot
+  
+
+--1.4 查看系统 VG 信息
+[root@redhat6 ~]# vgdisplay
+  --- Volume group ---
+  VG Name               vg_redhat6
+  System ID             
+  Format                lvm2
+  Metadata Areas        1
+  Metadata Sequence No  3
+  VG Access             read/write
+  VG Status             resizable
+  MAX LV                0
+  Cur LV                2
+  Open LV               2
+  Max PV                0
+  Cur PV                1
+  Act PV                1
+  VG Size               14.51 GiB
+  PE Size               4.00 MiB
+  Total PE              3714
+  Alloc PE / Size       3714 / 14.51 GiB
+  Free  PE / Size       0 / 0   
+  VG UUID               E6cA2U-TL1x-ScCV-UnGU-3Kq4-1u6V-WUb5L4
+   
+--1.5 查看系统 lv 信息
+[root@redhat6 ~]# lvdisplay
+  --- Logical volume ---
+  LV Name                /dev/vg_redhat6/lv_root
+  VG Name                vg_redhat6
+  LV UUID                QFAl72-FSES-YKAH-Dax1-9FQH-kMmv-8vqju2
+  LV Write Access        read/write
+  LV Status              available
+  # open                 1
+  LV Size                13.10 GiB
+  Current LE             3354
+  Segments               1
+  Allocation             inherit
+  Read ahead sectors     auto
+  - currently set to     256
+  Block device           253:0
+   
+  --- Logical volume ---
+  LV Name                /dev/vg_redhat6/lv_swap
+  VG Name                vg_redhat6
+  LV UUID                H26wg0-bbW2-IfHa-j250-RFFh-O0ze-zTe3VU
+  LV Write Access        read/write
+  LV Status              available
+  # open                 1
+  LV Size                1.41 GiB
+  Current LE             360
+  Segments               1
+  Allocation             inherit
+  Read ahead sectors     auto
+  - currently set to     256
+  Block device           253:1
+   
+  
+  备注：根据上面信息，swap 使用的是逻辑卷 vg_redhat6，而且 vg_redhat6  空间都已分配完成，
+            那么要扩 swap 分区，只要扩卷组 vg_redhat6，之后再扩 lv  /dev/vg_redhat6/lv_swap
+             即可。
+  
+二 swap 分区扩容          
+--2.1 笔记本虚拟机加一块  4GB IDE 硬盘  
+   
+   此步略，硬盘加完重启系统后，硬盘信息如下:
+   
+[root@redhat6 ~]# fdisk -l
+
+Disk /dev/sdb: 4294 MB, 4294967296 bytes
+255 heads, 63 sectors/track, 522 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x00000000
+
+Disk /dev/sdb doesn t contain a valid partition table
+
+Disk /dev/sda: 16.1 GB, 16106127360 bytes
+255 heads, 63 sectors/track, 1958 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x000d571a
+
+   Device Boot      Start         End      Blocks   Id  System
+/dev/sda1   *           1          64      512000   83  Linux
+Partition 1 does not end on cylinder boundary.
+/dev/sda2              64        1959    15215616   8e  Linux LVM
+
+Disk /dev/mapper/vg_redhat6-lv_root: 14.1 GB, 14067695616 bytes
+255 heads, 63 sectors/track, 1710 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x00000000
+
+Disk /dev/mapper/vg_redhat6-lv_root doesn t contain a valid partition table
+
+Disk /dev/mapper/vg_redhat6-lv_swap: 1509 MB, 1509949440 bytes
+255 heads, 63 sectors/track, 183 cylinders
+Units = cylinders of 16065 * 512 = 8225280 bytes
+Sector size (logical/physical): 512 bytes / 512 bytes
+I/O size (minimum/optimal): 512 bytes / 512 bytes
+Disk identifier: 0x00000000
+
+Disk /dev/mapper/vg_redhat6-lv_swap doesn t contain a valid partition table
+
+     备注：系统已经认出新加的盘 /dev/sdb， 容量为 4294 MB。
+
+   
+--2.2 给VG vg_redhat6 扩容 4 GB
+[root@redhat6 ~]# mkfs.ext4 -t ext4 -c /dev/sdb
+mke2fs 1.41.12 (17-May-2010)
+
+[root@redhat6 ~]# pvcreate /dev/sdb
+  Writing physical volume data to disk "/dev/sdb"
+  Physical volume "/dev/sdb" successfully created
+  
+[root@redhat6 ~]# pvscan
+  PV /dev/sda2   VG vg_redhat6      lvm2 [14.51 GiB / 0    free]
+  PV /dev/sdb                       lvm2 [4.00 GiB]
+  Total: 2 [18.51 GiB] / in use: 1 [14.51 GiB] / in no VG: 1 [4.00 GiB]
+  
+ [root@redhat6 ~]# vgextend vg_redhat6 /dev/sdb
+  Volume group "vg_redhat6" successfully extended
+  
+  
+--2.3 再次查看  vg_redhat6 信息
+[root@redhat6 ~]# vgdisplay
+  --- Volume group ---
+  VG Name               vg_redhat6
+  System ID             
+  Format                lvm2
+  Metadata Areas        2
+  Metadata Sequence No  4
+  VG Access             read/write
+  VG Status             resizable
+  MAX LV                0
+  Cur LV                2
+  Open LV               2
+  Max PV                0
+  Cur PV                2
+  Act PV                2
+  VG Size               18.50 GiB
+  PE Size               4.00 MiB
+  Total PE              4737
+  Alloc PE / Size       3714 / 14.51 GiB
+  Free  PE / Size       1023 / 4.00 GiB
+  VG UUID               E6cA2U-TL1x-ScCV-UnGU-3Kq4-1u6V-WUb5L4  
+  
+  备注： VG  vg_redhat6 扩容成功。
+  
+--2.4 停用 swap
+[root@redhat6 ~]# swapoff -v /dev/vg_redhat6/lv_swap
+swapoff on /dev/vg_redhat6/lv_swap  
+
+
+--2.5 给 dev/vg_redhat6/lv_swap 扩容 512M
+[root@redhat6 ~]# lvresize -L+512M /dev/vg_redhat6/lv_swap
+  Extending logical volume lv_swap to 1.91 GiB
+  Logical volume lv_swap successfully resized
+
+
+--2.6 格式化 swap 分区  
+[root@redhat6 ~]# mkswap /dev/vg_redhat6/lv_swap
+mkswap: /dev/vg_redhat6/lv_swap: warning: dont erase bootbits sectors
+        on whole disk. Use -f to force.
+Setting up swapspace version 1, size = 1998844 KiB
+no label, UUID=47f6e518-6189-4231-9aed-9f7ad01c29ca
+
+
+--2.7 启用 swap
+[root@redhat6 ~]# swapon -v /dev/vg_redhat6/lv_swap
+swapon on /dev/vg_redhat6/lv_swap
+swapon: /dev/mapper/vg_redhat6-lv_swap: found swap signature: version 1, page-size 4, same byte order
+swapon: /dev/mapper/vg_redhat6-lv_swap: pagesize=4096, swapsize=2046820352, devsize=2046820352
+
+
+--2.8 再次查看 swap 验证
+[root@redhat6 ~]# free -m
+             total       used       free     shared    buffers     cached
+Mem:           582        509         73          0         53        271
+-/+ buffers/cache:        183        399
+Swap:         1951          0       1951  
+
+ 备注： swap 分区成功扩容到 1951 MB。
+
+* windows 系统优化
+** windows磁盘清理工具
+  SpaceSniffer 图形化直观分析硬盘文件占用情况
+  这个工具做的太棒了,动态效果很酷.
+** windows系统优化工具
+  免费:
+  Toolwiz Care
+  付费:
+  Advanced SystemCare 
+
+** windows磁盘整理碎片工具
+  自带的太慢,花了几个小时整理一个20G左右的C盘,搞的我晚上没睡好.
+  快速整理磁盘碎片的工具
+  VoptXP 9.xx
+
+* 4.4BSD TCP/IP协议栈中snd_max
+  struct tcpcb {
+  ...
+  /* retransmit variables */
+	tcp_seq	snd_max;		/* highest sequence number sent;
+					 * used to recognize retransmits
+					 */
+ };
+ 我觉得snd_max的注释不准确。
+ 从 snd_una < acknowledgment field <= snd_max 
+ 可以得出，snd_max是当前尚未发送的序号，是已经最大发送的序号+1
+* Source Insight Context window 不能打开之解决办法  
+  如果你是第一次使用，估计都是默认的GLOBAL.CF3配置文件，所以可以用一下办法来处理。
+  只要将原来的My Documents\Source Insight\Settings下的GLOBAL.CF3修改为其他的名字，然后，重新打开SI，重新设置即可，然后记得要保存本次设置配置文件（利用Options->save configration）。
+* grep --line-buffered 选项的应用
+  在一个应用场景中
+  我们需要对一个oracle日志文件进行监控，当发现有ORA错误时
+  就在syslog中生成日志。
+  脚本如下：
+#+begin_example
+  tail -f oracle.log | grep -E "ORA" | logger -t oracle/12 -p local5.notice
+#+end_example
+  结果发现不报日志。
+  后来用tail -f oracle.log | logger -t oracle/12 -p local5.notice
+  发现可以报日志。
+  后来用ping 10.2.0.1 | grep -E "64" | logger -t oracle/12 -p local5.notice
+  发现当有大量日志时，会报出来。
+
+  于是定位出是grep的缓存问题。
+  给grep 加上--line-buffered.
+#+begin_example
+  tail -f oracle.log | grep --line-buffered -E "ORA" | logger -t oracle/12 -p local5.notice
+#+end_example
+  问题就解决了
+
+* 关于禁欲的争论
+　（一）关于禁欲的争论
+
+　　葛川是一家汽车销售公司的经理，最近身体状况很不好，食欲不振，睡眠质量还特别差，他向一位老中医求教良方。老中医说葛川是纵欲过度了，现在最好的办法就是采用禁欲疗法。于是，葛川决定三个月之内不行房事，所谓“百日筑基”，他打算利用这三个月的时间，将自己打造成一个强壮的男人。然而，禁欲计划还没实行多久，葛川就受不了了，每次欲 望来的时候，他都觉得胸中火烧火燎，若不行房事，他就更加睡不着觉，而且脸上还起了很多小疙瘩，看样子，禁欲生活让他的内分泌紊乱了。
+
+　　后来，葛川又去找那位老中医，问禁欲是否会引起内分泌紊乱。老中医说，如果你的意志足够坚强，就不会有什么内分泌紊乱。
+
+　　老中医的观点遭到了一位西医医生的批评，西医医生认为，强烈的禁欲，将导致精神恍惚，性情怪僻，进而出现肌体症状，如失眠，噩梦，头晕，目眩，记忆衰退，肠胃不适等。
+
+　　葛川搞不清楚：他们究竟谁说的有道理。后来他给自己找了个台阶下：反正自己也没有那么大的意志力，所以干脆不禁欲了，因为他不想让自己内分泌紊乱。不过他也见识过一些禁欲的和尚、道人，看他们一个个精神焕发、仙风道骨的样子，葛川心中自然是羡慕不已，同时也很奇怪：他们哪来的禁欲毅力？难道只有僧人们才能禁欲？普通人就只能放纵了？
+
+　　人类的性生活是不是需要节制？对于这个问题，不同的人有不同的回答。有人试图从体育明星的性生活中找到答案，但结果也是一头雾水。
+
+　　
+　　（二）性压抑与性疏导
+
+　　为什么有的人会因为缺乏性生活而内分泌失调，而还有些人会因为克制性欲而变得更加健康？同样的行为产生不同的结果，这到底是什么原因？
+
+　　事实上，禁欲和性压抑完全是两回事，前者是主动的，而后者是被动的。主动禁欲的人一般认为纵欲是对体内精气的损耗，是对生命的浪费。而性压抑者则认为自己没有享受到性的快乐，是命运对自己的不公。所以，这两者的心理出发点是完全不同的。
+
+　　禁欲者往往懂得怎样把本能的欲望转化成工作的能量，比如养生的道人可以“练精化气，练气还神，练神还虚”；高僧们则可以把欲望转化为念经参禅的巨大动力。
+
+　　性压抑者无法像象道人和高僧们那样去疏导性欲，每当性欲来临的时候，他（她）们只会心跳加速，体内热浪翻滚而无法平息。若是硬憋的话，体内就会就会出现虚火，从而导致内分泌紊乱、脸上起疙瘩的现象出现，男子脱发、女子月经不调等问题也往往是因此而引起。如果从这点看，西方医学工作者所说的性压抑会导致衰老还是有一定的道理的。
+
+　　那么，进行性欲管理的人就没有道理了吗？当然不是。在人们的想像出，禁欲一定是一件非常苦的差事，实际上禁欲者自己并不这样认为，相反，他们觉得禁欲是一种快感无比的行为。通过导引欲望，将能量滋润大脑，达到“天人合一”的境界，这样的快感是性高潮也无法相比的。
+
+　　笔者在为多家企业进行培训的过程中，曾做过一份关于“什么样的人最不善于性欲管理”的调查问卷，让大家在和尚、道士、尼姑、牧师、修女、企业家、政客、画家、歌手、海员、教师、白领职员、农民、战士中选择。竟然有20%的人认为和尚、道士、牧师最不善于进行性欲管理，原因是僧人们没有尝到过欲望放纵的滋味，自然就不会有性欲管理的动力，相反他们很可能经常会突破宗教的禁锢，试图去感受一下性的魅力呢。要不为什么小说中经常会描写到花和尚、淫道士，现实中也经常会有些喜欢“性侵犯”的红衣主教呢。
+
+
+三、节制的乐趣(2)
+
+
+　　在这20%的人们眼中，只有那些曾经纵欲过度的人，才知道纵欲的危害性，也才只能应该进行性欲管理。但这20%的人们依然不认为歌手、画家能进行性欲管理。
+
+　　我想，人们对僧人的认识可能还是有些误差。我们不否认在历史上甚至在现实世界中也存在着花和尚、淫道士，但宗教界真正的修行人禁欲者还是居多数。
+
+　　曾有养生书籍教授防止遗精的秘籍，方法是点按会阴穴，但大多数青少年反映此方法一点也不管用。点穴毕竟只能起到一时的精液阻隔作用，但青少年面对的性信息及他的性冲动却是经常性的。目前我们所处的社会环境，有许多的性刺激信息，电影、电视、报纸、杂志、网络中，充斥着大量性暗示内容。这无疑会增加性节制的难度。正所谓“树欲静而风不止”，你虽不想白白释放能量，但满世界的性刺激物却总在你眼前晃悠，使你的意志力不得不投降，于是，能量的“下流”很快会冲破点穴方式所设置的防线。
+*  三层交换机原理 
+   三层交换机可以根据其处理数据的不同而分为纯硬件和纯软件两大类。 
+
+   　　（1）纯硬件的三层技术相对来说技术复杂，成本高，但是速度快，性能好，带负载能力强。其原理是，采用ASIC芯片，采用硬件的方式进行路由表的查找和刷新。 
+   　　　　　　　　　　　　　　　　 
+   　　当数据由端口接口芯片接收进来以后，首先在二层交换芯片中查找相应的目的MAC地址，如果查到，就进行二层转发，否则将数据送至三层引擎。在三层引擎中，ASIC芯片查找相应的路由表信息，与数据的目的IP地址相比对，然后发送ARP数据包到目的主机，得到该主机的MAC地址，将MAC地址发到二层芯片，由二层芯片转发该数据包。 
+   
+   　　（2）基于软件的三层交换机技术较简单，但速度较慢，不适合作为主干。其原理是，采用CPU用软件的方式查找路由表。 
+
+   　　当数据由端口接口芯片接收进来以后，首先在二层交换芯片中查找相应的目的MAC地址，如果查到，就进行二层转发否则将数据送至CPU。CPU查找相应的路由表信息，与数据的目的IP地址相比对，然后发送ARP数据包到目的主机得到该主机的MAC地址，将MAC地址发到二层芯片，由二层芯片转发该数据包。因为低价CPU处理速度较慢，因此这种三层交换机处理速度较慢。 
+* http://www.voanews.cn/
+
+* linux ip转发
+echo "1" > /proc/sys/net/ipv4/ip_forward
+
+这个命令只能暂时开启Linux的路由转发功能，重启系统之后就恢复原来的配置了。
+
+可以通过在/etc/rc.d/rc.local 文件中加上上述的命令，每次开机启动都会自动开启。
+
+另外还可以通过修改/etc/sysctl.conf文件，让包转发功能在系统启动时自动生效:
+
+# Controls IP packet forwarding
+
+net.ipv4.ip_forward = 1
+* linux和windows下用setsockopt设置SO_SNDTIMEO,SO_RCVTIMEO的参数的一点区别  
+
+ linux:
+ 
+    struct timeval timeout={60,0};//60s
+     int ret=setsockopt(sock_fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
+     int ret=setsockopt(sock_fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
+ 
+    如果ret==0 则为成功,-1为失败,这时可以查看errno来判断失败原因
+     int recvd=recv(sock_fd,buf,1024,0);
+     if(recvd==-1&&errno==EAGAIN)
+    {
+         printf("timeout\n");
+    }
+ 
+
+windows:
+    int timeout = 3000; //3s
+    int ret=setsockopt(sock_fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
+    int ret=setsockopt(sock_fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));
+
+* vsftpd 遇到500 OOPS: cannot change directory
+  vsftpd是linux/unix下常见的ftp服务软件，如果在使用中遇到下列错误信息：
+  500 OOPS: cannot change directory ..........
+　表怕，解决起来很简单，只需要在启动vsftpd服务前，执行：setsebool ftpd_disable_trans 1，然后再重启服务即可，例如：
+
+
+[root]# ftp 192.168.10.100
+Connected to 192.168.10.100.
+220 (vsFTPd 2.0.5)
+User (192.168.10.100:(none)): oracle
+331 Please specify the password.
+Password:
+500 OOPS: cannot change directory:/home/oracle
+Login failed.
+
+[root]# setsebool ftpd_disable_trans 1
+　　注：如果希望设置永久有效，在执行setsebool时附加 -p参数即可。
+　　然后重新启动ftp服务：
+
+[root]# service vsftpd restart
+
+Shutting down vsftpd: [ OK ]
+Starting vsftpd for vsftpd: [ OK ]
+
+* 集中转换源码的编码
+#+begin_src c
+use strict;
+use File::Find;
+my $path = "d:/code/mrouter_ldap/";
+
+sub wanted {
+    if ( -f $File::Find::name ) {
+        if ( $File::Find::name =~ /\.java$/ ) {
+            my $file = $File::Find::name;
+            unlink "d:/tmp";
+            system "iconv -f utf-8 -t gb2312 $file > d:/tmp";
+            #system "cat d:/tmp";
+            system "cp d:/tmp $file";
+            
+        }
+    }
+}
+
+find( \&wanted, $path );
+#+end_src
+* cglib java中如何使用asm动态的生成或修改一个class文件
+
+java中如何使用asm动态的生成或修改一个class文件以及asm的架构思想
+
+在开发中一般情况下我们写好的代码然后编译成class文件并运行属于静态的class文件生成，那是不是class文件就只有静态生成一种啊，其实不然，在jdk的动态代理应用Proxy类就是已经使用了动态生成一个class文件来实现代理功能的，只是这一部分我们都看不到，而asm是一个专门的字节码动态生成的一个框架，其架构使用的是生产、消费和过滤模式对应的接口和类分别是ClassReader读取一个Class文件属于生产模式，classWriter是生产一个class文件属于消费模式，ClassAdapter是对ClassWriter的过滤，做修改功能的，classReader接受一个ClassWriter并在方法中调用ClassWriter的所有的方法来实现生产并消费。当我们修改一个类的时候就必须继承ClassAdapter利用ClassAdapter中包含的ClassWriter对象对class文件进行修改。如果只是动态生成一个class就直接使用classWriter和CodeWriter就可以了。运用asm进行动态生成和修改一个class文静必须了解class文件的结构和一些指令。但是CGLib(Code Generator Library代码生成库)帮我们做了封装和扩展让我们更容易去实现这个功能，不用了解class文件的结构也可以做到。其中CGLib的类的动态代理就是利用asm字节码动态生成而实现的，在这里说一下CGLib只是对asm的封装和扩展，CGLib的对class文件及一个类的操作是基于asm的欢聚换说asm是CGLib的底层，关于asm可以参考asm使用手册。网上是可以下载的，有兴趣的话可以研究一下。下面给出一些实际操作的小例子：
+
+public void generator()
+ {//自动生成一个class文件
+  ClassWriter cw=new ClassWriter(0);
+  cw.visit(Opcodes.V1_5, Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT, "com/test/bean/Base", null,"com/test/bean/Test", new String[]{"com/test/bean/IDAO"});
+  cw.visitField(Opcodes.ACC_PUBLIC+Opcodes.ACC_STATIC+Opcodes.ACC_FINAL, "name", "Ljava/lang/String;",null,"accp" ).visitEnd();
+  cw.visitField(Opcodes.ACC_PUBLIC+Opcodes.ACC_STATIC+Opcodes.ACC_FINAL, "age", "I",null, new Integer(20)).visitEnd();
+  cw.visitMethod(Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT,"hello", "()V", null,null).visitEnd();
+  cw.visitMethod(Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT,"add", "(Ljava/lang/Object;)V", null,null).visitEnd();
+  cw.visitMethod(Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT,"update","(Ljava/lang/Object;)V",null,null).visitEnd();
+  cw.visitMethod(Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT,"delete","(Ljava/lang/Object;)V", null,null).visitEnd();
+  cw.visitEnd();
+  byte[] b=cw.toByteArray();//构建好一个class文件
+  ClassReader cr=new ClassReader(b);
+  ClassWriter cw2=new ClassWriter(0);
+  //给class文件添加一个方法
+  cr.accept(new AddMethodAdapter(cw2,Opcodes.ACC_PUBLIC+Opcodes.ACC_ABSTRACT,"get","(Ljava/lang/String;)Ljava/lang/Object;"), 0);
+  //从class文件中移除一个方法
+  //cr.accept(new RemoveMethodAdapter(cw2,"delete","(Ljava/lang/Object;)V"), false);
+  b=cw2.toByteArray();//生成新的class文件
+  try {
+   FileOutputStream out=new FileOutputStream(new File("D:Base.class"));
+   out.write(b);
+   out.close();
+  } catch (Exception e) {
+   // TODO Auto-generated catch block
+   e.printStackTrace();
+  }
+ }
+/**
+  * 移除方法过滤器
+  * @author liurm
+  *
+  */
+ public class RemoveMethodAdapter extends ClassAdapter {
+        private String name;//方法名称
+        private String desc;//方法描述
+  public RemoveMethodAdapter(ClassVisitor classvisitor,String name,String desc) {
+   super(classvisitor);
+   // TODO Auto-generated constructor stub
+   this.name=name;
+   this.desc=desc;
+  }
+ 
+  public MethodVisitor visitMethod(int access, String name, String desc,
+    String signature, String[] exceptions) {
+   // TODO Auto-generated method stub
+   if(name.equals(this.name)&&desc.equals(this.desc))
+   {
+    return null;//移除方法
+   }
+   return super.visitMethod(access, name, desc, signature, exceptions);
+  }
+ 
+ }
+ /*
+  * 添加方法过滤器
+  * */
+ public class AddMethodAdapter extends ClassAdapter{
+  private int acc;//访问修饰符
+        private String name;//方法名称
+        private String desc;//方法描述
+        private boolean isMethodPersent;//是否已经添加
+  public AddMethodAdapter(ClassVisitor classvisitor,int acc,String name,String desc) {
+   super(classvisitor);
+   // TODO Auto-generated constructor stub
+   this.acc=acc;
+   this.name=name;
+   this.desc=desc;
+  }
+ 
+  public MethodVisitor visitMethod(int access, String name, String desc,
+    String signature, String[] exceptions) {
+   // TODO Auto-generated method stub
+   if(name.equals(this.name)&&desc.equals(this.desc))
+   {//方法已经添加
+    isMethodPersent=true;
+   }
+   return super.visitMethod(access, name, desc, signature, exceptions);
+  }
+
+  public void visitEnd() {
+   // TODO Auto-generated method stub
+   if(!isMethodPersent)
+   {//未添加是才添加
+    super.cv.visitMethod(acc, name, desc, null, null);
+   }
+   super.visitEnd();
+  }
+ 
+ }
+ 
+ class PrintClass implements org.objectweb.asm.ClassVisitor{
+
+  public void visitAttribute(Attribute attribute) {
+   // TODO Auto-generated method stub
+  
+  }
+
+  public void visitEnd() {
+   // TODO Auto-generated method stub
+   System.out.println("}");
+  }
+
+  public void visitInnerClass(String name, String outername, String innername, int access) {
+   // TODO Auto-generated method stub
+  
+  }
+
+  public void visit(int version, int access, String name, String signutre,
+    String supername, String[] interfacename) {
+   // TODO Auto-generated method stub
+   System.out.println(name+" extends "+supername+"{");
+  }
+
+  public AnnotationVisitor visitAnnotation(String desc, boolean  visible) {
+   // TODO Auto-generated method stub
+   return null;
+  }
+
+  public FieldVisitor visitField(int access, String name, String desc,
+    String signature, Object value) {
+   // TODO Auto-generated method stub
+   System.out.println(desc+" "+name);
+   return null;
+  }
+
+  public MethodVisitor visitMethod(int access, String name, String desc,
+    String signature, String[] exceptions) {
+   // TODO Auto-generated method stub
+   System.out.println(name+desc);
+   return null;
+  }
+
+  public void visitOuterClass(String owner, String name, String desc) {
+   // TODO Auto-generated method stub
+  
+  }
+
+  public void visitSource(String arg0, String arg1) {
+   // TODO Auto-generated method stub
+  
+  }
+ 
+ }
+
+生成Get，Set方法，一个普通的java类
+
+ClassWriter cw=new ClassWriter(0);//手动计算内存
+  cw.visit(Opcodes.V1_5, Opcodes.ACC_PUBLIC,"com/test/bean/Student",null,"java/lang/Object",null);//声明一个类
+  cw.visitField(Opcodes.ACC_PRIVATE, "age", "I", null,new Integer(20)).visitEnd();//定义age字段
+  cw.visitField(Opcodes.ACC_PRIVATE, "name", "Ljava/lang/String;",null,"accp").visitEnd();//定义name字段
+  //构造函数
+  MethodVisitor mv4=cw.visitMethod(Opcodes.ACC_PUBLIC, "<init>", "()V", null, null);
+  mv4.visitCode();
+  mv4.visitVarInsn(Opcodes.ALOAD, 0);
+  mv4.visitMethodInsn(Opcodes.INVOKESPECIAL, "com/test/bean/Student", "<init>", "()V");
+  mv4.visitInsn(Opcodes.RETURN);
+  mv4.visitMaxs(1, 1);
+  mv4.visitEnd();
+  //构建getAge方法
+  MethodVisitor mv=cw.visitMethod(Opcodes.ACC_PUBLIC, "getAge", "()I", null,null);
+  mv.visitCode();
+  mv.visitVarInsn(Opcodes.ALOAD, 0);
+  mv.visitFieldInsn(Opcodes.GETFIELD, "com/test/bean/Student", "age", "I");
+  mv.visitInsn(Opcodes.IRETURN);
+  mv.visitMaxs(1, 1);
+  mv.visitEnd();
+  //构建setAge方法
+  MethodVisitor mv1=cw.visitMethod(Opcodes.ACC_PUBLIC, "setAge", "(I)V", null, null);
+  mv1.visitCode();
+  mv1.visitVarInsn(Opcodes.ALOAD, 0);
+  mv1.visitVarInsn(Opcodes.ALOAD, 1);
+  mv1.visitFieldInsn(Opcodes.PUTFIELD, "com/test/bean/Student", "age", "I");
+  mv1.visitInsn(Opcodes.RETURN);
+  mv1.visitMaxs(2, 2);
+  mv1.visitEnd();
+  //构建getName方法
+  MethodVisitor mv2=cw.visitMethod(Opcodes.ACC_PUBLIC, "getName", "()Ljava/lang/String;", null,null);
+  mv2.visitCode();
+  mv2.visitVarInsn(Opcodes.ALOAD, 0);
+  mv2.visitFieldInsn(Opcodes.GETFIELD, "com/test/bean/Student", "name", "Ljava/lang/String;");
+  mv2.visitInsn(Opcodes.ARETURN);
+  mv2.visitMaxs(1, 1);
+  mv2.visitEnd();
+  //构建setName方法
+  MethodVisitor mv3=cw.visitMethod(Opcodes.ACC_PUBLIC, "setName", "(Ljava/lang/String;)V", null, null);
+  mv3.visitCode();
+  mv3.visitVarInsn(Opcodes.ALOAD, 0);
+  mv3.visitVarInsn(Opcodes.ALOAD, 1);
+  mv3.visitFieldInsn(Opcodes.PUTFIELD, "com/test/bean/Student", "name", "Ljava/lang/String;");
+  mv3.visitInsn(Opcodes.RETURN);
+  mv3.visitMaxs(2, 2);
+  mv3.visitEnd();
+  //sayhello方法
+  MethodVisitor mv5=cw.visitMethod(Opcodes.ACC_PUBLIC, "sayhello", "(Ljava/lang/String;)Ljava/lang/String;", null, null);
+  mv5.visitCode();
+  mv5.visitTypeInsn(Opcodes.NEW, "java/lang/StringBuilder");
+  mv5.visitInsn(Opcodes.DUP);
+  mv5.visitLdcInsn("Hello:");
+  mv5.visitMethodInsn(Opcodes.INVOKESPECIAL, "java/lang/StringBuilder", "<init>", "(Ljava/lang/String;)V");
+  mv5.visitVarInsn(Opcodes.ALOAD, 1);
+  mv5.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "append", "(Ljava/lang/String;)Ljava/lang/StringBuilder;");
+  mv5.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/lang/StringBuilder", "toString", "()Ljava/lang/String;");
+  mv5.visitInsn(Opcodes.ARETURN);
+  mv5.visitMaxs(3, 2);
+  mv5.visitEnd();
+  //静态块
+  MethodVisitor mv6=cw.visitMethod(Opcodes.ACC_STATIC, "<clinit>","()V", null,null);
+  mv6.visitCode();
+  //System.out.println("Hello World!");
+  mv6.visitFieldInsn(Opcodes.GETSTATIC, "java/lang/System", "out", "Ljava/io/PrintStream;");
+  mv6.visitLdcInsn("Hello World!");
+  mv6.visitMethodInsn(Opcodes.INVOKEVIRTUAL, "java/io/PrintStream", "println", "(Ljava/lang/String;)V");
+  //创建数组int [] a=new int[5];
+  //mv6.visitInsn(Opcodes.ICONST_5);
+  //int [] a=new int[6];
+  mv6.visitLdcInsn(new Integer(6));
+  //mv6.visitIntInsn(Opcodes.NEWARRAY, Opcodes.T_INT);
+  mv6.visitVarInsn(Opcodes.NEWARRAY, Opcodes.T_INT);
+  mv6.visitVarInsn(Opcodes.ASTORE, 4);
+  mv6.visitInsn(Opcodes.RETURN);
+  mv6.visitMaxs(4,0);
+  mv6.visitEnd();
+  cw.visitEnd();
+  byte[] b=cw.toByteArray();//可以装载到JVM中了
+
+* codemodel生成java代码
+ Use CodeModel to generate Java Source Code
+CodeModel is a library that allows you to generate Java source code in a type-safe fashion.
+
+When to use CodeModel:
+If you have huge chunk of data in terms of text file or XML and want to generate some Java class based on those data you can use CodeModel. It also helps when your data changes frequently.
+
+To know more about the CodeModel visit following link:
+http://fisheye5.atlassian.com/browse/~raw,r=1.601/jaxb-architecture-document/www/doc/com/sun/codemodel/package-summary.html
+
+Giving you small sample how to use CodeModel to generate your own class.
+
+
+Example: CodeFactory.java
+
+import com.sun.codemodel.JAnnotationUse;
+import com.sun.codemodel.JBlock;
+import com.sun.codemodel.JClass;
+import com.sun.codemodel.JCodeModel;
+import com.sun.codemodel.JDefinedClass;
+import com.sun.codemodel.JDocComment;
+import com.sun.codemodel.JExpr;
+import com.sun.codemodel.JMethod;
+import com.sun.codemodel.JMod;
+import com.sun.codemodel.JPackage;
+import com.sun.codemodel.JType;
+import com.sun.codemodel.JVar;
+
+/**
+ *
+ * @author naman
+ */
+public class CodeFactory {
+
+    // Method to get JType based on any String Value
+    public JType getTypeDetailsForCodeModel(JCodeModel jCodeModel, String type) {
+        if (type.equals("Unsigned32")) {
+            return jCodeModel.LONG;
+        } else if (type.equals("Unsigned64")) {
+            return jCodeModel.LONG;
+        } else if (type.equals("Integer32")) {
+            return jCodeModel.INT;
+        } else if (type.equals("Integer64")) {
+            return jCodeModel.LONG;
+        } else if (type.equals("Enumerated")) {
+            return jCodeModel.INT;
+        } else if (type.equals("Float32")) {
+            return jCodeModel.FLOAT;
+        } else if (type.equals("Float64")) {
+            return jCodeModel.DOUBLE;
+        } else {
+            return null;
+        }
+    }
+
+    // Function to generate CodeModel Class
+    public void writeCodeModel(String factroyPackage) {
+        try {
+
+            /* Creating java code model classes */
+            JCodeModel jCodeModel = new JCodeModel();
+
+            /* Adding packages here */
+            JPackage jp = jCodeModel._package(factroyPackage);
+
+            /* Giving Class Name to Generate */
+            JDefinedClass jc = jp._class("GeneratedFactory");
+
+            /* Adding annotation for the Class */
+            jc.annotate(com.myannotation.AnyXYZ.class);
+
+            /* Adding class level coment */
+            JDocComment jDocComment = jc.javadoc();
+            jDocComment.add("Class Level Java Docs");
+
+
+            /* Adding method to the Class which is public static and returns com.somclass.AnyXYZ.class */
+            String mehtodName = "myFirstMehtod";
+            JMethod jmCreate = jc.method(JMod.PUBLIC | JMod.STATIC, com.somclass.AnyXYZ.class, "create" + mehtodName);
+
+            /* Addign java doc for method */
+            jmCreate.javadoc().add("Method Level Java Docs");
+
+            /* Adding method body */
+            JBlock jBlock = jmCreate.body();
+
+            /* Defining method parameter */
+             JType jt = getTypeDetailsForCodeModel(jCodeModel, "Unsigned32");
+             if (jt != null) {
+                 jmCreate.param(jt, "data");
+             } else {
+                jmCreate.param(java.lang.String.class, "data");
+             }
+
+            /* Defining some class Variable in mthod body */
+            JClass jClassavpImpl = jCodeModel.ref(com.somclass.AnyXYZ.class);
+            jvarAvpImpl = jBlock.decl(jClassavpImpl, "varName");
+            jvarAvpImpl.init(JExpr._new(jClassavpImpl));
+
+            
+            /* Adding some direct statement */             
+            jBlock.directStatement("varName.setCode(100);");
+
+            /* returning varibalbe */        
+            jBlock._return(jvarAvpImpl);
+
+            /* Building class at given location */
+            jCodeModel.build(new File("generated/src"));
+
+        } catch (JAXBException ex) {
+            logger.log(Level.SEVERE, "JAXBException:" + ex);
+            ex.printStackTrace();
+        } catch (Exception ex) {
+            logger.log(Level.SEVERE, "Other Exception which in not catched:" + ex);
+            ex.printStackTrace();
+        }
+    }   
+
+    // Wirte main mehtod and call writeCodeModel("com.test") function to generate class 
+}
+
+
+
+After running above class it generates GeneratedFactory class under generated/src/com/test folder. It includes all required imports and also format the class as per Java Standard. It generates as described below.
+
+
+Generated Class: GeneratedFactory.java
+
+package com.test;
+
+import com.myannotation.AnyXYZ;
+import com.somclass.AnyXYZ;
+
+/**
+ * Class Level Java Docs
+ * 
+ */
+@com.myannotation.AnyXYZ
+public class GeneratedFactory {
+
+    /**
+     * Method Level Java Docs
+    * 
+    */
+    public static com.somclass.AnyXYZ myFirstMehtod(long data) {
+        com.somclass.AnyXYZ varName = new com.somclass.AnyXYZ();
+        varName.setCode(100);
+        return varName;
+    }
+}
+* perl 模块安装：
+安装
+perl-devel
+
+Expect
+
+Net::SSH::Expect
+* 操作技巧
+** 通过符号链接方便操作文件
+  windows 7 上使用mklink 命令
+** 使用截屏，记录工作上下文
+** windows 快捷键
+  alt + f4 关闭窗口 用于鼠标关太慢
+  WIN + D	显示桌面或还原窗口状态
+  win + up 窗口最大化
+  win + down 窗口最小化
+  win + L  锁屏  
+  atl+ tab 切换窗口
+  win + 数字  切换到第几个窗口
+
+** 快速启动器
+  launchy 开源，跨平台。
+  可以快速启动程序
+** 窗口切换器
+  Swicher
+  可以通过数字和窗口名称切换窗口
+* 一个会议失败
+** 如何展示自己
+  我做的网络信息分析的系统
+  由于做前台的同事，没有完成。
+  所以只有一个后台程序。
+  我演示时先让领导看了一下生成的拓扑图。
+  但是由于拓扑图是错的。领导说应该先从底层开始说起。
+  如何采集信息、分析信息。
+  最后居然没有展示后台的运行效果，失败！！！
+  *教训是没有好好准备*
+* 面试
+  能说尽量多说。如工作内容
+  不能说尽量不说，如离职原因
+  如能引导对话，向自己擅长方向引导。
+  遇到忘记的内容，不立即回答，慢慢说出自己的思路。
+
+* 网络设备的loopback与主机的loopbackd的不同
+  Loopback接口是虚拟接口，是一种纯软件性质的虚拟接口。
+  任何送到该接口的网络数据报文都会被认为是送往设备自身的。
+  大多数平台都支持使用这种接口来模拟真正的接口。
+  这样做的好处是虚拟接口不会像物理接口那样因为各种因素的影响而导致接口被关闭。
+  事实上，将Loopback接口和其他物理接口相比较，可以发现Loopback接口有以下几条优点：
+1.  Loopback接口状态永远是up的，即使没有配置地址。这是它的一个非常重要的特性。     
+2.  Loopback接口可以配置地址，而且可以配置全1的掩码,可以节省宝贵的地址空间。     
+3.  Loopback接口不能封装任何链路层协议
+
+  网络设备中，loopback被用来代表某些用于管理目的的虚拟接口，其含义并没有"回环"的意思。
+  loopback虚拟接口会分配到一个IP地址，但是这个IP地址不会对应到实际的物理接口。
+  网络设备中的loopback地址主要用于管理目的，例如设备发出的报警。
+  网络设备中的应用程序（管理程序）使用loopback地址发送可接收数据流，而不是使用实际物理接口的地址。
+  对外部来说，直接使用loopback地址来查看设备对应的信息（如报警信息），与网卡的物理地址无关。
+  我们也可以把这种地址理解为网络设备提供的服务的地址。
+
+  例如一台路由器配置如下：
+  interface Loopback0
+  ip address 10.130.139.255 255.255.255.255
+  !
+  interface FastEthernet0/0
+  ip address 192.168.10.5 255.255.255.0
+  duplex auto
+  speed auto
+  !
+  interface FastEthernet0/1
+  ip address 192.168.88.5 255.255.255.0
+  duplex auto
+  speed auto
+  有一台主机，其ip是192.168.10.88，网关设置为:192.168.10.5
+  那么在主机执行
+  PC>ping 10.130.139.255
+
+  Pinging 10.130.139.255 with 32 bytes of data:
+
+  Reply from 10.130.139.255: bytes=32 time=60ms TTL=255
+  Reply from 10.130.139.255: bytes=32 time=60ms TTL=255
+  Reply from 10.130.139.255: bytes=32 time=50ms TTL=255
+
+  Ping statistics for 10.130.139.255:
+  Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),
+  Approximate round trip times in milli-seconds:
+  Minimum = 50ms, Maximum = 60ms, Average = 56ms
+
+虚拟接口几种用途：
+1 作为一台路由器的管理地址
+系统管理员完成网络规划之后，为了方便管理，会为每一台路由器创建一个loopback 接口，
+并在该接口上单独指定一个IP 地址作为管理地址，管理员会使用该地址对路由器远程登录（telnet ），该地址实际上起到了类似设备名称一类的功能。
+但是通常每台路由器上存在众多接口和地址，为何不从当中随便挑选一个呢？
+原因如下：由于telnet 命令使用TCP 报文，会存在如下情况：路由器的某一个接口由于故障down 掉了，
+但是其他的接口却仍旧可以telnet ，也就是说，到达这台路由器的TCP 连接依旧存在。所以选择的telnet 地址必须是永远也不会down 掉的，
+而虚接口恰好满足此类要求。由于此类接口没有与对端互联互通的需求，所以为了节约地址资源，loopback 接口的地址通常指定为32 位掩码。
+2 使用该接口地址作为动态路由协议OSPF 、BGP 的router id 动态路由协议OSPF 、BGP 在运行过程中需要为该协议指定一个Router id ，
+作为此路由器的唯一标识，并要求在整个自治系统内唯一。由于router id 是一个32 位的无符号整数，这一点与IP 地址十分相像。
+而且IP 地址是不会出现重复现象的，所以通常将路由器的router id 指定为与该设备上的某个接口的地址相同。
+由于loopback 接口的IP 地址通常被视为路由器的标识，所以也就成了router id 的最佳选择。
+3、使用该接口地址作为BGP 建立TCP 连接的源地址
+在BGP 协议中，两个运行BGP 的路由器之间建立邻居关系是通过TCP 建立连接完成的。
+在配置邻居时通常指定loopback 接口为建立TCP 连接的源地址（通常只用于IBGP ，原因同2.1 ，都是为了增强TCP 连接的健壮性）
+配置命令如下：
+router id 61.235.66.1
+interface loopback 0
+ip address 61.235.66.1 255.255.255.255
+router bgp 100
+neighbor 61.235.66.7 remote-as 200
+neighbor 61.235.66.7 update-source LoopBack0
+* TODO tcp tw_recycle选项
+* 关于SO_DONTROUTE套接口选项的说明
+1 引子
+
+在上一篇关于如何将套接口绑定到网络接口上的文章中，我曾经以为采用 SO_DONTROUTE 套接口选项能够实现和 SO_BINDTODEVICE 选项同样的功能。但是实践证明不是这样。那么，其原因到底是为什么呢？ SO_DONTROUTE 套接口选项真正的作用是什么呢？本文将对此予以解答。
+2 问题求解
+
+在 socket(7) 中对 SO_DONTROUTE 选项的说明如下：
+
+       SO_DONTROUTE
+
+              Don't send via a gateway, only send to directly connected hosts.
+
+              The same effect can be achieved  by  setting  the  MSG_DONTROUTE
+
+              flag  on  a socket send(2) operation. Expects an integer boolean
+
+              flag.
+
+这段话的核心意思是 SO_DONTROUTE 选项将导致数据包不经由网关发送，而是发往直接相连的主机。该套接口选项合法的值是整数形式的布尔标志值。
+
+上述说明看起来似乎很明了，但是我 google 到的一些资料又说这个套接口选项将会绕过（ bypass ）路由表发送数据包，而且连 W. Richard Stevens 也是这样说的：“此选项规定发出的分组将旁路底层协议的正常路由机制。例如，对于 IPv4 ，分组被指向适当的本地接口，也就是目的地址的网络和子网部分所确定的本地接口。如果本地接口不能由目的地址确定（例如，目的主机不再一个点对点链路的另一端上，也不在一个共享网络上），则返回 ENETUNREACH 错误。……此选项经常由路由守护进程（ routed 和 gated ）用来旁路路由表（路由表不正确的情况下），强制一个分组从某个特定接口发出。” [UNIX 网络编程（第 1 卷），清华大学出版社，第 157 页 ] 。我不得不承认，正是这里的最后一句话，直接导致我认为可以通过 SO_DONTROUTE 套接口选项完成和 SO_BINDTODEVICE 同样的功能。但是实际上却并不是这样的。
+
+为了解决这个问题，我编写了一个测试程序 udpsend2.c 。该程序要求要有三个参数，其中，第二个参数是数据包目的地的 IP 地址，第三个参数是一个开关，当为 on 时开启 SO_DONTROUTE 选项，当为 off 时关闭 SO_DONTROUTE 选项，默认情况下该选项是打开的。如果您理解该程序有困难，请先阅读《 UNIX 网络编程（第 1 卷）》。
+
+/*
+  * $file:   udpsend2.c
+  * $func: test SO_DONTROUTE socket option,
+  *                 sending UDP packets.
+  * $author:     rockins
+  * $email:       ybc2084@163.com
+  * $date: Sat Jan 20 16:38:23 CST 2007
+  * $all copyleft, say, completely free
+  */
+
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <unistd.h>
+#include <signal.h>
+
+#define    BUFF_SIZE    512         /*data buffer size*/
+#define    REMOTE_PORT    9999       /*remote port, not important*/
+
+signed int len = 0;                 /*sending bytes in once time*/
+
+int
+main(int argc, char *argv[])
+{
+
+       int sock;
+       struct sockaddr_in remote_addr;
+       int dontroute = 1;
+       unsigned char buff[BUFF_SIZE];
+       int i;
+
+       /*check arguments*/
+       if (argc != 3) {
+              printf("usage: a.out <REMOTE_IP> [on | off]/n"
+                     "default is switch on SO_DONTROUTE option/n");
+              exit(-1);
+       }
+
+       /*determine switch SO_DONTROUTE or not*/
+       if (!strcmp(argv[2], "on"))
+              dontroute = 1;
+       else if (!strcmp(argv[2], "off"))
+              dontroute = 0;
+
+       /*stuff buffer*/
+       for (i = 0; i < BUFF_SIZE; i++) {
+              buff[i] = 'X';
+       }
+
+       /*create socket*/
+       if ((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+              perror("socket()");
+              exit(-1);
+       }
+
+       /*set SO_DONTROUTE option*/
+       if (setsockopt(sock, SOL_SOCKET, SO_DONTROUTE,
+                                   &dontroute, sizeof(dontroute)) < 0) {
+              perror("setsockopt()");
+              exit(-1);
+       }
+
+ 
+       /*remote address structure*/
+       memset(&remote_addr, 0, sizeof(struct sockaddr_in));
+       remote_addr.sin_family = AF_INET;
+       remote_addr.sin_port = htons(REMOTE_PORT);
+       remote_addr.sin_addr.s_addr = inet_addr(argv[1]);
+
+       /*data sending process*/
+       len = sendto(sock, buff, BUFF_SIZE, 0,
+                     (struct sockaddr *)&remote_addr,
+                     sizeof(struct sockaddr_in));
+       if (len < 0) {
+              perror("sendto()");
+              exit(-1);
+       }
+ 
+       printf("send %d to remote end.../n", len);
+       return (0);
+}
+
+如下编译程序：
+
+[root@cyc src]# gcc -g -o udpsend2 udpsend2.c
+3 对比测试
+
+首先介绍一下初始时刻测试环境的设置情况，如下所示：
+
+[root@cyc src]# uname -a
+
+Linux cyc 2.4.20-8 #4 Sat Jan 20 19:42:09 CST 2007 i686 i686 i386 GNU/Linux
+
+[root@cyc src]# ifconfig
+
+eth0      Link encap:Ethernet  HWaddr 00:0D:87:EA:E3:AF 
+
+          inet addr:202.115.26.224  Bcast:202.115.26.255  Mask:255.255.255.0
+
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+
+          RX packets:40016 errors:0 dropped:0 overruns:0 frame:0
+
+          TX packets:85327 errors:0 dropped:0 overruns:0 carrier:0
+
+          collisions:0 txqueuelen:100
+
+          RX bytes:3063524 (2.9 Mb)  TX bytes:36469606 (34.7 Mb)
+
+          Interrupt:11 Base address:0xc000
+
+[root@cyc src]# route
+
+Kernel IP routing table
+
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+
+202.115.26.0    *               255.255.255.0   U     0      0        0 eth0
+
+default         202.115.26.1    0.0.0.0         UG    0      0        0 eth0
+
+这里，作者所在的子网为 202.115.26.0/24 ，默认网关为 202.115.26.1 ，用于发送数据包的主机为 202.115.26.224 。用于接收数据的两台远端主机的 IP 地址分别为 202.115.26.193 和 202.112.14.184 。 202.115.26.193 与发送主机 202.115.26.224 位于同一网段内，通过交换机相连；而 202.112.14.184 则与发送主机 202.115.26.224 之间没有直接相连，中间通过多个路由器连接。连接示意图如下所示：
+
+
+3.1 同网段的测试
+
+首先测试的是 202.115.26.193 。路由表设置如下所示：
+
+[root@cyc src]# route
+
+Kernel IP routing table
+
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+
+202.115.26.0    *               255.255.255.0   U     0      0        0 eth0
+
+default         202.115.26.1    0.0.0.0          UG    0      0        0 eth0
+
+如下启动程序：
+
+[root@cyc src]# ./udpsend2 202.115.26.193 on
+
+send 512 to remote end...
+
+程序报告发送了 512 字节的数据给 202.115.26.193 ，尽管对方并没有真正接收数据包。如我们所知， UDP 是无连接的，它只负责将数据包发出去，至于对方有没有接收到， UDP 是不管的。
+
+接下来，去掉路由表中的默认路由：
+
+[root@cyc src]# route del default
+
+[root@cyc src]# route
+
+Kernel IP routing table
+
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+
+202.115.26.0    *               255.255.255.0   U     0      0        0 eth0
+
+再次运行 udpsend2 ，结果如下：
+
+[root@cyc src]# ./udpsend2 202.115.26.193 on
+
+send 512 to remote end...
+
+结论：当目的主机与发送主机处于同一个网段内时，无论内核是否设置了默认路由，数据包总能发送给目的主机（尽管目的主机可能并没有在等待接收数据包）。但是，子网必须要在路由表中。比如，如果上面将子网 202.115.26.0 所在的路由表项也删除的话，就会得到网络不可达的结果，这一点是很容易理解的。
+3.2 不同网段测试
+
+其次来测试当发送主机与目的主机位于不同网段时的情况，此时的目的主机为 202.112.14.184 。发送主机上的路由表设置如下，并且发送主机能够 ping 通目的主机。这表明虽然 202.112.14.184 与 202.115.26.224 之间虽然并没有直接相连，但是能够通过路由器转发数据包来完成通信：
+
+[root@cyc src]# route
+
+Kernel IP routing table
+
+Destination     Gateway         Genmask         Flags Metric Ref    Use Iface
+
+202.115.26.0    *               255.255.255.0   U     0      0        0 eth0
+
+default         202.115.26.1    0.0.0.0         UG    0      0        0 eth0
+
+[root@cyc src]# ping 202.112.14.181
+
+PING 202.112.14.181 (202.112.14.181) 56(84) bytes of data.
+
+64 bytes from 202.112.14.181: icmp_seq=1 ttl=125 time=0.364 ms
+
+运行程序 udpsend2 ，结果显示如下：
+
+[root@cyc src]# ./udpsend2 202.112.14.181 on        
+
+sendto(): Network is unreachable
+
+将默认路由（也即网关地址）从路由表中删除，再次运行程序：
+
+[root@cyc src]# ./udpsend2 202.112.14.181 on
+
+sendto(): Network is unreachable
+
+结论：无论路由表中是否包含了默认路由（也即网关地址），当两主机之间没有直接相连时（即使能够通过中间路由器通信），设置了 SO_DONTROUTE 也将导致网络不可达错误。而网络不可达错误通常程序中有函数返回 ENETUNREACH 的结果。在本例中， ENETUNREACH 错误是由 sendto() 函数引发的。
+4 总的结论
+
+根据上面的测试结果，我认为： SO_DONTROUTE 套接口选项并没有完全绕过路由表，而只是绕过了路由表中网关（或者说默认路由）所在的表项。因此， Linux 的 socket(7) 中的说明是正确并且无歧义的，而《 UNIX 网络编程（第 1 卷）》中的说法则带有一定的歧义性，容易给人造成误解。当然，这也可能是译者翻译不准确的缘故。总的来讲，当目的主机与发送方直接相连时，可以通过 SO_DONTROUTE 来实现从指定的网络接口发出数据包。但是，当接受者与发送方并没有直接相连时，就不能这样做了。而需要考虑通过 SO_BINDTODEVICE 选项或者 RAW 套接口或者 PACKET 套接口来实现。（注： RAW 套接口能实现网络层的直接数据访问，而 PACKET 套接口则能实现链路层的直接数据访问）。
+
+* SO_DONTROUTE和SO_BINDTODEVICE的深层次分析
+
+
+SO_DONTROUTE并没有跳过路由表的查找，而只是将查找范围缩小到了直连的同三层网段主机，SO_BINDTODEVICE亦没有跳过路由表查找，而只是将外出设备固定，也就是增加了一个查找键，因此二者都无法跳过查找路由表的过程，本质上，SO_DONTROUTE也是增加了一个查找键。路由表的查找在linux实现的协议栈中是无法越过的，但是却可以增加若干的限制条件，以hash路由表为例，在fn_hash_lookup函数中：
+if (f->fn_scope < flp->fl4_scope)  //检查路由的范围(**)
+    continue;
+err = fib_semantic_match(f->fn_type, FIB_INFO(f), flp, res);
+if (err == 0) {
+    //找到
+}
+在fib_semantic_match中：
+if (!flp->oif || flp->oif == nh->nh_oif)  //***
+    break;  //找到
+可见在核心的查找函数中，DONTROUTE和BINDTODEVICE只是做了一些限制，并且在核心查找函数的任意层次调用函数中都没有绕过路由查找的逻辑。
+     在正常的数据发送过程中，查找路由的时候是没有出口设备信息的，出口设备由路由表的匹配结果来决定，而在通过setsockopt设置了SO_BINDTODEVICE之后，在查找路由之前就有了出口设备信息，ip_queue_xmit中，查找键fl中会添加.oif = sk->sk_bound_dev_if这个信息(没有bindtodevice的情况下，sk->sk_bound_dev_if为0)，然后路由查找按照往常的方式继续，到达fib_semantic_match的时候，在***处起作用；对于SO_DONTROUTE这个选项，同样的道理，在**处起作用，linux内核协议栈将“路由范围”定义成了一个枚举，一共N中类型：
+enum rt_scope_t
+{
+    RT_SCOPE_UNIVERSE=0,      //任意的地址路由
+    RT_SCOPE_SITE=200,    //用户自定义
+    RT_SCOPE_LINK=253,    //本地直连的路由
+    RT_SCOPE_HOST=254,    //主机路由
+    RT_SCOPE_NOWHERE=255    //不存在的路由
+};
+数值逐渐增大，越大的越不易匹配，因此在**处，如果由于设置SO_DONTROUTE而配置了RT_SCOPE_LINK的话，如果目的主机在外部，路由表中的scope就是RT_SCOPE_UNIVERSE，这样就不会匹配，因此也就找不到了，因此如果设置了SO_DONTROUTE的话，即使一个目的地址存在路由，只要它在外部，那就是不可达的。另外SO_BINDTODEVICE还有一个约束，那就是数据包从那里走必然从哪里回来，如果不是从出去的口回来的，那么将无法送到用户态处理，这由INET_MATCH来处理，进入__inet_lookup之后，目的是查找一个和该数据包关联的套接字，对于每一个哈西冲突链中套结字都会调用INET_MATCH来进行匹配，INET_MATCH中有一句：
+!((__sk)->sk_bound_dev_if) || ((__sk)->sk_bound_dev_if == (__dif)
+同样对于udp来说，udp_v4_lookup_longway中也会有相同的逻辑，这样就保证了从哪里走从哪里回来。
+     根据SO_BINDTODEVICE的特点来说，用它来做负载均衡是可以的，但是前提是需要均衡的数据是本机发出的，而不是forward的，因为在ip_route_input_slow中设置路由表查找键的时候出口设备设置为0，在ip_route_input中查找路由缓存的时候rth->fl.oif == 0说明出口设备必须不能设置()，因此要想对过路数据做负载均衡，必须首先将其redirect到本机的用户态，然后再分别建立多个(取决于可以均衡的网卡数量)socket，每一个绑定一个出口网卡设备，然后视负载情况在这些设备关联的socket将数据代理出去，不过这要求机器性能足够好，负载均衡带来的收益要远大于redirect带来的开销损失。负载均衡永远都是一个重要话题，特别是鱼龙混杂的linux世界，linux主机有的性能超棒有的却只是386的古董，加上linux内核的路由缓存机制使之并不能实现基于包的负载均衡，在不修改协议栈的情况下，必须在用户态想办法，一种办法就是redirect，另一种办法就是使用虚拟网卡，即使用虚拟网卡的字符设备接口将三层或者二层数据导入到用户态，然后再使用SO_BINDTODEVICE均衡到各个网卡，但要注意，此法到此为止只实现了一半，由于虚拟网卡的字符设备出来的并不是用户空间数据，因此再往socket发送相当于做了一个隧道封装，什么时候解封装，这是一个问题，最好是数据通过需要均衡的路段后就解封装，因此必然需要一个对称的主机负责解封装。
+     但是且慢，难道SO_DONTROUTE就没有别的作用，就没有别的说头吗？不是这样的，也不会这么简单！这里的关键在于“出口设备”，只要能确定设备，带有SO_DONTROUTE的套结字就能成功将数据发送出去的，这是事实，在ip_route_output_slow中：
+if (fib_lookup(&fl, &res)) {
+//查找失败的可能：1.本身就没有路由表项匹配；2.有路由表项匹配，但是不是本地的。
+    res.fi = NULL;
+    if (oldflp->oif) {  //但是，只要有出口设备，就能发送成功：1.设置SO_BINDTODEVICE绑定一个设备；2.增加一条设备路由ip route add ip/mask dev device
+        if (fl.fl4_src == 0)
+            fl.fl4_src = inet_select_addr(dev_out, 0, RT_SCOPE_LINK);
+            res.type = RTN_UNICAST;
+            goto make_route;
+        }
+        if (dev_out)
+            dev_put(dev_out);
+        err = -ENETUNREACH;
+        goto out;
+    }
+}
+因此，不但SO_DONTROUTE没有跳过路由查找，还多了查找失败后的动作，DONTROUTE不是不查找路由表，而是对该包不进行路由，也就是该包是不会经过路由器的，设置了dontroute的套接字发送的包是永远不会发到网关的，但是本地路由查找是避不开的哦！SO_DONTROUTE多用于仅能确定发送出口却没有路由的情况。不要太着急哦，why？还有arp呢？既然dontroute只关心是否有出口设备，那么如果有出口设备的话，数据到了链路层之后呢？稍微知道网络过程的家伙都知道arp，真实的数据通信是需要链路层信道的建立的，因此，arp是必须的。不必担心，arp完全按照以前的方式进行哦，如果一个主机确实是和发送主机是直连的，那么很显然，只要目的主机有路由，即使它们配置的ip不在一个网段，arp回复就会正确被收到的，so_dontroute也正是用于这一情况的，但是如果我们仅仅想做一下实验，也就是目的ip是不同网段的一个不存在的ip的话，arp还会有回应吗？如果没有回应，数据如何通信呢？很简单，如果没有回应，数据无法进行通信，只有有回应才可以的，但是显然，这个回应是不可能发回来的，然而考虑两种情况，第一是网关启动了arp代理，这样虽然发送套接字设置了SO_DONTROUTE的数据不被网关路由，但是由于网关回应了arp(实际上是一次欺骗)，数据还是被发往网关了；第二种情况是网关没有启动arp代理，但是却使用了ip-mac保护，它侦测到有一个奇怪的arp请求(内部请求一个不同网段的ip地址的mac)，虽说这并不是非法的，路由器也可以由于好奇而回应自己的mac，从而将数据包引入自己这里，如果说请求一个不同网段ip的mac并不是非法的，但是如果网关设定了ip和mac的绑定，它并没有在这些绑定中查到目的ip的任何信息，于是它就认为这个请求有问题，于是仍然可能回应自己的mac而引入这个数据包。所以除非你真的有一个直连的机器，否则数据不但发不到，一些arp的信息都足以是你疑惑万分。
+     SO_BINGTODEVICE仅仅为套接字绑定了一个接口，而SO_DONTROUTE仅仅是不通过网关发送，不管你设置网关是什么，它总是以数据的目的地址作为下一跳。   
+
+* TCP协议疑难杂症全景解析
+2011-07-17 19:28 15106人阅读 评论(38) 收藏 举报
+tcp网络路由器算法网络协议互联网
+
+目录(?)[+]
+说明：
+1).本文以TCP的发展历程解析容易引起混淆，误会的方方面面
+2).本文不会贴大量的源码，大多数是以文字形式描述，我相信文字看起来是要比代码更轻松的
+3).针对对象：对TCP已经有了全面了解的人。因为本文不会解析TCP头里面的每一个字段或者3次握手的细节，也不会解释慢启动和快速重传的定义
+4).除了《TCP/IP详解》(卷一，卷二)以及《Unix网络编程》以及Linux源代码之外，学习网络更好的资源是RFC
+
+5).本文给出一个提纲，如果想了解细节，请直接查阅RFC
+
+6).翻来覆去，终于找到了这篇备忘，本文基于这篇备忘文档修改。
+1.网络协议设计
+ISO提出了OSI分层网络模型，这种分层模型是理论上的，TCP/IP最终实现了一个分层的协议模型，每一个层次对应一组网络协议完成一组特定的功能，该组网络协议被其下的层次复用和解复用。这就是分层模型的本质，最终所有的逻辑被编码到线缆或者电磁波。
+     分层模型是很好理解的，然而对于每一层的协议设计却不是那么容易。TCP/IP的漂亮之处在于：协议越往上层越复杂。我们把网络定义为互相连接在一起的设备，网络的本质作用还是“端到端”的通信，然而希望互相通信的设备并不一定要“直接”连接在一起，因此必然需要一些中间的设备负责转发数据，因此就把连接这些中间设备的线缆上跑的协议定义为链路层协议，实际上所谓链路其实就是始发与一个设备，通过一根线，终止于另一个设备。我们把一条链路称为“一跳”。因此一个端到端的网络包含了“很多跳”。
+2.TCP和IP协议
+终止于IP协议，我们已经可以完成一个端到端的通信，为何还需要TCP协议？这是一个问题，理解了这个问题，我们就能理解TCP协议为何成了现在这个样子，为何如此“复杂”，为何又如此简单。
+     正如其名字所展示的那样，TCP的作用是传输控制，也就是控制端到端的传输，那为何这种控制不在IP协议中实现的。答案很简单，那就是这会增加IP协议的复杂性，而IP协议需要的就是简单。这是什么原因造成的呢？
+     首先我们认识一下为何IP协议是沙漏的细腰部分。它的下层是繁多的链路层协议，这些链路提供了相互截然不同且相差很远的语义，为了互联这些异构的网络，我们需要一个网络层协议起码要提供一些适配的功能，另外它必然不能提供太多的“保证性服务”，因为上层的保证性依赖下层的约束性更强的保证性，你永远无法在一个100M吞吐量的链路之上实现的IP协议保证1000M的吞吐量...
+     IP协议设计为分组转发协议，每一跳都要经过一个中间节点，路由的设计是TCP/IP网络的另一大创举，这样，IP协议就无需方向性，路由信息和协议本身不再强关联，它们仅仅通过IP地址来关联，因此，IP协议更加简单。路由器作为中间节点也不能太复杂，这涉及到成本问题，因此路由器只负责选路以及转发数据包。
+     因此传输控制协议必然需要在端点实现。在我们详谈TCP协议之前，首先要看一下它不能做什么，由于IP协议不提供保证，TCP也不能提供依赖于IP下层链路的这种保证，比如带宽，比如时延，这些都是链路层决定的，既然IP协议无法修补，TCP也不能，然而它却能修正始于IP层的一些“不可保证性质”，这些性质包括IP层的不可靠，IP层的不按顺序，IP层的无方向/无连接。
+     将该小节总结一下，TCP/IP模型从下往上，功能增加，需要实现的设备减少，然而设备的复杂性却在增加，这样保证了成本的最小化，至于性能或者因素，靠软件来调节吧，TCP协议就是这样的软件，实际上最开始的时候，TCP并不考虑性能，效率，公平性，正是考虑了这些，TCP协议才复杂了起来。
+3.TCP协议
+这是一个纯软件协议，为何将其设计上两个端点，参见上一小节，本节详述TCP协议，中间也穿插一些简短的论述。
+3.1.TCP协议
+确切的说，TCP协议有两重身份，作为网络协议，它弥补了IP协议尽力而为服务的不足，实现了有连接，可靠传输，报文按序到达。作为一个主机软件，它和UDP以及左右的传输层协议隔离了主机服务和网络，它们可以被看做是一个多路复用/解复用器，将诸多的主机进程数据复用/解复用到IP层。可以看出，不管从哪个角度，TCP都作为一个接口存在，作为网络协议，它和对端的TCP接口，实现TCP的控制逻辑，作为多路复用/解复用器，它和下层IP协议接口，实现协议栈的功能，而这正是分层网络协议模型的基本定义(两类接口，一类和下层接口，另一类和对等层接口)。
+     我们习惯于将TCP作为协议栈的最顶端，而不把应用层协议当成协议栈的一部分，这部分是因为应用层被TCP/UDP解复用了之后，呈现出了一种太复杂的局面，应用层协议用一种不同截然不同的方式被解释，应用层协议习惯于用类似ASN.1标准来封装，这正体现了TCP协议作为多路复用/解复用器的重要性，由于直接和应用接口，它可以很容易直接被应用控制，实现不同的传输控制策略，这也是TCP被设计到离应用不太远的地方的原因之一。
+     总之，TCP要点有四，一曰有连接，二曰可靠传输，三曰数据按照到达，四曰端到端流量控制。注意，TCP被设计时只保证这四点，此时它虽然也有些问题，然而很简单，然而更大的问题很快呈现出来，使之不得不考虑和IP网络相关的东西，比如公平性，效率，因此增加了拥塞控制，这样TCP就成了现在这个样子。
+3.2.有连接，可靠传输，数据按序到达的TCP
+IP协议是没有方向的，数据报传输能到达对端全靠路由，因此它是一跳一跳地到达对端的，只要有一跳没有到达对端的路由，那么数据传输将失败，其实路由也是互联网的核心之一，实际上IP层提供的核心基本功能有两点，第一点是地址管理，第二点就是路由选路。TCP利用了IP路由这个简单的功能，因此TCP不必考虑选路，这又一个它被设计成端到端协议的原因。
+     既然IP已经能尽力让单独的数据报到达对端，那么TCP就可以在这种尽力而为的网络上实现其它的更加严格的控制功能。TCP给无连接的IP网络通信增加了连接性，确认了已经发送出去的数据的状态，并且保证了数据的顺序。
+3.2.1.有连接
+这是TCP的基本，因为后续的传输的可靠性以及数据顺序性都依赖于一条连接，这是最简单的实现方式，因此TCP被设计成一种基于流的协议，既然TCP需要事先建立连接，之后传输多少数据就无所谓了，只要是同一连接的数据能识别出来即可。
+疑难杂症1：3次握手和4次挥手
+TCP使用3次握手建立一条连接，该握手初始化了传输可靠性以及数据顺序性必要的信息，这些信息包括两个方向的初始序列号，确认号由初始序列号生成，使用3次握手是因为3次握手已经准备好了传输可靠性以及数据顺序性所必要的信息，该握手的第3次实际上并不是需要单独传输的，完全可以和数据一起传输。
+     TCP使用4次挥手拆除一条连接，为何需要4次呢？因为TCP是一个全双工协议，必须单独拆除每一条信道。注意，4次挥手和3次握手的意义是不同的，很多人都会问为何建立连接是3次握手，而拆除连接是4次挥手。3次握手的目的很简单，就是分配资源，初始化序列号，这时还不涉及数据传输，3次就足够做到这个了，而4次挥手的目的是终止数据传输，并回收资源，此时两个端点两个方向的序列号已经没有了任何关系，必须等待两方向都没有数据传输时才能拆除虚链路，不像初始化时那么简单，发现SYN标志就初始化一个序列号并确认SYN的序列号。因此必须单独分别在一个方向上终止该方向的数据传输。
+疑难杂症2：TIME_WAIT状态
+为何要有这个状态，原因很简单，那就是每次建立连接的时候序列号都是随机产生的，并且这个序列号是32位的，会回绕。现在我来解释这和TIME_WAIT有什么关系。
+     任何的TCP分段都要在尽力而为的IP网络上传输，中间的路由器可能会随意的缓存任何的IP数据报，它并不管这个IP数据报上被承载的是什么数据，然而根据经验和互联网的大小，一个IP数据报最多存活MSL(这是根据地球表面积，电磁波在各种介质中的传输速率以及IP协议的TTL等综合推算出来的，如果在火星上，这个MSL会大得多...)。
+     现在我们考虑终止连接时的被动方发送了一个FIN，然后主动方回复了一个ACK，然而这个ACK可能会丢失，这会造成被动方重发FIN，这个FIN可能会在互联网上存活MSL。
+     如果没有TIME_WAIT的话，假设连接1已经断开，然而其被动方最后重发的那个FIN(或者FIN之前发送的任何TCP分段)还在网络上，然而连接2重用了连接1的所有的5元素(源IP，目的IP，TCP，源端口，目的端口)，刚刚将建立好连接，连接1迟到的FIN到达了，这个FIN将以比较低但是确实可能的概率终止掉连接2.
+     为何说是概率比较低呢？这涉及到一个匹配问题，迟到的FIN分段的序列号必须落在连接2的一方的期望序列号范围之内。虽然这种巧合很少发生，但确实会发生，毕竟初始序列号是随机产生了。因此终止连接的主动方必须在接受了被动方且回复了ACK之后等待2*MSL时间才能进入CLOSE状态，之所以乘以2是因为这是保守的算法，最坏情况下，针对被动方的ACK在以最长路线(经历一个MSL)经过互联网马上到达被动方时丢失。
+     为了应对这个问题，RFC793对初始序列号的生成有个建议，那就是设定一个基准，在这个基准之上搞随机，这个基准就是时间，我们知道时间是单调递增的。然而这仍然有问题，那就是回绕问题，如果发生回绕，那么新的序列号将会落到一个很低的值。因此最好的办法就是避开“重叠”，其含义就是基准之上的随机要设定一个范围。
+     要知道，很多人很不喜欢看到服务器上出现大量的TIME_WAIT状态的连接，因此他们将TIME_WAIT的值设置的很低，这虽然在大多数情况下可行，然而确实也是一种冒险行为。最好的方式就是，不要重用一个连接。
+疑难杂症3：重用一个连接和重用一个套接字
+这是根本不同的，单独重用一个套接字一般不会有任何问题，因为TCP是基于连接的。比如在服务器端出现了一个TIME_WAIT连接，那么该连接标识了一个五元素，只要客户端不使用相同的源端口，连接服务器是没有问题的，因为迟到的FIN永远不会到达这个连接。记住，一个五元素标识了一个连接，而不是一个套接字(当然，对于BSD套接字而言，服务端的accept套接字确实标识了一个连接)。
+3.2.2.传输可靠性
+基本上传输可靠性是靠确认号实现的，也就是说，每发送一个分段，接下来接收端必然要发送一个确认，发送端收到确认后才可以发送下一个字节。这个原则最简单不过了，教科书上的“停止-等待”协议就是这个原则的字节版本，只是TCP使用了滑动窗口机制使得每次不一定发送一个字节，但是这是后话，本节仅仅谈一下确认的超时机制。
+     怎么知道数据到达对端呢？那就是对端发送一个确认，但是如果一直收不到对端的确认，发送端等多久呢？如果一直等下去，那么将无法发现数据的丢失，协议将不可用，如果等待时间过短，可能确认还在路上，因此等待时间是个问题，另外如何去管理这个超时时间也是一个问题。
+疑难杂症4：超时时间的计算
+绝对不能随意去揣测超时的时间，而应该给出一个精确的算法去计算。毫无疑问，一个TCP分段的回复到达的时间就是一个数据报往返的时间，因此标准定义了一个新的名词RTT，代表一个TCP分段的往返时间。然而我们知道，IP网络是尽力而为的，并且路由是动态的，且路由器会毫无先兆的缓存或者丢弃任何的数据报，因此这个RTT是需要动态测量的，也就是说起码每隔一段时间就要测量一次，如果每次都一样，万事大吉，然而世界并非如你所愿，因此我们需要找到的恰恰的一个“平均值”，而不是一个准确值。
+     这个平均值如果仅仅直接通过计算多次测量值取算术平均，那是不恰当的，因为对于数据传输延时，我们必须考虑的路径延迟的瞬间抖动，否则如果两次测量值分别为2和98，那么超时值将是50，这个值对于2而言，太大了，结果造成了数据的延迟过大(本该重传的等待了好久才重传)，然而对于98而言，太小了，结果造成了过度重传(路途遥远，本该很慢，结果大量重传已经正确确认但是迟到的TCP分段)。
+     因此，除了考虑每两次测量值的偏差之外，其变化率也应该考虑在内，如果变化率过大，则通过以变化率为自变量的函数为主计算RTT(如果陡然增大，则取值为比较大的正数，如果陡然减小，则取值为比较小的负数，然后和平均值加权求和)，反之如果变化率很小，则取测量平均值。这是不言而喻的，这个算法至今仍然工作的很好。
+疑难杂症5：超时计时器的管理-每连接单一计时器
+很显然，对每一个TCP分段都生成一个计时器是最直接的方式，每个计时器在RTT时间后到期，如果没有收到确认，则重传。然而这只是理论上的合理，对于大多数操作系统而言，这将带来巨大的内存开销和调度开销，因此采取每一个TCP连接单一计时器的设计则成了一个默认的选择。可是单一的计时器怎么管理如此多的发出去的TCP分段呢？又该如何来设计单一的计时器呢。
+     设计单一计时器有两个原则：1.每一个报文在长期收不到确认都必须可以超时；2.这个长期收不到中长期不能和测量的RTT相隔太远。因此RFC2988定义一套很简单的原则：
+a.发送TCP分段时，如果还没有重传定时器开启，那么开启它。
+b.发送TCP分段时，如果已经有重传定时器开启，不再开启它。
+c.收到一个非冗余ACK时，如果有数据在传输中，重新开启重传定时器。
+d.收到一个非冗余ACK时，如果没有数据在传输中，则关闭重传定时器。
+我们看看这4条规则是如何做到以上两点的，根据a和c(在c中，注意到ACK是非冗余的)，任何TCP分段只要不被确认，超时定时器总会超时的。然而为何需要c呢？只有规则a存在的话，也可以做到原则1。实际上确实是这样的，但是为了不会出现过早重传，才添加了规则c，如果没有规则c，那么万一在重传定时器到期前，发送了一些数据，这样在定时器到期后，除了很早发送的数据能收到ACK外，其它稍晚些发送的数据的ACK都将不会到来，因此这些数据都将被重传。有了规则c之后，只要有分段ACK到来，则重置重传定时器，这很合理，因此大多数正常情况下，从数据的发出到ACK的到来这段时间以及计算得到的RTT以及重传定时器超时的时间这三者相差并不大，一个ACK到来后重置定时器可以保护后发的数据不被过早重传。
+     这里面还有一些细节需要说明。一个ACK到来了，说明后续的ACK很可能会依次到来，也就是说丢失的可能性并不大，另外，即使真的有后发的TCP分段丢失现象发生，也会在最多2倍定时器超时时间的范围内被重传(假设该报文是第一个报文发出启动定时器之后马上发出的，丢失了，第一个报文的ACK到来后又重启了定时器，又经过了一个超时时间才会被重传)。虽然这里还没有涉及拥塞控制，但是可见网络拥塞会引起丢包，丢包会引起重传，过度重传反过来加重网络拥塞，设置规则c的结果可以缓解过多的重传，毕竟将启动定时器之后发送的数据的重传超时时间拉长了最多一倍左右。最多一倍左右的超时偏差做到了原则2，即“这个长期收不到中长期不能和测量的RTT相隔太远”。
+     还有一点，如果是一个发送序列的最后一个分段丢失了，后面就不会收到冗余ACK，这样就只能等到超时了，并且超时时间几乎是肯定会比定时器超时时间更长。如果这个分段是在发送序列的靠后的时间发送的且和前面的发送时间相隔时间较远，则其超时时间不会很大，反之就会比较大。
+疑难杂症6：何时测量RTT
+目前很多TCP实现了时间戳，这样就方便多了，发送端再也不需要保存发送分段的时间了，只需要将其放入协议头的时间戳字段，然后接收端将其回显在ACK即可，然后发送端收到ACK后，取出时间戳，和当前时间做算术差，即可完成一次RTT的测量。
+3.2.3.数据顺序性
+基本上传输可靠性是靠序列号实现的。
+疑难杂症7：确认号和超时重传
+确认号是一个很诡异的东西，因为TCP的发送端对于发送出去的一个数据序列，它只要收到一个确认号就认为确认号前面的数据都被收到了，即使前面的某个确认号丢失了，也就是说，发送端只认最后一个确认号。这是合理的，因为确认号是接收端发出的，接收端只确认按序到达的最后一个TCP分段。
+     另外，发送端重发了一个TCP报文并且接收到该TCP分段的确认号，并不能说明这个重发的报文被接收了，也可能是数据早就被接收了，只是由于其ACK丢失或者其ACK延迟到达导致了超时。值得说明的是，接收端会丢弃任何重复的数据，即使丢弃了重复的数据，其ACK还是会照发不误的。
+     标准的早期TCP实现为，只要一个TCP分段丢失，即使后面的TCP分段都被完整收到，发送端还是会重传从丢失分段开始的所有报文，这就会导致一个问题，那就是重传风暴，一个分段丢失，引起大量的重传。这种风暴实则不必要的，因为大多数的TCP实现中，接收端已经缓存了乱序的分段，这些被重传的丢失分段之后的分段到达接收端之后，很大的可能性是被丢弃。关于这一点在拥塞控制被引入之后还会提及(问题先述为快：本来报文丢失导致超时就说明网络很可能已然拥塞，重传风暴只能加重其拥塞程度)。
+疑难杂症8：乱序数据缓存以及选择确认
+TCP是保证数据顺序的，但是并不意味着它总是会丢弃乱序的TCP分段，具体会不会丢弃是和具体实现相关的，RFC建议如果内存允许，还是要缓存这些乱序到来的分段，然后实现一种机制等到可以拼接成一个按序序列的时候将缓存的分段拼接，这就类似于IP协议中的分片一样，但是由于IP数据报是不确认的，因此IP协议的实现必须缓存收到的任何分片而不能将其丢弃，因为丢弃了一个IP分片，它就再也不会到来了。    
+     现在，TCP实现了一种称为选择确认的方式，接收端会显式告诉发送端需要重传哪些分段而不需要重传哪些分段。这无疑避免了重传风暴。
+疑难杂症9：TCP序列号的回绕的问题
+TCP的序列号回绕会引起很多的问题，比如序列号为s的分段发出之后，m秒后，序列号比s小的序列号为j的分段发出，只不过此时的j比上一个s多了一圈，这就是回绕问题，那么如果这后一个分段到达接收端，这就会引发彻底乱序-本来j该在s后面，结果反而到达前面了，这种乱序是TCP协议检查不出来的。我们仔细想一下，这种情况确实会发生，数据分段并不是一个字节一个字节发送出去的，如果存在一个速率为1Gbps的网络，TCP发送端1秒会发送125MB的数据，32位的序列号空间能传输2的32次方个字节，也就是说32秒左右就会发生回绕，我们知道这个值远小于MSL值，因此会发生的。
+     有个细节可能会引起误会，那就是TCP的窗口大小空间是序列号空间的一半，这样恰好在满载情况下，数据能填满发送窗口和接收窗口，序列号空间正好够用。然而事实上，TCP的初始序列号并不是从0开始的，而是随机产生的(当然要辅助一些更精妙的算法)，因此如果初始序列号比较接近2的32次方，那么很快就会回绕。
+     当然，如今可以用时间戳选项来辅助作为序列号的一个识别的部分，接收端遇到回绕的情况，需要比较时间戳，我们知道，时间戳是单调递增的，虽然也会回绕，然而回绕时间却要长很多。这只是一种策略，在此不详谈。还有一个很现实的问题，理论上序列号会回绕，但是实际上，有多少TCP的端点主机直接架设在1G的网络线缆两端并且接收方和发送方的窗口还能恰好被同时填满。另外，就算发生了回绕，也不是一件特别的事情，回绕在计算机里面太常见了，只需要能识别出来即可解决，对于TCP的序列号而言，在高速网络(点对点网络或者以太网)的两端，数据发生乱序的可能性很小，因此当收到一个序列号突然变为0或者终止序列号小于起始序列号的情况后，很容易辨别出来，只需要和前一个确认的分段比较即可，如果在一个经过路由器的网络两端，会引发IP数据报的顺序重排，对于TCP而言，虽然还会发生回绕，也会慢得多，且考虑到拥塞窗口(目前还没有引入)一般不会太大，窗口也很难被填满到65536。
+3.2.4.端到端的流量控制
+端到端的流量控制使用滑动窗口来实现。滑动窗口的原理非常简单，基本就是一个生产者/消费者模型
+疑难杂症10：流量控制的真实意义
+很多人以为流量控制会很有效的协调两端的流量匹配，确实是这样，但是如果你考虑到网络的利用率问题，TCP的流量控制机制就不那么完美了，造成这种局面的原因在于，滑动窗口只是限制了最大发送的数据，却没有限制最小发送的数据，结果导致一些很小的数据被封装成TCP分段，报文协议头所占的比例过于大，造成网络利用率下降，这就引出了接下来的内容，那就是端到端意义的TCP协议效率。
+~~~~~~~~~~~~~~~~~~~~
+承上启下
+终于到了阐述问题的时候了，以上的TCP协议实现的非常简单，这也是TCP的标准实现，然而很快我们就会发现各种各样的问题。这些问题导致了标准化协会对TCP协议进行了大量的修补，这些修补杂糅在一起让人们有些云里雾里，不知所措。本文档就旨在分离这些杂乱的情况，实际上，根据RFC，这些杂乱的情况都是可以找到其单独的发展轨迹的。
+~~~~~~~~~~~~~~~~~~~~
+
+4.端到端意义上的TCP协议效率
+4.1.三个问题以及解决
+问题1描述：接收端处理慢，导致接收窗口被填满
+这明显是速率不匹配引发的问题，然而即使速率不匹配，只要滑动窗口能协调好它们的速率就好，要快都快，要慢都慢，事实上滑动窗口在这一点上做的很好。但是如果我们不得不从效率上来考虑问题的话，事实就不那么乐观了。考虑此时接收窗口已然被填满，慢速的应用程序慢腾腾的读取了一个字节，空出一个位置，然后通告给TCP的发送端，发送端得知空出一个位置，马上发出一个字节，又将接收端填满，然后接收应用程序又一次慢腾腾...这就是糊涂窗口综合症，一个大多数人都很熟悉的词。这个问题极大的浪费了网络带宽，降低了网络利用率。好比从大同拉100吨煤到北京需要一辆车，拉1Kg煤到北京也需要一辆车(超级夸张的一个例子，请不要相信)，但是一辆车开到北京的开销是一定的...
+问题1解决：窗口通告
+对于问题1，很显然问题出在接收端，我们没有办法限制发送端不发送小分段，但是却可以限制接收端通告小窗口，这是合理的，这并不影响应用程序，此时经典的延迟/吞吐量反比律将不再适用，因为接收窗口是满的，其空出一半空间表示还有一半空间有数据没有被应用读取，和其空出一个字节的空间的效果是一样的，因此可以限制接收端当窗口为0时，直接通告给发送端以阻止其继续发送数据，只有当其接收窗口再次达到MSS的一半大小的时候才通告一个不为0的窗口，此前对于所有的发送端的窗口probe分段(用于探测接收端窗口大小的probe分段，由TCP标准规定)，全部通告窗口为0，这样发送端在收到窗口不为0的通告，那么肯定是一个比较大的窗口，因此发送端可以一次性发出一个很大的TCP分段，包含大量数据，也即拉了好几十吨的煤到北京，而不是只拉了几公斤。
+     即，限制窗口通告时机，解决糊涂窗口综合症
+问题2描述：发送端持续发送小包，导致窗口闲置
+这明显是发送端引起的问题，此时接收端的窗口开得很大，然而发送端却不积累数据，还是一味的发送小块数据分段。只要发送了任和的分段，接收端都要无条件接收并且确认，这完全符合TCP规范，因此必然要限制发送端不发送这样的小分段。
+问题2解决：Nagle算法
+Nagel算法很简单，标准的Nagle算法为：
+IF 数据的大小和窗口的大小都超过了MSS
+    Then 发送数据分段
+ELSE
+    IF 还有发出的TCP分段的确认没有到来
+        Then 积累数据到发送队列的末尾的TCP分段
+    ELSE
+        发送数据分段
+    EndIF
+EndIF
+可是后来，这个算法变了，变得更加灵活了，其中的：
+    IF 还有发出的TCP分段的确认没有到来
+变成了
+    IF 还有发出的不足MSS大小的TCP分段的确认没有到来
+这样如果发出了一个MSS大小的分段还没有被确认，后面也是可以随时发送一个小分段的，这个改进降低了算法对延迟时间的影响。这个算法体现了一种自适应的策略，越是确认的快，越是发送的快，虽然Nagle算法看起来在积累数据增加吞吐量的同时也加大的时延，可事实上，如果对于类似交互式的应用，时延并不会增加，因为这类应用回复数据也是很快的，比如Telnet之类的服务必然需要回显字符，因此能和对端进行自适应协调。
+     注意，Nagle算法是默认开启的，但是却可以关闭。如果在开启的情况下，那么它就严格按照上述的算法来执行。
+问题3.确认号(ACK)本身就是不含数据的分段，因此大量的确认号消耗了大量的带宽
+这是TCP为了确保可靠性传输的规范，然而大多数情况下，ACK还是可以和数据一起捎带传输的。如果没有捎带传输，那么就只能单独回来一个ACK，如果这样的分段太多，网络的利用率就会下降。从大同用火车拉到北京100吨煤，为了确认煤已收到，北京需要派一辆同样的火车空载开到大同去复命，因为没有别的交通工具，只有火车。如果这位复命者刚开着一列火车走，又从大同来了一车煤，这拉煤的哥们儿又要开一列空车去复命了。
+问题3的解决：
+RFC建议了一种延迟的ACK，也就是说，ACK在收到数据后并不马上回复，而是延迟一段可以接受的时间，延迟一段时间的目的是看能不能和接收方要发给发送方的数据一起回去，因为TCP协议头中总是包含确认号的，如果能的话，就将ACK一起捎带回去，这样网络利用率就提高了。往大同复命的确认者不必开一辆空载火车回大同了，此时北京正好有一批货物要送往大同，这位复命者搭着这批货的火车返回大同。
+     如果等了一段可以接受的时间，还是没有数据要发往发送端，此时就需要单独发送一个ACK了，然而即使如此，这个延迟的ACK虽然没有等到可以被捎带的数据分段，也可能等到了后续到来的TCP分段，这样它们就可以取最大者一起返回了，要知道，TCP的确认号是收到的按序报文的最后一个字节的后一个字节。最后，RFC建议，延迟的ACK最多等待两个分段的积累确认。
+4.2.分析三个问题之间的关联
+三个问题导致的结果是相同的，但是要知道它们的原因本质上是不同的，问题1几乎总是出现在接收端窗口满的情况下，而问题2几乎总是发生在窗口闲置的情况下，问题3看起来是最无聊的，然而由于TCP的要求，必须要有确认号，而且一个确认号就需要一个TCP分段，这个分段不含数据，无疑是很小的。
+     三个问题都导致了网络利用率的降低。虽然两个问题导致了同样的结果，但是必须认识到它们是不同的问题，很自然的将这些问题的解决方案汇总在一起，形成一个全局的解决方案，这就是如今的操作系统中的解决方案。
+4.3.问题的杂糅情况
+疑难杂症11：糊涂窗口解决方案和Nagle算法
+糊涂窗口综合症患者希望发送端积累TCP分段，而Nagle算法确实保证了一定的TCP分段在发送端的积累，另外在延迟ACK的延迟的那一会时间，发送端会利用这段时间积累数据。然而这却是三个不同的问题。Nagle算法可以缓解糊涂窗口综合症，却不是治本的良药。
+疑难杂症12：Nagle算法和延迟ACK
+延迟ACK会延长ACK到达发送端的时间，由于标准Nagle算法只允许一个未被确认的TCP分段，那无疑在接收端，这个延迟的ACK是毫无希望等待后续数据到来最终进行积累确认的，如果没有数据可以捎带这个ACK，那么这个ACK只有在延迟确认定时器超时的时候才会发出，这样在等待这个ACK的过程中，发送端又积累了一些数据，因此延迟ACK实际上是在增加延迟的代价下加强了Nagle算法。在延迟ACK加Nagle算法的情况下，接收端只有不断有数据要发回，才能同时既保证了发送端的分段积累，又保证了延迟不增加，同时还没有或者很少有空载的ACK。
+     要知道，延迟ACK和Nagle是两个问题的解决方案。
+疑难杂症13：到底何时可以发送数据
+到底何时才能发送数据呢？如果单从Nagle算法上看，很简单，然而事实证明，情况还要更复杂些。如果发送端已经排列了3个TCP分段，分段1，分段2，分段3依次被排入，三个分段都是小分段(不符合Nagle算法中立即发送的标准)，此时已经有一个分段被发出了，且其确认还没有到来，请问此时能发送分段1和2吗？如果按照Nagle算法，是不能发送的，但实际上它们是可以发送的，因为这两个分段已经没有任何机会再积累新的数据了，新的数据肯定都积累在分段3上了。问题在于，分段还没有积累到一定大小时，怎么还可以产生新的分段？这是可能的，但这是另一个问题，在此不谈。
+     Linux的TCP实现在这个问题上表现的更加灵活，它是这么判断能否发送的(在开启了Nagle的情况下)：
+IF (没有超过拥塞窗口大小的数据分段未确认 || 数据分段中包含FIN ) &&
+    数据分段没有超越窗口边界
+    Then
+    IF 分段在中间(上述例子中的分段1和2) ||
+           分段是紧急模式            ||
+       通过上述的Nagle算法(改进后的Nagle算法)
+        Then 发送分段
+    EndIF
+EndIF
+     曾经我也改过Nagle算法，确切的说不是修改Nagle算法，而是修改了“到底何时能发送数据”的策略，以往都是发送端判断能否发送数据的，可是如果此时有延迟ACK在等待被捎带，而待发送的数据又由于积累不够或者其它原因不能发送，因此两边都在等，这其实在某些情况下不是很好。我所做的改进中对待何时能发送数据又增加了一种情况，这就是“ACK拉”的情况，一旦有延迟ACK等待发送，判断一下有没有数据也在等待发送，如果有的话，看看数据是否大到了一定程度，在此，我选择的是MSS的一半：
+IF (没有超过拥塞窗口大小的数据分段未确认 || 数据分段中包含FIN ) &&
+     数据分段没有超越窗口边界                      
+    Then
+    IF 分段在中间(上述例子中的分段1和2) ||
+           分段是紧急模式            ||
+       通过上述的Nagle算法(改进后的Nagle算法)
+        Then 发送分段
+    EndIF
+ELSE IF 有延迟ACK等待传输                &&
+    发送队列中有待发送的TCP分段       &&
+    发送队列的头分段大小大于MSS的一半
+        Then 发送队列头分段且捎带延迟ACK
+EndIF
+另外，发送队列头分段的大小是可以在统计意义上动态计算的，也不一定非要是MSS大小的一半。我们发现，这种算法对于交互式网路应用是自适应的，你打字越快，特定时间内积累的分段就越长，对端回复的越快(可以捎带ACK)，本端发送的也就越快(以Echo举例会更好理解)。 
+疑难杂症14：《TCP/IP详解(卷一)》中Nagle算法的例子解读
+这个问题在网上搜了很多的答案，有的说RFC的建议，有的说别的。可是实际上这就是一个典型的“竞态问题”：
+首先服务器发了两个分段：
+数据段12：ack 14
+数据段13：ack 14，54:56
+然后客户端发了两个分段：
+数据段14：ack 54，14:17
+数据段15：ack 56，17:18
+可以看到数据段14本来应该确认56的，但是确认的却是54。也就是说，数据段已经移出队列将要发送但还未发送的时候，数据段13才到来，软中断处理程序抢占了数据段14的发送进程，要知道此时只是把数据段14移出了队列，还没有更新任何的状态信息，比如“发出但未被确认的分段数量”，此时软中断处理程序顺利接收了分段13，然后更新窗口信息，并且检查看有没有数据要发送，由于分段14已经移出队列，下一个接受发送检查的就是分段15了，由于状态信息还没有更新，因此分段15顺利通过发送检测，发送完成。
+     可以看Linux的源代码了解相关信息，tcp_write_xmit这个函数在两个地方会被调用，一个是TCP的发送进程中，另一个就是软中断的接收处理中，两者在调用中的竞态就会引起《详解》中的那种情况。注意，这种不加锁的发送方式是合理的，也是最高效的，因此TCP的处理语义会做出判断，丢弃一切不该接收或者重复接收的分段的。
+~~~~~~~~~~~~~~~~~~~~
+承上启下
+又到了该承上启下，到此为止，我们叙述的TCP还都是简单的TCP，就算是简单的TCP，也存在上述的诸多问题，就更别提继续增加TCP的复杂性了。到此为止，我们的TCP都是端到端意义上的，然而实际上TCP要跑在IP网络之上的，而IP网络的问题是很多的，是一个很拥堵网络。不幸的是，TCP的有些关于确认和可靠性的机制还会加重IP网络的拥堵。
+~~~~~~~~~~~~~~~~~~~~
+
+5.IP网络之上的TCP
+5.1.端到端的TCP协议和IP协议之间的矛盾
+端到端的TCP只能看到两个节点，那就是自己和对方，它们是看不到任何中间的路径的。可是IP网络却是一跳一跳的，它们的矛盾之处在于TCP的端到端流量控制必然会导致网络拥堵。因为每条TCP连接的一端只知道它对端还有多少空间用于接收数据，它们并不管到达对端的路径上是否还有这么大的容量，事实上所有连接的这些空间加在一起将瞬间超过IP网络的容量，因此TCP也不可能按照滑动窗口流量控制机制很理想的运行。
+     势必需要一种拥塞控制机制，反应路径的拥塞情况。
+疑难杂症15：拥塞控制的本质
+由于TCP是端到端协议，因此两端之间的控制范畴属于流量控制，IP网络的拥塞会导致TCP分段的丢失，由于TCP看不到中间的路由器，因此这种丢失只会发生中间路由器，当然两个端点的网卡或者IP层丢掉数据分段也是TCP看不到的。因此拥塞控制必然作用于IP链路。事实上我们可以得知，只有在以下情况下拥塞控制才会起作用：
+a.两个或两个以上的连接(其中一个一定要是TCP，另一个可以是任意连接)经过同一个路由器或者同一个链路时；
+b.只有一个TCP连接，然而它经过了一个路由器时。
+其它情况下是不会拥塞的。因为一个TCP总是希望独享整条网络通路，而这对于多个连接而言是不可能的，必须保证TCP的公平性，这样这种拥塞控制机制才合理。本质上，拥塞的原因就是大家都想独享全部带宽资源，结果导致拥塞，这也是合理的，毕竟TCP看不到网络的状态，同时这也决定了TCP的拥塞控制必须采用试探性的方式，最终到达一个足以引起其“反应”的“刺激点”。
+     拥塞控制需要完成以下两个任务：1.公平性；2.拥塞之后退出拥塞状态。
+疑难杂症16：影响拥塞的因素
+我们必须认识到拥塞控制是一个整体的机制，它不偏向于任何TCP连接，因此这个机制内在的就包含了公平性。那么影响拥塞的因素都有什么呢？具有讽刺意味的是，起初TCP并没有拥塞控制机制，正是TCP的超时重传风暴(一个分段丢失造成后续的已经发送的分段均被重传，而这些重传大多数是不必要的)加重了网络的拥塞。因此重传必然不能过频，必须把重传定时器的超时时间设置的稍微长一些，而这一点在单一重传定时器的设计中得到了加强。除此TCP自身的因素之外，其它所有的拥塞都可以靠拥塞控制机制来自动完成。
+     另外，不要把路由器想成一种线速转发设备，再好的路由器只要接入网络，总是会拉低网络的总带宽，因此即使只有一个TCP连接，由于TCP的发送方总是以发送链路的带宽发送分段，这些分段在经过路由器的时候排队和处理总是会有时延，因此最终肯定会丢包的。
+     最后，丢包的延后性也会加重拥塞。假设一个TCP连接经过了N个路由器，前N-1个路由器都能顺利转发TCP分段，但是最后一个路由器丢失了一个分段，这就导致了这些丢失的分段浪费了前面路由器的大量带宽。
+5.2.拥塞控制的策略
+在介绍拥塞控制之前，首先介绍一下拥塞窗口，它实际上表示的也是“可以发送多少数据”，然而这个和接收端通告的接收窗口意义是不一样的，后者是流量控制用的窗口，而前者是拥塞控制用的窗口，体现了网络拥塞程度。
+     拥塞控制整体上分为两类，一类是试探性的拥塞探测，另一类则是拥塞避免(注意，不是常规意义上的拥塞避免)。
+5.2.1.试探性的拥塞探测分为两类，之一是慢启动，之二是拥塞窗口加性扩大(也就是熟知的拥塞避免，然而这种方式是避免不了拥塞的)。
+5.2.2.拥塞避免方式拥塞控制旨在还没有发生拥塞的时候就先提醒发送端，网络拥塞了，这样发送端就要么可以进入快速重传/快速恢复或者显式的减小拥塞窗口，这样就避免网络拥塞的一沓糊涂之后出现超时，从而进入慢启动阶段。
+5.2.3.快速重传和快速恢复。所谓快速重传/快速恢复是针对慢启动的，我们知道慢启动要从1个MSS开始增加拥塞窗口，而快速重传/快速恢复则是一旦收到3个冗余ACK，不必进入慢启动，而是将拥塞窗口缩小为当前阀值的一半加上3，然后如果继续收到冗余ACK，则将拥塞窗口加1个MSS，直到收到一个新的数据ACK，将窗口设置成正常的阀值，开始加性增加的阶段。
+     当进入快速重传时，为何要将拥塞窗口缩小为当前阀值的一半加上3呢？加上3是基于数据包守恒来说的，既然已经收到了3个冗余ACK，说明有三个数据分段已经到达了接收端，既然三个分段已经离开了网络，那么就是说可以在发送3个分段了，只要再收到一个冗余ACK，这也说明1个分段已经离开了网络，因此就将拥塞窗口加1个MSS。直到收到新的ACK，说明直到收到第三个冗余ACK时期发送的TCP分段都已经到达对端了，此时进入正常阶段开始加性增加拥塞窗口。
+疑难杂症17：超时重传和收到3个冗余ACK后重传
+这两种重传的意义是不同的，超时重传一般是因为网络出现了严重拥塞(没有一个分段到达，如果有的话，肯定会有ACK的，若是正常ACK，则重置重传定时器，若是冗余ACK，则可能是个别报文丢失或者被重排序，若连续3个冗余ACK，则很有可能是个别分段丢失)，此时需要更加严厉的缩小拥塞窗口，因此此时进入慢启动阶段。而收到3个冗余ACK后说明确实有中间的分段丢失，然而后面的分段确实到达了接收端，这因为这样才会发送冗余ACK，这一般是路由器故障或者轻度拥塞或者其它不太严重的原因引起的，因此此时拥塞窗口缩小的幅度就不能太大，此时进入快速重传/快速恢复阶段。
+疑难杂症18：为何收到3个冗余ACK后才重传
+这是一种权衡的结构，收到两个或者一个冗余ACK也可以重传，但是这样的话可能或造成不必要的重传，因为两个数据分段发生乱序的可能性不大，超过三个分段发生乱序的可能性才大，换句话说，如果仅仅收到一个乱序的分段，那很可能被中间路由器重排了，那么另一个分段很可能马上就到，然而如果连续收到了3个分段都没能弥补那个缺漏，那很可能是它丢失了，需要重传。因此3个冗余ACK是一种权衡，在减少不必要重传和确实能检测出单个分段丢失之间所作的权衡。
+     注意，冗余ACK是不能捎带的。
+疑难杂症19：乘性减和加性增的深层含义
+为什么是乘性减而加性增呢？拥塞窗口的增加受惠的只是自己，而拥塞窗口减少受益的大家，可是自己却受到了伤害。哪一点更重要呢？我们知道TCP的拥塞控制中内置了公平性，恰恰就是这种乘性减实现了公平性。拥塞窗口的1个MSS的改变影响一个TCP发送者，为了使得自己拥塞窗口的减少影响更多的TCP发送者-让更多的发送者受益，那么采取了乘性减的策略。
+     当然，BIC算法提高了加性增的效率，不再一个一个MSS的加，而是一次加比较多的MSS，采取二分查找的方式逐步找到不丢包的点，然后加性增。
+疑难杂症20：TCP连接的传输稳定状态是什么
+首先，先说一下发送端的发送窗口怎么确定，它取的是拥塞窗口和接收端通告窗口的最小值。然后，我们提出三种发送窗口的稳定状态：
+a.IP互联网络上接收端拥有大窗口的经典锯齿状
+b.IP互联网络上接收端拥有小窗口的直线状态
+c.直连网络端点间的满载状态下的直线状态
+其中a是大多数的状态，因为一般而言，TCP连接都是建立在互联网上的，而且是大量的，比如Web浏览，电子邮件，网络游戏，Ftp下载等等。TCP发送端用慢启动或者拥塞避免方式不断增加其拥塞窗口，直到丢包的发生，然后进入慢启动或者拥塞避免阶段(要看是由于超时丢包还是由于冗余ACK丢包)，此时发送窗口将下降到1或者下降一半，这种情况下，一般接收端的接收窗口是比较大的，毕竟IP网络并不是什么很快速的网络，一般的机器处理速度都很快。
+     但是如果接收端特别破，处理速度很慢，就会导致其通告一个很小的窗口，这样的话，即使拥塞窗口再大，发送端也还是以通告的接收窗口为发送窗口，这样就不会发生拥塞。最后，如果唯一的TCP连接运行在一个直连的两台主机上，那么它将独享网络带宽，这样该TCP的数据流在最好的情况下将填满网络管道(我们把网络管道定义为带宽和延时的乘积)，其实在这种情况下是不存在拥塞的，就像你一个人独自徘徊在飘雨黄昏的街头一样...
+5.2.4.主动的拥塞避免
+前面我们描述的拥塞控制方式都是试探性的检测，然后拥塞窗口被动的进行乘性减，这样在接收端窗口很大的情况下(一般都是这样，网络拥堵，分段就不会轻易到达接收端，导致接收端的窗口大量空置)就可能出现锯齿形状的“时间-窗口”图，类似在一个拥堵的北京X环上开车，发送机发动，车开动，停止，等待，发动机发动，车开动...听声音也能听出来。
+     虽然TCP看不到下面的IP网络，然而它还是可以通过检测RTT的变化以及拥塞窗口的变化推算出IP网络的拥堵情况的。就比方说北京东四环一家快递公司要持续送快递到西四环，当发件人发现货到时间越来越慢的时候，他会意识到“下班高峰期快到了”...
+     可以通过持续观测RTT的方式来主动调整拥塞窗口的大小而不是一味的加性增。然而还有更猛的算法，那就是计算两个差值的乘积：
+(当前拥塞窗口-上一次拥塞窗口)x(当前的RTT-上一次的RTT)
+如果结果是正数，则拥塞窗口减少1/8，若结果是负数或者0，则窗口增加一个MSS。注意，这回不再是乘性减了，可以看出，减的幅度比乘性减幅度小，这是因为这种拥塞控制是主动的，而不是之前的那种被动的试探方式。在试探方式中，乘性减以一种惩罚的方式实现了公平性，而在这里的主动方式中，当意识到要拥塞的时候，TCP发送者主动的减少了拥塞窗口，为了对这种自首行为进行鼓励，采用了小幅减少拥塞窗口的方式。需要注意的是，在拥塞窗口减小的过程中，乘积的前一个差值是负数，如果后一个差值也是负数，那么结果就是继续缩减窗口，直到拥塞缓解或者窗口减少到了一定程度，使得后一个差值成了正数或者0，这种情况下，其实后一个差值只能变为0。
+疑难杂症21：路由器和TCP的互动
+虽然有了5.2.4节介绍的主动的拥塞检测，那么路由器能不能做点什么帮助检测拥塞呢？这种对路由器的扩展是必要的，要知道，每天有无数的TCP要通过路由器，虽然路由器不管TCP协议的任何事(当然排除连接跟踪之类的，这里所说的是标准的IP路由器)，但是它却能以一种很简单的方式告诉TCP的两端IP网络发生了拥堵，这种方式就是当路由器检测到自己发生轻微拥堵的时候随机的丢包，随机丢包而不是连续丢包对于TCP而言是有重大意义的，随机丢包会使TCP发现丢弃了个别的分段而后续的分段仍然会到达接收端，这样TCP发送端就会接收到3个冗余ACK，然后进入快速重传/快速恢复而不是慢启动。
+     这就是路由器能帮TCP做的事。
+6.其它
+疑难杂症22：如何学习TCP
+很多人发帖问TCP相关的内容，接下来稀里哗啦的就是让看《TCP/IP详解》和《Unix网络编程》里面的特定章节，我觉得这种回答很不负责任。因为我并不认为这两本书有多大的帮助，写得确实很不错，然而可以看出Richard Stevens是一个实用主义者，他喜欢用实例来解释一切，《详解》通篇都是用tcpdump的输出来讲述的，这种方式只是适合于已经对TCP很理解的人，然而大多数的人是看不明白的。
+     如果想从设计的角度来说，这两本书都很烂。我觉得应该先看点入门的，比如Wiki之类的，然后看RFC文档,793，896，1122等)，这样你就明白TCP为何这么设计了，而这些你永远都不能在Richard Stevens的书中得到。最后，如果你想，那么就看一点Richard Stevens的书，最重要的还是写点代码或者敲点命令，然后抓包自己去分析。
+疑难杂症23：Linux，Windows和网络编程
+我觉得在Linux上写点TCP的代码是很不错的，如果有BSD那就更好了。不推荐用Winsock学习TCP。虽然微软声称自己的API都是为了让事情更简单，但实际上事情却更复杂了，如果你用Winsock学习，你就要花大量的时候去掌握一些和网络编程无关但是windows平台上却少不了的东西
+6.1.总结
+TCP协议是一个端到端的协议，虽然话说它是一个带流量控制，拥塞控制的协议，然而正是因为这些所谓的控制才导致了TCP变得复杂。同时这些特性是互相杂糅的，流量控制带来了很多问题，解决这些问题的方案最终又带来了新的问题，这些问题在解决的时候都只考虑了端到端的意义，但实际上TCP需要尽力而为的IP提供的网络，因此拥塞成了最终的结症，拥塞控制算法的改进也成了一个单独的领域。
+     在学习TCP的过程中，切忌一锅粥一盘棋的方式，一定要分清楚每一个算法到底是解决什么问题的，每一个问题和其他问题到底有什么关联，这些问题的解决方案之间有什么关联，另外TCP的发展历史也最好了解一下，这些都搞明白了，TCP协议就彻底被你掌控了。接下来你就可以学习Socket API了，然后高效的TCP程序出自你手！
+
+* Iptables 规则 一些简单实例和详细介绍
+设定规则 
+iptables -p INPUT DROP 
+ iptables -p OUTPUT ACCEPT 
+ iptables -p FORWARD DROP 
+
+1、防止外网用内网IP欺骗
+iptables -t nat -A PREROUTING -i eth0 -s 10.0.0.0/8 -j DROP 
+ iptables -t nat -A PREROUTING -i eth0 -s 172.16.0.0/12 -j DROP 
+ iptables -t nat -A PREROUTING -i eth0 -s 192.168.0.0/16 -j DROP
+
+   查看nat规则
+iptables -t nat -L
+
+2、如果想取消上面所加的规则：
+iptables -F -t nat 
+ iptables -X -t nat 
+ iptables -Z -t nat 
+
+3、阻止一个IP连接本机
+iptables -t filter -A INPUT -s 192.168.1.5 -i eth0 -j DROP
+
+4、查看本机的IPTABLES的所填规则
+iptables -L -n
+
+5、清除filter中所有的规则连接
+iptables -F
+
+  清除filter中使用者自定义连接中的规则
+iptables -X
+
+6、保存所修改的iptables规则
+/etc/rc.d/init.d/iptables save
+
+  重新启动iptables服务
+service iptables restart
+
+7、关闭不安全的端口连接本机
+iptables -A OUTPUT -p tcp --sport 31337 -j DROP 
+ iptables -A OUTPUT -p tcp --dport 31337 -j DROP
+
+8、开启所需要的端口
+22 
+ iptables -A INPUT -p tcp --dport 22 -j ACCEPT 
+ iptables -A OUTPUT -p tcp --sport 22 -j ACCEPT 
+ 80 
+ iptables -A OUTPUT -p tcp --sport 80 -j ACCEPT 
+ iptables -A INPUT -p tcp --dport 80 -j ACCEPT
+
+9、禁止一个IP或者一个IP段访问服务器端口服务
+80端口 
+ iptables -t filter -I INPUT 2 -s 192.168.5.0/24 -p tcp --dport http -j DROP
+FTP端口 
+ iptables -t filter -I INPUT 2 -s 192.168.7.9 -p tcp --dport ftp -j DROP
+
+
+ 用iptables -ADC 来指定链的规则，-A添加 -D删除 -C 修改
+
+ iptables - [RI] chain rule num rule-specification[option]
+ 用iptables - RI 通过规则的顺序指定
+
+ iptables -D chain rule num[option]
+ 删除指定规则
+ iptables -[LFZ] [chain][option]
+ 用iptables -LFZ 链名 [选项]
+
+ iptables -[NX] chain
+ 用 -NX 指定链
+
+ iptables -P chain target[options]
+ 指定链的默认目标
+
+ iptables -E old-chain-name new-chain-name
+ -E 旧的链名 新的链名 
+ 用新的链名取代旧的链名
+ 说明
+ Iptalbes 是用来设置、维护和检查Linux内核的IP包过滤规则的。 
+ 可以定义不同的表，每个表都包含几个内部的链，也能包含用户定义的链。每个链都是一个规则列表，对对应的包进行匹配：每条规则指定应当如何处理与之相匹配的包。这被称作'target'（目标），也可以跳向同一个表内的用户定义的链。
+
+ TARGETS
+ 防火墙的规则指定所检查包的特征，和目标。如果包不匹配，将送往该链中下一条规则检查；如果匹配,那么下一条规则由目标值确定.该目标值可以是用户定义的链名,或是某个专用值,如ACCEPT[通过], DROP[删除], QUEUE[排队], 或者 RETURN[返回]。
+ ACCEPT 表示让这个包通过。DROP表示将这个包丢弃。QUEUE表示把这个包传递到用户空间。RETURN表示停止这条链的匹配，到前一个链的规则重新开始。如果到达了一个内建的链(的末端)，或者遇到内建链的规则是RETURN，包的命运将由链准则指定的目标决定。
+
+ TABLES
+ 当前有三个表（哪个表是当前表取决于内核配置选项和当前模块)。
+ -t table
+ 这个选项指定命令要操作的匹配包的表。如果内核被配置为自动加载模块，这时若模块没有加载，(系统)将尝试(为该表)加载适合的模块。这些表如下：filter,这是默认的表，包含了内建的链INPUT（处理进入的包）、FORWORD（处理通过的包）和OUTPUT（处理本地生成的包）。nat,这个表被查询时表示遇到了产生新的连接的包,由三个内建的链构成：PREROUTING (修改到来的包)、OUTPUT（修改路由之前本地的包）、POSTROUTING（修改准备出去的包）。mangle 这个表用来对指定的包进行修改。它有两个内建规则：PREROUTING（修改路由之前进入的包）和OUTPUT（修改路由之前本地的包）。
+ OPTIONS
+ 这些可被iptables识别的选项可以区分不同的种类。
+
+ COMMANDS
+ 这些选项指定执行明确的动作：若指令行下没有其他规定,该行只能指定一个选项.对于长格式的命令和选项名,所用字母长度只要保证iptables能从其他选项中区分出该指令就行了。
+ -A -append
+ 在所选择的链末添加一条或更多规则。当源（地址）或者/与 目的（地址）转换为多个地址时，这条规则会加到所有可能的地址(组合)后面。
+
+ -D -delete
+ 从所选链中删除一条或更多规则。这条命令可以有两种方法：可以把被删除规则指定为链中的序号(第一条序号为1),或者指定为要匹配的规则。
+
+ -R -replace
+ 从选中的链中取代一条规则。如果源（地址）或者/与 目的（地址）被转换为多地址，该命令会失败。规则序号从1开始。
+
+ -I -insert
+ 根据给出的规则序号向所选链中插入一条或更多规则。所以，如果规则序号为1，规则会被插入链的头部。这也是不指定规则序号时的默认方式。
+
+ -L -list
+ 显示所选链的所有规则。如果没有选择链，所有链将被显示。也可以和z选项一起使用，这时链会被自动列出和归零。精确输出受其它所给参数影响。
+
+ -F -flush
+ 清空所选链。这等于把所有规则一个个的删除。
+
+ --Z -zero
+ 把所有链的包及字节的计数器清空。它可以和 -L配合使用，在清空前察看计数器，请参见前文。
+
+ -N -new-chain
+ 根据给出的名称建立一个新的用户定义链。这必须保证没有同名的链存在。
+
+ -X -delete-chain
+ 删除指定的用户自定义链。这个链必须没有被引用，如果被引用，在删除之前你必须删除或者替换与之有关的规则。如果没有给出参数，这条命令将试着删除每个非内建的链。
+
+
+ -P -policy
+ 设置链的目标规则。
+
+ -E -rename-chain
+ 根据用户给出的名字对指定链进行重命名，这仅仅是修饰，对整个表的结构没有影响。TARGETS参数给出一个合法的目标。只有非用户自定义链可以使用规则，而且内建链和用户自定义链都不能是规则的目标。
+
+ -h Help.
+ 帮助。给出当前命令语法非常简短的说明。
+
+ PARAMETERS
+ 参数
+ 以下参数构成规则详述，如用于add、delete、replace、append 和 check命令。
+
+ -p -protocal [!]protocol
+ 规则或者包检查(待检查包)的协议。指定协议可以是tcp、udp、icmp中的一个或者全部，也可以是数值，代表这些协议中的某一个。当然也可以使用在/etc/protocols中定义的协议名。在协议名前加上"!"表示相反的规则。数字0相当于所有all。Protocol all会匹配所有协议，而且这是缺省时的选项。在和check命令结合时，all可以不被使用。
+ -s -source [!] address[/mask]
+ 指定源地址，可以是主机名、网络名和清楚的IP地址。mask说明可以是网络掩码或清楚的数字，在网络掩码的左边指定网络掩码左边"1"的个数，因此，mask值为24等于255.255.255.0。在指定地址前加上"!"说明指定了相反的地址段。标志 --src 是这个选项的简写。
+
+ -d --destination [!] address[/mask]
+ 指定目标地址，要获取详细说明请参见 -s标志的说明。标志 --dst 是这个选项的简写。
+
+ -j --jump target
+ -j 目标跳转
+ 指定规则的目标；也就是说，如果包匹配应当做什么。目标可以是用户自定义链（不是这条规则所在的），某个会立即决定包的命运的专用内建目标，或者一个扩展（参见下面的EXTENSIONS）。如果规则的这个选项被忽略，那么匹配的过程不会对包产生影响，不过规则的计数器会增加。
+
+ -i -in-interface [!] [name]
+ i -进入的（网络）接口 [!][名称]
+ 这是包经由该接口接收的可选的入口名称，包通过该接口接收（在链INPUT、FORWORD和PREROUTING中进入的包）。当在接口名前使用"!"说明后，指的是相反的名称。如果接口名后面加上"+"，则所有以此接口名开头的接口都会被匹配。如果这个选项被忽略，会假设为"+"，那么将匹配任意接口。
+
+ -o --out-interface [!][name]
+ -o --输出接口[名称]
+ 这是包经由该接口送出的可选的出口名称，包通过该口输出（在链FORWARD、OUTPUT和POSTROUTING中送出的包）。当在接口名前使用"!"说明后，指的是相反的名称。如果接口名后面加上"+"，则所有以此接口名开头的接口都会被匹配。如果这个选项被忽略，会假设为"+"，那么将匹配所有任意接口。
+
+ [!] -f, --fragment
+ [!] -f --分片
+ 这意味着在分片的包中，规则只询问第二及以后的片。自那以后由于无法判断这种把包的源端口或目标端口（或者是ICMP类型的），这类包将不能匹配任何指定对他们进行匹配的规则。如果"!"说明用在了"-f"标志之前，表示相反的意思。
+
+ OTHER OPTIONS
+ 其他选项
+ 还可以指定下列附加选项：
+
+ -v --verbose
+ -v --详细
+ 详细输出。这个选项让list命令显示接口地址、规则选项（如果有）和TOS（Type of Service）掩码。包和字节计数器也将被显示，分别用K、M、G(前缀)表示1000、1,000,000和1,000,000,000倍（不过请参看-x标志改变它），对于添加,插入,删除和替换命令，这会使一个或多个规则的相关详细信息被打印。
+
+ -n --numeric
+ -n --数字
+ 数字输出。IP地址和端口会以数字的形式打印。默认情况下，程序试显示主机名、网络名或者服务（只要可用）。
+
+ -x -exact
+ -x -精确
+ 扩展数字。显示包和字节计数器的精确值，代替用K,M,G表示的约数。这个选项仅能用于 -L 命令。
+
+ --line-numbers
+ 当列表显示规则时，在每个规则的前面加上行号，与该规则在链中的位置相对应。
+
+ MATCH EXTENSIONS
+ 对应的扩展
+ iptables能够使用一些与模块匹配的扩展包。以下就是含于基本包内的扩展包，而且他们大多数都可以通过在前面加上!来表示相反的意思。
+
+ tcp
+ 当 --protocol tcp 被指定,且其他匹配的扩展未被指定时,这些扩展被装载。它提供以下选项：
+
+ --source-port [!] [port[:port]]
+ 源端口或端口范围指定。这可以是服务名或端口号。使用格式端口：端口也可以指定包含的（端口）范围。如果首端口号被忽略，默认是"0"，如果末端口号被忽略，默认是"65535"，如果第二个端口号大于第一个，那么它们会被交换。这个选项可以使用 --sport的别名。
+
+ --destionation-port [!] [port:[port]]
+ 目标端口或端口范围指定。这个选项可以使用 --dport别名来代替。
+
+ --tcp-flags [!] mask comp
+ 匹配指定的TCP标记。第一个参数是我们要检查的标记，一个用逗号分开的列表，第二个参数是用逗号分开的标记表,是必须被设置的。标记如下：SYN ACK FIN RST URG PSH ALL NONE。因此这条命令：iptables -A FORWARD -p tcp --tcp-flags SYN, ACK, FIN, RST SYN只匹配那些SYN标记被设置而ACK、FIN和RST标记没有设置的包。
+
+ [!] --syn
+ 只匹配那些设置了SYN位而清除了ACK和FIN位的TCP包。这些包用于TCP连接初始化时发出请求；例如，大量的这种包进入一个接口发生堵塞时会阻止进入的TCP连接，而出去的TCP连接不会受到影响。这等于 --tcp-flags SYN, RST, ACK SYN。如果"--syn"前面有"!"标记，表示相反的意思。
+
+ --tcp-option [!] number
+ 匹配设置了TCP选项的。
+
+ udp
+ 当protocol udp 被指定,且其他匹配的扩展未被指定时,这些扩展被装载,它提供以下选项：
+
+ --source-port [!] [port:[port]]
+ 源端口或端口范围指定。详见 TCP扩展的--source-port选项说明。
+
+ --destination-port [!] [port:[port]]
+ 目标端口或端口范围指定。详见 TCP扩展的--destination-port选项说明。
+
+ icmp
+ 当protocol icmp被指定,且其他匹配的扩展未被指定时,该扩展被装载。它提供以下选项：
+ --icmp-type [!] typename
+ 这个选项允许指定ICMP类型，可以是一个数值型的ICMP类型，或者是某个由命令iptables -p icmp -h所显示的ICMP类型名。
+
+ mac
+ --mac-source [!] address
+ 匹配物理地址。必须是XX:XX:XX:XX:XX这样的格式。注意它只对来自以太设备并进入PREROUTING、FORWORD和INPUT链的包有效。
+
+ limit
+ 这个模块匹配标志用一个标记桶过滤器一一定速度进行匹配,它和LOG目标结合使用来给出有限的登陆数.当达到这个极限值时,使用这个扩展包的规则将进行匹配.(除非使用了"!"标记)
+
+ --limit rate
+ 最大平均匹配速率：可赋的值有'/second', '/minute', '/hour', or '/day'这样的单位，默认是3/hour。
+
+ --limit-burst number
+ 待匹配包初始个数的最大值:若前面指定的极限还没达到这个数值,则概数字加1.默认值为5
+
+ multiport
+ 这个模块匹配一组源端口或目标端口,最多可以指定15个端口。只能和-p tcp 或者 -p udp 连着使用。
+
+ --source-port [port[, port]]
+ 如果源端口是其中一个给定端口则匹配
+
+ --destination-port [port[, port]]
+ 如果目标端口是其中一个给定端口则匹配
+
+ --port [port[, port]]
+ 若源端口和目的端口相等并与某个给定端口相等,则匹配。
+ mark
+ 这个模块和与netfilter过滤器标记字段匹配（就可以在下面设置为使用MARK标记）。
+
+ --mark value [/mask]
+ 匹配那些无符号标记值的包（如果指定mask，在比较之前会给掩码加上逻辑的标记）。
+
+ owner
+ 此模块试为本地生成包匹配包创建者的不同特征。只能用于OUTPUT链，而且即使这样一些包（如ICMP ping应答）还可能没有所有者，因此永远不会匹配。
+
+ --uid-owner userid
+ 如果给出有效的user id，那么匹配它的进程产生的包。
+
+ --gid-owner groupid
+ 如果给出有效的group id，那么匹配它的进程产生的包。
+
+ --sid-owner seessionid
+ 根据给出的会话组匹配该进程产生的包。
+
+ state
+ 此模块，当与连接跟踪结合使用时，允许访问包的连接跟踪状态。
+
+ --state state
+ 这里state是一个逗号分割的匹配连接状态列表。可能的状态是:INVALID表示包是未知连接，ESTABLISHED表示是双向传送的连接，NEW表示包为新的连接，否则是非双向传送的，而RELATED表示包由新连接开始，但是和一个已存在的连接在一起，如FTP数据传送，或者一个ICMP错误。
+
+ unclean
+ 此模块没有可选项，不过它试着匹配那些奇怪的、不常见的包。处在实验中。
+
+ tos
+ 此模块匹配IP包首部的8位tos（服务类型）字段（也就是说，包含在优先位中）。
+
+ --tos tos
+ 这个参数可以是一个标准名称，（用iptables -m tos -h 察看该列表），或者数值。
+
+ TARGET EXTENSIONS
+ iptables可以使用扩展目标模块：以下都包含在标准版中。
+
+ LOG
+ 为匹配的包开启内核记录。当在规则中设置了这一选项后，linux内核会通过printk()打印一些关于全部匹配包的信息（诸如IP包头字段等）。
+ --log-level level
+ 记录级别（数字或参看 syslog.conf(5)）。
+ --log-prefix prefix
+ 在纪录信息前加上特定的前缀：最多14个字母长，用来和记录中其他信息区别。
+
+ --log-tcp-sequence
+ 记录TCP序列号。如果记录能被用户读取那么这将存在安全隐患。
+
+ --log-tcp-options
+ 记录来自TCP包头部的选项。
+ --log-ip-options
+ 记录来自IP包头部的选项。
+
+ MARK
+ 用来设置包的netfilter标记值。只适用于mangle表。
+
+ --set-mark mark
+
+ REJECT
+ 作为对匹配的包的响应，返回一个错误的包：其他情况下和DROP相同。
+
+ 此目标只适用于INPUT、FORWARD和OUTPUT链，和调用这些链的用户自定义链。这几个选项控制返回的错误包的特性：
+
+ --reject-with type
+ Type可以是icmp-net-unreachable、icmp-host-unreachable、icmp-port-nreachable、icmp-proto-unreachable、 icmp-net-prohibited 或者 icmp-host-prohibited，该类型会返回相应的ICMP错误信息（默认是port-unreachable）。选项 echo-reply也是允许的；它只能用于指定ICMP ping包的规则中，生成ping的回应。最后，选项tcp-reset可以用于在INPUT链中,或自INPUT链调用的规则，只匹配TCP协议：将回应一个TCP RST包。
+ TOS
+ 用来设置IP包的首部八位tos。只能用于mangle表。
+
+ --set-tos tos
+ 你可以使用一个数值型的TOS 值，或者用iptables -j TOS -h 来查看有效TOS名列表。
+ MIRROR
+ 这是一个试验示范目标，可用于转换IP首部字段中的源地址和目标地址，再传送该包,并只适用于INPUT、FORWARD和OUTPUT链，以及只调用它们的用户自定义链。
+
+ SNAT
+ 这个目标只适用于nat表的POSTROUTING链。它规定修改包的源地址（此连接以后所有的包都会被影响），停止对规则的检查，它包含选项：
+
+ --to-source [-][:port-port]
+ 可以指定一个单一的新的IP地址，一个IP地址范围，也可以附加一个端口范围（只能在指定-p tcp 或者-p udp的规则里）。如果未指定端口范围，源端口中512以下的（端口）会被安置为其他的512以下的端口；512到1024之间的端口会被安置为1024以下的，其他端口会被安置为1024或以上。如果可能，端口不会被修改。
+
+ --to-destiontion [-][:port-port]
+ 可以指定一个单一的新的IP地址，一个IP地址范围，也可以附加一个端口范围（只能在指定-p tcp 或者-p udp的规则里）。如果未指定端口范围，目标端口不会被修改。
+
+ MASQUERADE
+ 只用于nat表的POSTROUTING链。只能用于动态获取IP（拨号）连接：如果你拥有静态IP地址，你要用SNAT。伪装相当于给包发出时所经过接口的IP地址设置一个映像，当接口关闭连接会终止。这是因为当下一次拨号时未必是相同的接口地址（以后所有建立的连接都将关闭）。它有一个选项：
+
+ --to-ports [-port>]
+ 指定使用的源端口范围，覆盖默认的SNAT源地址选择（见上面）。这个选项只适用于指定了-p tcp或者-p udp的规则。
+
+ REDIRECT
+ 只适用于nat表的PREROUTING和OUTPUT链，和只调用它们的用户自定义链。它修改包的目标IP地址来发送包到机器自身（本地生成的包被安置为地址127.0.0.1）。它包含一个选项：
+
+ --to-ports [ ]
+ 指定使用的目的端口或端口范围：不指定的话，目标端口不会被修改。只能用于指定了-p tcp 或 -p udp的规则。
+
+ DIAGNOSTICS
+ 诊断
+ 不同的错误信息会打印成标准错误：退出代码0表示正确。类似于不对的或者滥用的命令行参数错误会返回错误代码2，其他错误返回代码为1。
+
+ BUGS 
+ 臭虫
+ Check is not implemented (yet).
+ 检查还未完成。
+
+ COMPATIBILITY WITH IPCHAINS
+ 与ipchains的兼容性
+ iptables和Rusty Russell的ipchains非常相似。主要区别是INPUT 链只用于进入本地主机的包,而OUTPUT只用于自本地主机生成的包。因此每个包只经过三个链的一个；以前转发的包会经过所有三个链。其他主要区别是 -i 引用进入接口；-o引用输出接口，两者都适用于进入FORWARD链的包。当和可选扩展模块一起使用默认过滤器表时，iptables是一个纯粹的包过滤器。这能大大减少以前对IP伪装和包过滤结合使用的混淆，所以以下选项作了不同的处理：
+ -j MASQ
+ -M -S
+ -M -L
+ 在iptables中有几个不同的链。

@@ -1,0 +1,87 @@
+
+
+*  pdb调试
+用pdb调试有多种方式可选：
+
+1. 命令行启动目标程序，加上-m参数，这样调用myscript.py的话断点就是程序的执行第一行之前
+ python -m pdb myscript.py
+
+2. 在Python交互环境中启用调试
+ >>> import pdb
+ >>> import mymodule
+ >>> pdb.run(‘mymodule.test()’)
+
+3. 比较常用的，就是在程序中间插入一段程序，相对于在一般IDE里面打上断点然后启动debug，不过这种方式是hardcode的if __name__ == "__main__":
+    a = 1
+    import pdb
+    pdb.set_trace()
+    b = 2
+    c = a + b
+    print (c)
+
+
+然后正常运行脚本，到了pdb.set_trace()那就会定下来，就可以看到调试的提示符(Pdb)了
+
+常用的调试命令
+h(elp)，会打印当前版本Pdb可用的命令，如果要查询某个命令，可以输入 h [command]，例如：“h l” — 查看list命令
+l(ist)，可以列出当前将要运行的代码块
+
+(Pdb) l
+ 497 pdb.set_trace()
+ 498 base_data = {}
+ 499 new_data = {}
+ 500 try:
+ 501 execfile(base_file_name,{},base_data)
+ 502 -> execfile(new_file_name,{},new_data)
+ 503 except:
+ 504 logger.writeLog(“error! load result log error!”)
+ 505 print “load cmp logs error!”
+ 506 raise Exception, “load cmp logs error!”
+ 507 
+b(reak)， 设置断点，例如 “b 77″，就是在当前脚本的77行打上断点，还能输入函数名作为参数，断点就打到具体的函数入口，如果只敲b，会显示现有的全部断点
+
+(Pdb) b 504
+ Breakpoint 4 at /home/jchen/regression/regressionLogCMP.py:504
+condition bpnumber [condition]，设置条件断点，下面语句就是对第4个断点加上条件“a==3”
+
+(Pdb) condition 4 a==3
+ (Pdb) b
+ Num Type Disp Enb Where
+ 4 breakpoint keep yes at /home/jchen/regression/regressionLogCMP.py:504
+ stop only if a==3
+cl(ear)，如果后面带有参数，就是清除指定的断点（我在Python2.4上从来没成功过！！！）；如果不带参数就是清除所有的断点
+
+(Pdb) cl
+ Clear all breaks? y
+disable/enable，禁用/激活断点
+
+(Pdb) disable 3
+ (Pdb) b
+ Num Type Disp Enb Where
+ 3 breakpoint keep no at /home/jchen/regression/regressionLogCMP.py:505
+n(ext)，让程序运行下一行，如果当前语句有一个函数调用，用n是不会进入被调用的函数体中的
+
+s(tep)，跟n相似，但是如果当前有一个函数调用，那么s会进入被调用的函数体中
+c(ont(inue))，让程序正常运行，直到遇到断点
+j(ump)，让程序跳转到指定的行数
+
+(Pdb) j 497
+ > /home/jchen/regression/regressionLogCMP.py(497)compareLog()
+ -> pdb.set_trace()
+a(rgs)，打印当前函数的参数
+
+(Pdb) a
+ _logger =
+ _base = ./base/MRM-8137.log
+ _new = ./new/MRM-8137.log
+ _caseid = 5550001
+ _toStepNum = 10
+ _cmpMap = {‘_bcmpbinarylog’: ‘True’, ‘_bcmpLog’: ‘True’, ‘_bcmpresp’: ‘True’}
+p，最有用的命令之一，打印某个变量
+
+(Pdb) p _new
+ u’./new/MRM-8137.log’
+！，感叹号后面跟着语句，可以直接改变某个变量
+q(uit)，退出调试
+
+发现在命令行下调试程序也是一件挺有意思的事情，记录下来分享一下

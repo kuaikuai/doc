@@ -1,0 +1,205 @@
+读书笔记和实验
+
+* 《Pthread Primer》
+** 关于锁与数据保护的理解
+   page 110
+   我们通过锁来保护数据,实际上它们保护的是临界区的代码!
+   没有奇妙的东西能够强迫使用同一共享数据的其它函数加锁, 只有好的编程实践才能.
+
+** 锁引起的死锁 解决办法:
+    明确多个锁的级别关系,每次加锁时都使用相同的顺序加锁.
+    当要违反级别关系时,使用pthread_mutex_trylock函数.
+
+** 条件变量的理解
+   相当于拓展版的信号量,把内部封装打散了.
+   与信号量不同的是,互斥量和判断条件,都由程序员来显式控制.
+   
+** 条件变量使用应该遵守
+   page 117
+   pthread_mutex_lock(&lock);
+   while(condition) {
+     pthread_cond_wait(&cond, &lock);
+   }
+   pthread_mutex_unlock(&lock);
+
+   当别的线程调用
+   pthread_cond_signal(&cond);
+   唤醒上面的休眠线程时,被唤醒的线程必须重新检查一下,自己需要的条件是否满足.
+   因为条件变量本身与线程的需要等待条件并无直接联系.
+   
+   调用pthread_cond_signal的线程之前可能根本没有检查condition是否满足.
+
+** The Lost Wakeup 
+   page 121
+   线程漏掉了唤醒的信号,因为当时它并没有休眠.
+   pthread_mutex_lock(&m);
+   while(condition) {
+      pthread_cond_wait(&c, &m);
+   }
+   pthread_mutex_unlock(&m);
+
+   如果负责唤醒的线程在修改条件时没有加锁保护,
+   就会出现Lost Wakeup问题.
+   正确做法:
+   pthread_mutex_lock(&m);
+   condition = TRUE;
+   pthread_mutex_unlock(&m);
+   pthread_cond_signal(&c);
+
+   我的实验代码如下:
+在wait休眠之前,使用pthread_cond_signal向目标线程发送信号,
+结果该线程会漏掉信号,永久睡眠
+#+BEGIN_SRC C
+#include <stdio.h>
+#include <stdlib.h>
+#include <pthread.h>
+
+pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+pthread_cond_t cond;
+
+int condition = 0;
+
+void *test(void *arg)
+{
+    sleep(1);
+    pthread_mutex_lock(&lock);
+    pthread_cond_wait(&cond, &lock);
+    printf("live!\n");
+    pthread_mutex_unlock(&lock);
+    return NULL;
+}
+
+int main(int argc, char *argv[])
+{
+    pthread_t tid;
+    pthread_create(&tid, NULL, test, NULL);
+
+    pthread_cond_signal(&cond);
+    pthread_join(tid, NULL);
+    return 0;
+}
+#+END_SRC
+** pthread_cond_signal调用的时机
+   如上面实例:
+   pthread_mutex_lock(&m);
+   condition = TRUE;
+   pthread_mutex_unlock(&m);
+   pthread_cond_signal(&c);
+   在临界区外,调用!
+   如果在临界区内调用,
+   那当signal企图唤醒休眠等待条件的线程时,由于无法获取锁而再次休眠.
+
+** sem_wait注意
+   page 113
+   由于sem_wait可以被信号打断(这时,返回-1, errno为EINTR)
+   所以实际使用可以
+   void SEM_WAIT(sem_t *sem)
+   { while (sem_wait(sem) != 0) {}}
+
+** barrier
+   page 137
+   barrier用来同步多个线程,
+   在同步点上调用pthread_barrier_wait,减少其值.
+   当值为0时,所有线程唤醒,从统一起跑线继续执行.
+
+** TSD
+   page 155
+
+   TSD可以看作线程内的全局变量,
+   实际是在Thread结构中一个数组,访问代价高与全局变量,
+   如果可以不用的话,尽量不用.
+
+   可以用生成传入结构指针的方式,代替TSD.
+   我的理解:
+#+BEGIN_SRC c
+   struct mystruct {
+      int a;
+      int b;
+   };
+   struct mystruct *data = (struct mystruct *)malloc(sizeof(struct mystruct));
+   pthread_create(&tid, NULL, func, (void *)data);
+#+END_SRC
+
+** cancellation
+   cancellation可以用简单轮询的方式代替.
+** signal
+   不要使用signal handler,
+   但是如果需要处理超时alarm信号,则需要handler.
+   使用一个单独处理信号的线程,使用sigwait()捕获所有的想处理的信号.
+   如果确实想向某个线程发送信息,可以内部使用pthread_kill.
+#+BEGIN_SRC c
+pthread_sigmask(SIG_BLOCK, signal_set, NULL);
+sigwait(&signal_set, &signal);
+switch(signal) {
+    case SIGALRM:
+        run_alarm();
+        break;
+    case SIGUSR1:
+        run_usr1();
+        break;
+}
+#+END_SRC
+
+
+我的一个实验,实验结果输出"handler2".
+线程一发送的SIGALRM信号,自己没有获取到,
+反而让线程二获取到了。
+标明如果线程确实需要SIGALRM信号，需要特殊处理一下。
+#+BEGIN_SRC c
+#include <pthread.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <signal.h>
+void handler(int sig)
+{
+    printf("handler\n");
+}
+
+void handler2(int sig)
+{
+    printf("handler2\n");
+}
+
+void *thr_main(void *arg)
+{
+    static struct sigaction action;
+    action.sa_handler = handler;
+    sigaction(SIGALRM, &action, NULL);
+    alarm(2);
+    sleep(5);
+    return;
+}
+
+
+void *thr_main2(void *arg)
+{
+    static struct sigaction action;
+    action.sa_handler = handler2;
+    sigaction(SIGALRM, &action, NULL);
+    sleep(5);
+    return;
+}
+
+int main(int argc, char *argv[])
+{
+    pthread_t tid, tid2;
+    pthread_create(&tid, NULL, thr_main, NULL);
+    pthread_create(&tid2, NULL, thr_main2, NULL);
+    pthread_join(tid, NULL);
+    pthread_join(tid2,NULL);
+    return 0;
+}
+#+END_SRC
+
+** 其它
+   使用attirbute object来初始化线程和信号量的一些属性。
+   比较重要的两个：
+   pthread_attr_t attr;
+   pthread_attr_init(&attr);
+   pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+   pthread_attr_setdetachstate(&attr,PTHREAD_CREATE_DETACHED);
+   pthread_create(&tid, &attr, foo, NULL);
+
+
+
+* 《UNIX网络编程 卷1 套接字联网API》

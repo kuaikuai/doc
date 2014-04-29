@@ -1,0 +1,771 @@
+
+* 善用录屏软件。
+  描述一个操作，最方便
+  软件windows: WinK 
+
+  linux下方便的录屏命令
+  ffmpeg -f x11grab -s 1024*768 -r 20 -i :0.0 -sameq ~/recode.mpg -r后是刷新屏率，
+  推出直接Ctrl+C，方便、绿色。
+
+* 思维导图工具freemind
+* 编码转换工具iconv
+  还有对应libiconv库，方便编写转换程序
+* 常用的网络工具
+wireshark  报文分析
+
+nmap 网络扫描器
+
+nessus
+
+netcat 可以做后门服务程序
+
+tcpdump
+
+snort 
+
+ethereal(wireshark)
+
+hping2
+iptables/netfilter/ipchains/ipfwadm
+traceroute/ping/telnet
+lsof
+
+openvas
+
+
+* 制作windosXP系统U盘启动
+  使用WinSetupFromUSB
+  
+* 协议分析工具 wireshark 
+  用wireshark帮助学习TCP/IP
+  wireshark 过滤语句
+** wireshark 在windows中无法获取loopback
+  解决办法:
+  使用RawCap抓包，生成文件，然后用wireshark打卡
+
+* java手机全屏
+  java手机的程序底部总有一个虚拟键盘，
+  对于触摸屏手机，这个键盘没有用处，占用宝贵的屏幕空间。
+  下载的程序是jar格式的，可以用rar解压。
+  进入META-INF子目录，记事本编辑MANIFEST.MF
+  补充一行
+  MIDlet-Touch-Support: True
+  再重装一次就可以了。
+
+* 画图工具dia
+  有多许多graphviz无法生成的图，使用dia手动画，还不错。类似于visio
+* graphviz
+  我一直为生成合适的树状图，头疼，
+  使用ascci码，对齐太累，还老弄不清，没有得出合适的节点间距公式。
+  今天忽然想到<land of lisp>书使用graphviz生成游戏地图的事情。
+  哈哈，生成树状图，也就轻松了，有了它，可以轻松查看，各种树操作运行的结果，对于算法直观可见
+  dot -Tpng -O tree.dot
+* inno setup 制作安装文件
+  inno setup内置pascal，可以方便的使用pascal编写安装程序。
+  有完善的帮助文档，供查询。
+  安装的每一个阶段都有回调函数，我们在回调函数加入我们要求，来定制安装程序。
+** 生成有输入框的页面
+  调用CreateInputQueryPage函数。
+  实例代码如下：
+#+begin_src pascal
+  procedure InitializeWizard;
+  begin
+    //输入序列号的页面
+    UserPage := CreateInputQueryPage(wpWelcome,
+                'Information', '',
+                'Please specify the terminal number and server address, then click Next.');
+    UserPage.Add('Terminal NO.:', False);
+    UserPage.Add('Server Address:', False); 
+  end;
+#+end_src
+代码中可以使用 UserPage.Values[0] 和 UserPage.Values[1] 分别获取第一个和第二个输入框的输入值。
+** 生成输出消息的页面
+   实例代码如下：
+#+begin_src pascal
+   Page := CreateOutputMsgPage(wpInstalling, '信息', '请在继续前认真阅读下列重要信息。','ATM代理不支持该版本的XFS。');
+#+end_src
+  
+* 虚拟机使用
+** VirtualBox NAT 端口映射
+
+   我在公司的电脑上安装了一个Fedora 13作为工作环境，但是实际工作ATM监控偏偏必须要求XP的环境，
+   所以我在linux中VirtualBox安装windows XP, 由于需要测试XP中程序对外部服务程序的交互，而且公司了一个台机器（一个MAC）一个IP地址，所以不能用虚拟机的网卡桥接模式。
+   于是如何能让外部看到NAT内的程序的端口，过程如下：
+
+VirtualBox NAT网络模式下面，Guest系统对Host系统和局域网内其他的机器都是不可见的，所以Guest上面的任何服务都不能被外界访问到。这样很多情况下，是不能接受的，比如想在Guest系统为Ubuntu的虚拟机上面开启SSH服务，怎么办呢？两个方法，1、把网络连接方式改成Bridge模式，这样虚拟机的Guest系统就有了自己的IP地址，相当于局域网内的一台主机，这样Host系统和局域网内的其他机器都可以访问他了。2、在NAT网络模式下，开启端口映射。需要什么服务就映射什么端口数据。今天我以VirtualBox的guest系统Ubuntu系统开启SSH服务为例来介绍怎么配置端口映射。
+
+     首先介绍一下NAT网络模式下端口映射的优点，首先节省一个IP地址（有些情况下，IP地址资源比较宝贵）；其次，这样可以避免Server暴露过多的接口，提供什么服务暴露什么接口，这样保证Server安全性。当然这种方式也有一定的局限性，服务的端口必须是固定的，假如服务的端口是动态的，那么这种方式就没有办法了，比如NFS服务就不能用端口映射来实现。
+
+     下面介绍怎样在VirtualBox的Guest系统Ubuntu中启用SSH服务，Host系统为Windows。SSH服务的端口是22端口，理论上可以把Host系统Windows的22端口映射到Ubuntu的22端口。这样做不好，假如有一天Host系统Windows也要在22端口上提供服务就没有办法了，所以我们准备用Host系统的2222端口，映射到Ubuntu的22端口。
+
+     VBoxManage modifyvm "VM name" --natpf1 "guestssh,tcp,,2222,,22"
+
+     “VM name”就是Guest系统的名字，guestssh还是用户自定义的名字。你可能发现第三个参数和第五个参数空白了，是什么意思呢？当Host系统有多块网卡的时候，通过第三个参数指定那款网卡的2222端口映射；如果Host系统有多块网卡时，通过第五个参数指定那个网卡的22端口接收数据。
+
+VBoxManage modifyvm "VM name" --natpf1 "guestssh,tcp,,2222,10.0.2.19,22"
+
+     以上的命令式将Host系统2222端口的数据映射到Guest系统的10.0.2.10网卡的22端口。
+
+** Virtualbox 设置内外文件共享
+
+  在Virtualbox 的界面上，在虚拟机的设置中，“数据空间”设置共享名和host上共享的路径。
+  在虚拟机中，linux: mount -t vboxsf 共享名 /mnt
+             windows XP: 路径在 \\Vboxsvr\共享名
+   如果在虚拟机中mount共享文件夹，报一下错误：           
+  /sbin/mount.vboxsf:mounting failed with the error:protocol
+  原因一：共享名写错了
+  原因二：没有在虚拟机设置中，设置“数据空间”。
+  原因三：没有安装Guest Additions（增强功能）
+
+** virtualbox虚拟机的串口设置-简单有效地配置你的串口
+
+最近一直在查找virtualbox中串口如何设置。在google, baidu了N次以后，找出来的文章要么步骤非常复杂，要么根本就无法使用。索性自己探索，找出一种简单而又有效的配置方式。
+
+首先是宿主机，我用的是Debian-5.0, 在上面安装了目前最新的virtualbox-3.1.2. 在virtulbox里也安装了debian-5.0, 用来做测试。
+
+我们需要先配置一下宿主机器上的virtualbox。
+
+1. 在串口栏中勾选 []启用串口(E)
+
+2. 端口编号选择COM1
+
+3. 端口模式选择Host Pipe
+
+4. 勾选 []创建通道(C)
+
+5. Port/File Path: 填上 /tmp/serial. 也就是说我们在宿主机器的/tmp/中创建了serial的通道文件
+
+此外，我们还要在宿主机器上设定一下串口.在此之前需要安装minicom软件
+
+1. 运行minicom命令
+
+2. CTRL+A调出配置界面，选择Serial port setup
+
+3. Serial Device修改为 unix#/tmp/serial
+
+4. Bps/Par/Bits修改为 9600 8N1
+
+5. Hardware Flow Control和Software Flow Control都设置为No.
+
+6. 保存为dfl以后退出
+
+在虚拟机上配置：
+
+修改/boot/grub/menu.lst,将输出导出到串口
+
+title     Debian GNU/Linux, kernel 2.6.32.7
+
+root    (hd0,0)
+
+kernel  /boot/vmlinuz-2.6.32.7 root=/dev/hda1 ro console=ttyS0,9600
+
+initrd    /boot/initrd.img-2.6.32.7
+
+修改/etc/inittab,允许输出的控制台为ttyS0.
+
+将
+
+#T0:23:respawn:/sbin/getty -L ttyS0 9600 vt100
+
+启用即可。
+
+宿主机开启minicom, 然后启动虚拟机，就可以看到系统启动输出信息全部导出到了串口上。等到登陆界面出现的时候，就可以登陆操作。
+
+我的机器上minicom不好用。
+
+我使用另一个虚拟器，设置其串口也是/tmp/serial，但是不选创建创建通道(C)。
+
+这样两虚拟机就共享了串口，连接在一起，我在第二个虚拟机看第一个输出的内容，:-)
+
+** 复制虚拟机
+Virtualbox克隆命令格式 “VBoxManage clonevdi 原始VDI文件名 新的VDI文件名”
+** 虚拟机几种链接方式的用途
+  NAT方式，虚拟机可以通过host链接外网，但是外部不可以见它的ip.
+  桥接方式，虚拟机IP与host处于同一网段，外部网络可以同等看待虚拟机和宿主。
+  Host-only Adapter，host生成一个虚拟网卡，虚拟机和host使用这个虚拟网卡通讯。与外部通讯无关。
+
+** VMware 扩展硬盘大小
+3)  输入C:\Program Files\VMware\VMware Server\vmware-vdiskmanager.exe -x 10Gb D:\Example\disk_example.vmdk
+-x 表示extend
+10Gb表示要扩展之后要达到的总空间。
+
+** vmware 和 virtualbox 通用格式
+  原先在vmware中建的环境
+  我现在需要在virtualbox再建立一次，很麻烦。
+  我发现他们都支持import/export功能，而且都支持ovf格式。
+  所以可以把vmware中的export出来，然后import到virtualbox中
+* 本机代码版本管理
+  公司级别的SVN、CVS等由于往往提交受限，而且个人版本控制使用SVN或者CVS有些大而不当。
+  所以我采用RCS管理提交的服务器之前修改的代码。
+  在代码目录中，执行如下命令：
+#+begin_example
+  mkdir RCS
+  ci xxx.c
+  co xxx.c
+#+end_example
+  然后代码就提交到RCS中。
+
+* 广域网模拟器WANem
+  一个简化般的linux
+
+* ns2网络仿真
+http://www.isi.edu/nsnam/ns/index.html
+* cisco packet tracer 模拟器
+* 查看windows磁盘占用情况
+  SpaceSniffer
+* 怎么复制一个目录下的所有文件除了某几个文件或目录？
+  rsync -rv --exclude=“d/" --exclude="c/"  dir/ dir_bk/
+* Sikuli X 很棒自动化工具，可直接针对GUI编程
+* 善用录屏软件。
+  描述一个操作，最方便
+  软件windows: WinK 
+
+  linux下方便的录屏命令
+  ffmpeg -f x11grab -s 1024*768 -r 20 -i :0.0 -sameq ~/recode.mpg -r后是刷新屏率，
+  推出直接Ctrl+C，方便、绿色。
+
+* 思维导图工具freemind
+* 编码转换工具iconv
+  还有对应libiconv库，方便编写转换程序
+* 常用的网络工具
+wireshark  报文分析
+nmap 网络扫描器
+nessus
+netcat 可以做后门服务程序
+tcpdump
+snort
+ethereal(wireshark)
+hping2
+iptables/netfilter/ipchains/ipfwadm
+traceroute/ping/telnet
+lsof
+
+* 制作windosXP系统U盘启动
+  使用WinSetupFromUSB
+  
+* 协议分析工具 wireshark 
+  用wireshark帮助学习TCP/IP
+  wireshark 过滤语句
+* java手机全屏
+  java手机的程序底部总有一个虚拟键盘，
+  对于触摸屏手机，这个键盘没有用处，占用宝贵的屏幕空间。
+  下载的程序是jar格式的，可以用rar解压。
+  进入META-INF子目录，记事本编辑MANIFEST.MF
+  补充一行
+  MIDlet-Touch-Support: True
+  再重装一次就可以了。
+
+* 画图工具dia
+  有多许多graphviz无法生成的图，使用dia手动画，还不错。类似于visio
+* graphviz
+  我一直为生成合适的树状图，头疼，
+  使用ascci码，对齐太累，还老弄不清，没有得出合适的节点间距公式。
+  今天忽然想到<land of lisp>书使用graphviz生成游戏地图的事情。
+  哈哈，生成树状图，也就轻松了，有了它，可以轻松查看，各种树操作运行的结果，对于算法直观可见
+  dot -Tpng -O tree.dot
+* chm转换pdf
+  我的电纸书不支持pdf，而且我更喜欢pdf。
+  在linux上可以用chm2pdf转换。
+#+begin_example
+  chm2pdf xxx.chm xxx.pdf
+#+end_example
+  我常用的方式：
+#+begin_example
+  chm2pdf --book xxx.chm xxx.pdf  
+#+end_example
+* inno setup 制作安装文件
+  inno setup内置pascal，可以方便的使用pascal编写安装程序。
+  有完善的帮助文档，供查询。
+  安装的每一个阶段都有回调函数，我们在回调函数加入我们要求，来定制安装程序。
+** 生成有输入框的页面
+  调用CreateInputQueryPage函数。
+  实例代码如下：
+#+begin_src pascal
+  procedure InitializeWizard;
+  begin
+    //输入序列号的页面
+    UserPage := CreateInputQueryPage(wpWelcome,
+                'Information', '',
+                'Please specify the terminal number and server address, then click Next.');
+    UserPage.Add('Terminal NO.:', False);
+    UserPage.Add('Server Address:', False); 
+  end;
+#+end_src
+代码中可以使用 UserPage.Values[0] 和 UserPage.Values[1] 分别获取第一个和第二个输入框的输入值。
+** 生成输出消息的页面
+   实例代码如下：
+#+begin_src pascal
+   Page := CreateOutputMsgPage(wpInstalling, '信息', '请在继续前认真阅读下列重要信息。','ATM代理不支持该版本的XFS。');
+#+end_src
+  
+* 虚拟机使用
+** VirtualBox NAT 端口映射
+
+   我在公司的电脑上安装了一个Fedora 13作为工作环境，但是实际工作ATM监控偏偏必须要求XP的环境，
+   所以我在linux中VirtualBox安装windows XP, 由于需要测试XP中程序对外部服务程序的交互，而且公司了一个台机器（一个MAC）一个IP地址，所以不能用虚拟机的网卡桥接模式。
+   于是如何能让外部看到NAT内的程序的端口，过程如下：
+
+VirtualBox NAT网络模式下面，Guest系统对Host系统和局域网内其他的机器都是不可见的，所以Guest上面的任何服务都不能被外界访问到。这样很多情况下，是不能接受的，比如想在Guest系统为Ubuntu的虚拟机上面开启SSH服务，怎么办呢？两个方法，1、把网络连接方式改成Bridge模式，这样虚拟机的Guest系统就有了自己的IP地址，相当于局域网内的一台主机，这样Host系统和局域网内的其他机器都可以访问他了。2、在NAT网络模式下，开启端口映射。需要什么服务就映射什么端口数据。今天我以VirtualBox的guest系统Ubuntu系统开启SSH服务为例来介绍怎么配置端口映射。
+
+     首先介绍一下NAT网络模式下端口映射的优点，首先节省一个IP地址（有些情况下，IP地址资源比较宝贵）；其次，这样可以避免Server暴露过多的接口，提供什么服务暴露什么接口，这样保证Server安全性。当然这种方式也有一定的局限性，服务的端口必须是固定的，假如服务的端口是动态的，那么这种方式就没有办法了，比如NFS服务就不能用端口映射来实现。
+
+     下面介绍怎样在VirtualBox的Guest系统Ubuntu中启用SSH服务，Host系统为Windows。SSH服务的端口是22端口，理论上可以把Host系统Windows的22端口映射到Ubuntu的22端口。这样做不好，假如有一天Host系统Windows也要在22端口上提供服务就没有办法了，所以我们准备用Host系统的2222端口，映射到Ubuntu的22端口。
+
+     VBoxManage modifyvm "VM name" --natpf1 "guestssh,tcp,,2222,,22"
+
+     “VM name”就是Guest系统的名字，guestssh还是用户自定义的名字。你可能发现第三个参数和第五个参数空白了，是什么意思呢？当Host系统有多块网卡的时候，通过第三个参数指定那款网卡的2222端口映射；如果Host系统有多块网卡时，通过第五个参数指定那个网卡的22端口接收数据。
+
+VBoxManage modifyvm "VM name" --natpf1 "guestssh,tcp,,2222,10.0.2.19,22"
+
+     以上的命令式将Host系统2222端口的数据映射到Guest系统的10.0.2.10网卡的22端口。
+
+** Virtualbox 设置内外文件共享
+
+  在Virtualbox 的界面上，在虚拟机的设置中，“数据空间”设置共享名和host上共享的路径。
+  在虚拟机中，linux: mount -t vboxsf 共享名 /mnt
+             windows XP: 路径在 \\Vboxsvr\共享名
+   如果在虚拟机中mount共享文件夹，报一下错误：           
+  /sbin/mount.vboxsf:mounting failed with the error:protocol
+  原因一：共享名写错了
+  原因二：没有在虚拟机设置中，设置“数据空间”。
+  原因三：没有安装Guest Additions（增强功能）
+
+** virtualbox虚拟机的串口设置-简单有效地配置你的串口
+
+最近一直在查找virtualbox中串口如何设置。在google, baidu了N次以后，找出来的文章要么步骤非常复杂，要么根本就无法使用。索性自己探索，找出一种简单而又有效的配置方式。
+
+首先是宿主机，我用的是Debian-5.0, 在上面安装了目前最新的virtualbox-3.1.2. 在virtulbox里也安装了debian-5.0, 用来做测试。
+
+我们需要先配置一下宿主机器上的virtualbox。
+
+1. 在串口栏中勾选 []启用串口(E)
+
+2. 端口编号选择COM1
+
+3. 端口模式选择Host Pipe
+
+4. 勾选 []创建通道(C)
+
+5. Port/File Path: 填上 /tmp/serial. 也就是说我们在宿主机器的/tmp/中创建了serial的通道文件
+
+此外，我们还要在宿主机器上设定一下串口.在此之前需要安装minicom软件
+
+1. 运行minicom命令
+
+2. CTRL+A调出配置界面，选择Serial port setup
+
+3. Serial Device修改为 unix#/tmp/serial
+
+4. Bps/Par/Bits修改为 9600 8N1
+
+5. Hardware Flow Control和Software Flow Control都设置为No.
+
+6. 保存为dfl以后退出
+
+在虚拟机上配置：
+
+修改/boot/grub/menu.lst,将输出导出到串口
+
+title     Debian GNU/Linux, kernel 2.6.32.7
+
+root    (hd0,0)
+
+kernel  /boot/vmlinuz-2.6.32.7 root=/dev/hda1 ro console=ttyS0,9600
+
+initrd    /boot/initrd.img-2.6.32.7
+
+修改/etc/inittab,允许输出的控制台为ttyS0.
+
+将
+
+#T0:23:respawn:/sbin/getty -L ttyS0 9600 vt100
+
+启用即可。
+
+宿主机开启minicom, 然后启动虚拟机，就可以看到系统启动输出信息全部导出到了串口上。等到登陆界面出现的时候，就可以登陆操作。
+
+我的机器上minicom不好用。
+
+我使用另一个虚拟器，设置其串口也是/tmp/serial，但是不选创建创建通道(C)。
+
+这样两虚拟机就共享了串口，连接在一起，我在第二个虚拟机看第一个输出的内容，:-)
+
+** 复制虚拟机
+Virtualbox克隆命令格式 “VBoxManage clonevdi 原始VDI文件名 新的VDI文件名”
+** 虚拟机几种链接方式的用途
+  NAT方式，虚拟机可以通过host链接外网，但是外部不可以见它的ip.
+  桥接方式，虚拟机IP与host处于同一网段，外部网络可以同等看待虚拟机和宿主。
+  Host-only Adapter，host生成一个虚拟网卡，虚拟机和host使用这个虚拟网卡通讯。与外部通讯无关。
+
+** VMware 扩展硬盘大小
+3)  输入C:\Program Files\VMware\VMware Server\vmware-vdiskmanager.exe -x 10Gb D:\Example\disk_example.vmdk
+-x 表示extend
+10Gb表示要扩展之后要达到的总空间。
+
+** vmware 和 virtualbox 通用格式
+  原先在vmware中建的环境
+  我现在需要在virtualbox再建立一次，很麻烦。
+  我发现他们都支持import/export功能，而且都支持ovf格式。
+  所以可以把vmware中的export出来，然后import到virtualbox中
+* 本机代码版本管理
+  公司级别的SVN、CVS等由于往往提交受限，而且个人版本控制使用SVN或者CVS有些大而不当。
+  所以我采用RCS管理提交的服务器之前修改的代码。
+  在代码目录中，执行如下命令：
+#+begin_example
+  mkdir RCS
+  ci xxx.c
+  co xxx.c
+#+end_example
+  然后代码就提交到RCS中。
+
+* 广域网模拟器WANem
+  一个简化般的linux
+
+* ns2网络仿真
+http://www.isi.edu/nsnam/ns/index.html
+* cisco packet tracer 模拟器
+* 查看windows磁盘占用情况
+  SpaceSniffer
+* 怎么复制一个目录下的所有文件除了某几个文件或目录？
+  rsync -rv --exclude=“d/" --exclude="c/"  dir/ dir_bk/
+* linux 安全工具
+  lynis
+  gnu tiger
+
+  linux安全基线检查和加固工具
+  Tripwire
+  afick
+  sxid
+* lwp-request
+echo "a=&b=&=" | lwp-request -m POST http://xxxxx
+* openssl enc -ciphername
+* curl
+* 用google批量找反射xss
+* cain 破解md5 hash工具
+* nagios 安装
+服务器先安装好Apache。 
+
+从 http://www.nagios.org 下载以下软件：
+nagios-3.2.3.tar.gz 
+nagios-plugins-1.4.15.tar.gz 
+nrpe-2.12.tar.gz 
+
+** 安装Nagios Core 
+切换到root用户  
+su -l  
+添加nagios用户  
+useradd -m nagios  
+passwd nagios  
+  
+创建nagios组，允许用户在web上执行命令.  
+groupadd nagios
+usermod -a -G nagcmd nagios  
+usermod -a -G nagcmd apache  
+  
+tar xzvf nagios-3.2.3.tar.gz  
+  
+cd nagios-3.2.3  
+  
+./configure --with-command-group=nagcmd  
+  
+make all  
+  
+make install  
+make install-init  
+make install-config  
+make install-commandmode</pre><br><br>  
+
+
+configure完成后会显示如下提示 
+General Options:  
+-------------------------  
+       Nagios executable:  nagios  
+       Nagios user/group:  nagios,nagios  
+      Command user/group:  nagios,nagcmd  
+           Embedded Perl:  no  
+            Event Broker:  yes  
+       Install ${prefix}:  /usr/local/nagios  
+               Lock file:  ${prefix}/var/nagios.lock  
+  Check result directory:  ${prefix}/var/spool/checkresults  
+          Init directory:  /etc/rc.d/init.d  
+ Apache conf.d directory:  /etc/httpd/conf.d  
+            Mail program:  /bin/mail  
+                 Host OS:  linux-gnu  
+  
+Web Interface Options:  
+------------------------  
+                HTML URL:  http://localhost/nagios/  
+                 CGI URL:  http://localhost/nagios/cgi-bin/  
+Traceroute (used by WAP):  /bin/traceroute  
+
+
+配置文件目录/usr/local/nagios/etc 
+
+修改/usr/local/nagios/etc/objects/contacts.cfg中的邮箱地址为 
+nagios@xxx.edu.cn。该邮箱设置了过滤规则，所有信件转发到 xxx@139.com
+
+
+将/root/nagios-3.2.3/sample-config/httpd.conf中的片段拷贝到/usr/local/apache2/conf/httpd.conf中
+添加nagiosadmin用户 
+/usr/local/apache2/bin/htpasswd -c /usr/local/nagios/etc/htpasswd.users nagiosadmin
+
+** 安装Nagios Plugins 
+
+
+tar xzvf nagios-plugins-1.4.15.tar.gz  
+cd nagios-plugins-1.4.15  
+  
+./configure --with-nagios-user=nagios --with-nagios-group=nagios  
+  
+make  
+  
+make install  
+
+
+命令安装在/usr/local/nagios/libexec/目录下 
+
+** 启动Nagios 
+
+chkconfig --add nagios #将nagios添加到服务中  
+chkconfig nagios on #开启该服务  
+chkconfig --list nagios #查看服务启动状态  
+  
+  
+检查脚本正确性  
+/usr/local/nagios/bin/nagios -v /usr/local/nagios/etc/nagios.cfg  
+  
+service nagios start  
+
+
+
+
+
+访问 http://ip/nagios/
+
+
+** 安装NRPE 
+
+先安装Nagios Plugins，如果是在被监控主机上安装，需要先添加nagios用户。 
+
+tar xzvf nrpe-2.12.tar.gz  
+cd nrpe-2.12  
+  
+./configure  
+make all  
+  
+make install-plugin  
+
+
+安装NRPE Daemon 
+NRPE Daemon的端口5666 
+
+
+先按照上一步安装NRPE 
+
+make install-daemon  
+make install-daemon-config  
+make install-xinetd  
+
+
+安装完毕后NRPE的配置文件在/usr/local/nagios/etc/nrpe.cfg 
+编辑/etc/xinetd.d/nrpe 
+only_from = 127.0.0.1 #这里只能加一个IP
+编辑/etc/services，在最后一行加上 
+
+nrpe 5666/tcp # NRPE
+
+重启xinetd服务 
+
+service xinetd restart
+
+执行下面命令，检查服务有无正常启动 
+
+netstat -at | grep nrpe
+
+#应该出现以下提示
+tcp 0 0 *:nrpe *:* LISTEN
+
+
+测试NRPE Deamon服务 
+
+测试本机
+/usr/local/nagios/libexec/check_nrpe -H localhost
+
+测试远程
+/usr/local/nagios/libexec/check_nrpe -H 202.195.160.46
+
+正常会显示
+NRPE v2.12
+
+
+在监控主机上编辑/usr/local/nagios/etc/objects/commands.cfg，加入下面的command。
+
+define command{  
+        command_name  check_nrpe  
+        command_line  $USER1$/check_nrpe -H $HOSTADDRESS$ -c $ARG1$  
+}  
+
+
+重启监控主机的Nagios服务 
+
+service nagios restart
+
+测试接收邮件 
+
+首先需要将nagios监控主机的IP加入到邮件系统的信任主机列表中。否则必须使用外部邮件系统账号发送邮件。 
+
+新建/root/testmail文件 
+
+
+/bin/mail -v -s "test" nagios@xxx.edu.cn < /root/testmail -- -f nagios@xxx.edu.cn -F nagios  
+  
+/usr/bin/printf "%b" "test" | /bin/mail -v -s "test Alert" nagios@xxx.edu.cn -- -f nagios@xxx.edu.cn -F nagios  
+
+
+修改commands.cfg 
+
+notify-host-by-email 和 notify-service-by-email 末尾均加上以下语句。为了便于通过学校邮箱转139邮箱时不被139邮箱过滤。
+
+-- -f nagios@xxx.edu.cn -F nagios
+
+
+
+check_http 
+
+
+./check_http -H www.xxx.edu.cn -w 5 -c 8 -u /index.php -s "www.xxx.edu.cn"  
+  
+define command{  
+        command_name    check_http  
+        command_line    $USER1$/check_http -H $ARG1$ -w $ARG2$ -c $ARG3$ -u $ARG4$ -s $ARG5$  
+        }  
+  
+define service{  
+        use                     generic-service  
+        host_name               server-www-8  
+        service_description     website-www-8  
+         check_command      check_http!www.xxx.edu.cn!5!8!/index.php!"www.xxx.edu.cn"  
+        }  
+
+
+check_dns 
+
+
+./check_http -H www.xxx.edu.cn -a site's ip -w 5 -c 8  
+  
+define command {  
+         command_name check_dns  
+         command_line $USER1$/check_dns -s $HOSTADDRESS$ -H $ARG1$ -a $ARG2$ -w $ARG3$ -c $ARG4$  
+}  
+  
+define service{  
+        use                     generic-service  
+        host_name               server-dns-95  
+        service_description     network-dns-95  
+         check_command      check_dns!www.xxx.edu.cn!site's ip!5!8!  
+        }  
+
+* nagios Nagios监控报警时间设置
+  Nagios监控报警时间设置，打开 /usr/local/nagios/etc/nagios.cfg文件，如下配置：
+  interval_length 表示时间单位，默认为60，即1分钟
+  
+ /usr/local/nagios/etc/objects/services.cfg:(新版本不存在这个文件)
+ normal_check_interval 表示重新检测的时间间隔，默认为3个时间单位
+ check_interval 与normal_check_interval的作用一样，只能在3.X中使用
+ retry_check_interval 重试时间max_check_attempts 这个是出现故障的连接次数，达到这个次数之后就报警。
+
+ 关于max_check_attempts、normal_check_interval、retry_check_interval三个参数。
+首先要说明两个概念，一、软态：被监控项处于retry_check检测周期内的非正常状态；
+二、硬态：被监控项达到max_check_attempts最大次数后的非正常状态；除此之外的状态，我们估且称之为“常态”。
+我们试着看看设置如下参数时，Nagios是怎么做状态检测及告警的：
+ max_check_attempts 3
+ normal_check_interval 3
+ retry_check_interval 2
+ notification_interval 3
+ 首先，Nagios每三分钟检测一次服务，当某次检测到服务状态为异常时，直接进入软态（1/3 soft
+ state），此后，以每2分钟（retry_check_interval）的检测频率，再进行2次（一共进行3次检测，从
+ 而达到 max_check_attempts）检测，如果这两次检测服务都为异常，则直接进入硬态（hard state）
+ 。进入硬态后，Nagios以每3分钟（normal_check_interva）一次的频率检测服务，这与常态时是一样
+ 的；同时每3分钟（notification_interval）进行一次告警。
+
+ 注意：修改这些参数后并不是即时生效。首先要重启nagios，然后等待下一次检测完成，nagios才会按新的参数计算检测时间与报警次数。
+ 出现alert后，如果要发送email报警，需要满足以下条件：
+ service中有定义notifications_enabled=1，且此service的contacts有定义
+ service_notification_commands。
+ service_notification_commands的command出自于commands.cfg，这里定义了使用什么命令发送邮件。
+ host的alert是一样的。
+ 收不到邮件通常有以下几种可能：
+ 邮件被拒收，检查mail的log可以看到。
+ nagios是否发送告警邮件，跟contact.cfg（或hosts.cfg）配置文件里的几个参数有关系。下面就着重
+ 讲义下这几个参数：
+ notifications_enabled：是否启用通知提醒功能。1为开启，0为禁用。显而易见，此选项值为0时，
+ nagios肯定是不会发送邮件的。
+ contact_groups：定义接收通知提醒邮件的联系人群组。请确认你的邮件地址是否填写正确并在组中。
+ notification_interval：重复发送提醒邮件（信息）的最短间隔时间。默认间隔时间是60分钟。如果
+ 这个值被设为0，nagios将不会重复发送告警通知邮件，而是一次。 
+ notification_period：定义发送告警通知的时间段。关键主机服务，设为7×24；
+ 一般主机服务，设为上班时间（WorkTime）。那么， 如果定义的监控不在定义的告警时间段里，无论发生什么情况，nagios都不会发送告警通知邮件。
+ notification_options：定义被监控主机（对象）在何种情况下发送告警通知邮件，可选状态如下：
+ (1) w：WARNING，警告(2) u：UNKNOWN，未知(3) c：CRITICAL，危险（已达临界值）(4) d：DOWN，已宕机(5) r：RECOVERY，状态已恢复至OK(6) f：FLAPPING，（未弄懂这个状态的意思，也许是状态波动很大）(7) n：NONE，不发送告警通知邮件
+ nagios监控与报警时间间隔：
+ max_check_attempts：check_interval：retry interval：notification_interval：
+ 在OK状态，nagios用check_interval定义的时间间隔来监控，出现问题后，切换为retry_interval和
+ max_check_attempts进行监控，达到max_check_attempts后触发首次报警，同时恢复为check_interval
+ 进行监控，并用notification_interval定义的时间间隔来发送报警，服务恢复后，在最近的
+ check_interval点发送OK短信，完成报警周期。
+ 特殊：1.max_check_attempts定义为1，检测到问题后立即报警，不重试。2.notification_interval定义为0，报警只发送一次，不重发。
+
+ 巧用Escalations限制Nagios报警次数
+ Nagios是非常强大的一款监控工具，尤其是它的告警功能，现在网上实现的形式多种多样如结合移动
+ 139邮箱、Fetion、MSN等，但是如果服务器出现故障而未能及时的解决，Nagios就会不断的发送告警信
+ 息，实在令人头疼。现在用如下方法可以解决Nagios的告警次数问题。
+ vi escalations.cfg
+ escalations有自动调整;不断增加; 逐步上升等意思，本身配置文件的功能是当服务在某一告警次数前
+ 没有恢复，告警频率周期将会缩短，同时将告警信息发送至指定联系人。
+ 其内容为：
+ define hostescalation{
+ host_name WWW-Server //被监控主机名称，与Hosts.cfg中一致
+ first_notification 4 // 第n条信息起，改变频率间隔
+ last_notification 0 // 第n条信息起，恢复频率间隔
+ notification_interval 30 // 通知间隔(分)
+ contact_groups sysadmin
+ }
+ 说明：从第4条告警信息起至服务器恢复前，告警信息发送至sysadmin组下的联系人，告警间隔为30分
+ 钟1条信息。
+ define serviceescalation{
+ host_name WWW-Server //被监控主机名称，与Hosts.cfg中一致
+ service_description Check_HTTP,Check_Jetty //被监控服务名称，与Services.cfg中一致
+ first_notification 4
+ last_notification 0
+ notification_interval 30
+ contact_groups nt-admins,managers,everyone
+ }
+ 保存
+ 修改nagios.cfg
+ vi nagios.cfg添加：cfg_file=/etc/nagios/objects/escalations.cfg
+ 检查nagios配置文件是否正确/usr/sbin/nagios -v /etc/nagios/nagios.cfg
+ 重新启动nagios服务:service nagios restart
+ 测试：
+ 服务器启动后停掉被监控测试机的相应服务，确认告警信息是否按照设置发送至不同信箱
+ 总结
+ escalations这个功能官方给的定义是notification的扩充，使notification变得更加灵活，方便。文
+ 中我使用的方法算是耍了个小聪明，将第四条告警信息后的所有信息全部发送至我公司邮箱直至服务器
+ 恢复(recovery的信息还是会发送至手机的)，从而实现限制告警信息发送至手机的条数。这样，用
+ Escalations限制Nagios报警次数的功能就成功实现了。
+
+* nagios nrpe 调试
+  /usr/local/nagios/etc/nrpe.cfg
+  修改debug=1
+  然后tail -f /var/log/messages
+* nagios 与cgi
+  xsddefault_save_status_data()
+  nagios 主流程将当前状态写到status.dat文件中。
+
+  xsddefault_read_status_data()
+  cgi程序通过读取status.dat中的内容显示到页面上。
+
+* nagios fork
+  运行监查命令时，使用fork产生新进程，运行检查命令
+  命令产生结果，放到临时文件。
+  启动专门的流程，查看这些临时文件。
+  reap_check_results()

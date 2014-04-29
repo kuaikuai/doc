@@ -1,0 +1,1440 @@
+
+* 概念
+** strip unit
+With RAID technology, data is striped across an array of physical drives. This data-distribution scheme complements the way the operating system requests data.
+The granularity at which data is stored on one drive of the array before subsequent data is stored on the next drive of the array is called the stripe-unit size .
+
+** ONO
+   object number
+* 文件数据布局
+/*
+ * ceph_file_layout - describe data layout for a file/inode
+ */
+struct ceph_file_layout {
+	/* file -> object mapping */
+        /* 条带单元、条带深度 */
+	__le32 fl_stripe_unit;     /* stripe unit, in bytes.  must be multiple
+				      of page size. */
+        /* 条带个数、条带宽度 */
+	__le32 fl_stripe_count;    /* over this many objects */
+        /* 文件对象大小 */
+	__le32 fl_object_size;     /* until objects are this big, then move to
+				      new objects */
+	__le32 fl_cas_hash;        /* UNUSED.  0 = none; 1 = sha256 */
+
+	/* pg -> disk layout */
+	__le32 fl_object_stripe_unit;  /* UNUSED.  for per-object parity, if any */
+
+	/* object -> pg layout */
+	__le32 fl_pg_preferred; /* preferred primary for pg (-1 for none) */
+	__le32 fl_pg_pool;      /* namespace, crush ruleset, rep level */
+} __attribute__ ((packed));
+
+见
+osdmap.c
+ceph_calc_file_object_mapping
+filter.cc
+file_to_extents
+  __u32 object_size = layout->fl_object_size;
+  __u32 su = layout->fl_stripe_unit;
+  __u32 stripe_count = layout->fl_stripe_count;
+  // layout into objects
+  uint64_t blockno = cur / su;          // which block
+  uint64_t stripeno = blockno / stripe_count;    // which horizontal stripe        (Y)
+  uint64_t stripepos = blockno % stripe_count;   // which object in the object set (X)
+  uint64_t objectsetno = stripeno / stripes_per_object;       // which object set
+  uint64_t objectno = objectsetno * stripe_count + stripepos;  // object id
+
+通过这个代码可以推导出布局格式
+
+如果strips_per_object = 2,那么Y方向上的
+临近的两个stripe unit组成一个object.
+如下
+
++-----+-----+-----+-----+
+| SU  | SU  | SU  | SU  |
+| --- | --- | --- | --- |
+| SU  | SU  | SU  | SU  |
++-----+-----+-----+-----+
+| SU  | SU  | SU  | SU  |
+| --- | --- | --- | --- |
+| SU  | SU  | SU  | SU  |
++-----+-----+-----+-----+
+
+
+/*
+ * calculate file layout from given offset, length.
+ * fill in correct oid, logical length, and object extent
+ * offset, length.
+ *
+ * for now, we write only a single su, until we can
+ * pass a stride back to the caller.
+ */
+void ceph_calc_file_object_mapping(struct ceph_file_layout *layout,
+				   u64 off, u64 *plen,
+				   u64 *ono,
+				   u64 *oxoff, u64 *oxlen)
+得出这个函数的作用是:
+根据偏移值和长度,
+计算出 ono: object number, oxoff:在object内的偏移值
+oxlen: object目前条带单元内剩余长度
+
+
+* RBD
+  The linux kernel RBD (rados block device) driver allows striping a linux block device over multiple distributed object store data objects.
+
+* 配置一个ceph集群系统
+
+** Monitors
+The monitors handle central cluster management, configuration, and state. They are relatively lightweight daemons. Data is stored in a directory on a normal local file system (ext3/4, btrfs, xfs, whatever).
+Hardware:
+    * Some local disk space (few gigs at most)
+    * Fixed network address 
+How many:
+    * 1 is okay.
+    * 2 is not recommended, you'll need to have both of them up all the time, worse than just having one.
+    * 3 is probably ideal for most everyone.
+    * More for extremely large clusters. Always use an odd number. 
+
+** Metadata servers, MDSs
+The metadata server daemon (cmds) act as a distributed, coherent cache of file system metadata. They do not store data locally; all metadata is stored on disk via the storage nodes.
+Metadata servers can be added into the cluster willy-nilly on an as-needed basis, and load will be magically balanced to them. Start with 1 or 2, then add more as needed.
+A 'max mds' parameter controls how many cmds instances are active. Any additional running instances are put in standby mode, and take over if one of the active daemons becomes unresponsive.
+
+Hardware:
+    * Lots and lots and lots of RAM
+    * Fast CPU
+    * Fast (low latency) network 
+How many:
+    * 1 is ok
+    * 2 or more for redundancy and load balancing. 
+
+** Storage nodes, or OSDs
+The storage nodes store actual data on disk. You will want at least two of these if you want any sort of redundancy across nodes. Each 'storage node' is really an instance of the cosd daemon, serving up access to a local disk or set of disks. You can have a single cosd per hardware node, or multiple cosd daemons (perhaps one for each disk). The simplest route is to just put a single cosd on each hardware node, and pool the disks together.
+
+Things will work best if the disks are formatted with btrfs, but ext3 can also be used. Btrfs gives you checksumming and the ability to pool disks together without RAID (it handles data redundancy internally), and the journaling will perform better with btrfs.
+
+The OSD daemon uses a journal to quickly stream writes to disk and keep write latency low. NVRAM or an SSD are ideal for this, as they have extremely low latency writes and typically high bandwidth. Generally speaking, the journal device only needs to be big enough for several seconds of sustained writes. A dedicated disk partition can also be used. Many RAID controllers have battery-backed NVRAM; those also work pretty well. Or, if necessary, a regular disk file. For more information, see OSD journal.
+
+Hardware:
+    * Lots of disks
+    * Ideally an SSD or NVRAM for a journal, or a RAID controller with battery-backed NVRAM also works well.
+    * Lots of RAM will mean better fs caching
+    * Fast network 
+How many:
+    * as many as possible. 
+
+** config
+Then create a configuration file. Here is an example (based on the sample configuration file) for two nodes, node0 and node1.
+
+#+begin_src c
+[global]
+       pid file = /var/run/ceph/$name.pid
+       debug ms = 1
+[mon]
+       mon data = /data/mon$id
+[mon0]
+       host = node0
+       mon addr = 10.0.0.10:6789
+[mon1]
+       host = node1
+       mon addr = 10.0.0.11:6789
+[mds]
+[mds0]
+       host = node0
+[mds1]
+       host = node1
+[osd]
+       sudo = true
+       osd data = /data/osd$id
+[osd0]
+       host = node0
+[osd1]
+       host = node1
+#+end_src
+Then distribute the configuration file to all nodes and create the directory where to mount ceph and the directory where to store data.
+#+begin_src c
+for i in 0 1 ; do
+    scp ceph.conf node$i:/etc/ceph/ceph.conf
+    ssh node$i mkdir -p /data/osd$i /ceph
+    ssh node$i mount -o remount,user_xattr /
+done
+#+end_src
+Now you should be able to create the file system
+
+$ /usr/sbin/mkcephfs -c /etc/ceph/ceph.conf --allhosts -v
+
+Start Ceph and mount file system.
+
+$ /etc/init.d/ceph -a start
+$ mount -t ceph 10.0.0.10:/ /ceph
+
+* 客户端mount过程
+
+  向monitor发起session
+  获取monitor回应的mon_map
+  由 ceph_mon_handle_map\ceph_osdc_handle_map这两个函数分别处理服务端的map
+
+/*
+ * The monitor map enumerates the set of all monitors.
+ */
+struct ceph_monmap {
+	struct ceph_fsid fsid;
+	u32 epoch;
+	u32 num_mon;
+	struct ceph_entity_inst mon_inst[0];
+};
+
+struct ceph_osdmap {
+	struct ceph_fsid fsid;
+	u32 epoch;
+	u32 mkfs_epoch;
+	struct ceph_timespec created, modified;
+
+	u32 flags;         /* CEPH_OSDMAP_* */
+
+	u32 max_osd;       /* size of osd_state, _offload, _addr arrays */
+	u8 *osd_state;     /* CEPH_OSD_* */
+	u32 *osd_weight;   /* 0 = failed, 0x10000 = 100% normal */
+	struct ceph_entity_addr *osd_addr;
+
+	struct rb_root pg_temp;
+	struct rb_root pg_pools;
+	u32 pool_max;
+
+	/* the CRUSH map specifies the mapping of placement groups to
+	 * the list of osds that store+replicate them. */
+	struct crush_map *crush;
+};
+
+
+* 客户端结构
+/*
+ * per client state
+ *
+ * possibly shared by multiple mount points, if they are
+ * mounting the same ceph filesystem/cluster.
+ */
+struct ceph_client {
+	struct ceph_fsid fsid;
+	bool have_fsid;
+
+	void *private;
+
+	struct ceph_options *options;
+
+	struct mutex mount_mutex;      /* serialize mount attempts */
+	wait_queue_head_t auth_wq;
+	int auth_err;
+
+	int (*extra_mon_dispatch)(struct ceph_client *, struct ceph_msg *);
+
+	u32 supported_features;
+	u32 required_features;
+
+	struct ceph_messenger *msgr;   /* messenger instance */
+	struct ceph_mon_client monc;
+	struct ceph_osd_client osdc;
+
+#ifdef CONFIG_DEBUG_FS
+	struct dentry *debugfs_dir;
+	struct dentry *debugfs_monmap;
+	struct dentry *debugfs_osdmap;
+#endif
+};
+
+* 通讯
+** 用于通讯的类
+  SimpleMessenger
+
+** messager.c
+
+* 通讯消息结构
+由create_request_message产生客户端最后发送出去的消息。
+实现优点笨拙。
+
+/*
+ * a single message.  it contains a header (src, dest, message type, etc.),
+ * footer (crc values, mainly), a "front" message body, and possibly a
+ * data payload (stored in some number of pages).
+ */
+struct ceph_msg {
+	struct ceph_msg_header hdr;	/* header */
+	struct ceph_msg_footer footer;	/* footer */
+	struct kvec front;              /* unaligned blobs of message */
+	struct ceph_buffer *middle;
+	struct page **pages;            /* data payload.  NOT OWNER. */
+	unsigned nr_pages;              /* size of page array */
+	unsigned page_alignment;        /* io offset in first page */
+	struct ceph_pagelist *pagelist; /* instead of pages */
+	struct list_head list_head;
+	struct kref kref;
+	struct bio  *bio;		/* instead of pages/pagelist */
+	struct bio  *bio_iter;		/* bio iterator */
+	int bio_seg;			/* current bio segment */
+	struct ceph_pagelist *trail;	/* the trailing part of the data */
+	bool front_is_vmalloc;
+	bool more_to_follow;
+	bool needs_out_seq;
+	int front_max;
+
+	struct ceph_msgpool *pool;
+};
+
+客户端向MDS发送的消息体内的消息头
+struct ceph_mds_request_head {
+	__le64 oldest_client_tid;
+	__le32 mdsmap_epoch;           /* on client */
+	__le32 flags;                  /* CEPH_MDS_FLAG_* */
+	__u8 num_retry, num_fwd;       /* count retry, fwd attempts */
+	__le16 num_releases;           /* # include cap/lease release records */
+	__le32 op;                     /* mds op code */
+	__le32 caller_uid, caller_gid;
+	__le64 ino;                    /* use this ino for openc, mkdir, mknod,
+					  etc. (if replaying) */
+	union ceph_mds_request_args args;
+} __attribute__ ((packed));
+
+union ceph_mds_request_args {
+	struct {
+		__le32 mask;                 /* CEPH_CAP_* */
+	} __attribute__ ((packed)) getattr;
+	struct {
+		__le32 mode;
+		__le32 uid;
+		__le32 gid;
+		struct ceph_timespec mtime;
+		struct ceph_timespec atime;
+		__le64 size, old_size;       /* old_size needed by truncate */
+		__le32 mask;                 /* CEPH_SETATTR_* */
+	} __attribute__ ((packed)) setattr;
+	struct {
+		__le32 frag;                 /* which dir fragment */
+		__le32 max_entries;          /* how many dentries to grab */
+		__le32 max_bytes;
+	} __attribute__ ((packed)) readdir;
+	struct {
+		__le32 mode;
+		__le32 rdev;
+	} __attribute__ ((packed)) mknod;
+	struct {
+		__le32 mode;
+	} __attribute__ ((packed)) mkdir;
+	struct {
+		__le32 flags;
+		__le32 mode;
+		__le32 stripe_unit;          /* layout for newly created file */
+		__le32 stripe_count;         /* ... */
+		__le32 object_size;
+		__le32 file_replication;
+		__le32 preferred;
+	} __attribute__ ((packed)) open;
+	struct {
+		__le32 flags;
+	} __attribute__ ((packed)) setxattr;
+	struct {
+		struct ceph_file_layout layout;
+	} __attribute__ ((packed)) setlayout;
+	struct {
+		__u8 rule; /* currently fcntl or flock */
+		__u8 type; /* shared, exclusive, remove*/
+		__le64 pid; /* process id requesting the lock */
+		__le64 pid_namespace;
+		__le64 start; /* initial location to lock */
+		__le64 length; /* num bytes to lock from start */
+		__u8 wait; /* will caller wait for lock to become available? */
+	} __attribute__ ((packed)) filelock_change;
+} __attribute__ ((packed));
+
+MDS::handle_deferrable_message ->
+Server::dispatch -> handle_client_request -> dispatch_client_request
+
+handle_find_ino_reply
+
+* tid_t
+  transaction id
+
+* frag_t fragtree_t
+见frag.h
+中注释如下：
+/*
+ * 
+ * the goal here is to use a binary split strategy to partition a namespace.  
+ * frag_t represents a particular fragment.  bits() tells you the size of the
+ * fragment, and value() it's name.  this is roughly analogous to an ip address
+ * and netmask.
+ * 
+ * fragtree_t represents an entire namespace and it's partition.  it essentially 
+ * tells you where fragments are split into other fragments, and by how much 
+ * (i.e. by how many bits, resulting in a power of 2 number of child fragments).
+ * 
+ * this vaguely resembles a btree, in that when a fragment becomes large or small
+ * we can split or merge, except that there is no guarantee of being balanced.
+ *
+ * presumably we are partitioning the output of a (perhaps specialized) hash 
+ * function.
+ */
+
+
+
+对于一个值v和段f
+v & f.mask()) == f.value()
+那么 v就落到段f中。
+
+使用32位整数表示分片，以及分段形成的树。
+
+低24位： value
+高8位: bit
+
+见ceph_frag.h中
+static inline __u32 ceph_frag_make(__u32 b, __u32 v)
+{
+	return (b << 24) |
+		(v & (0xffffffu << (24-b)) & 0xffffffu);
+}
+static inline __u32 ceph_frag_bits(__u32 f)
+{
+	return f >> 24;
+}
+static inline __u32 ceph_frag_value(__u32 f)
+{
+	return f & 0xffffffu;
+}
+
+f : 段落名
+by: 使用新by位分割段f
+i : 分割段f后的第i个子段(子节点)
+__u32 ceph_frag_make_child(__u32 f, int by, int i);
+
+// splitting
+将frag_t对象使用nb位分割,产生第i个子段
+frag_t::frag_t make_child(int i, int nb)
+
+
+从frag树中查找段值为v的段
+fragtree_t::operat[] frag_t operator[](unsigned v);
+
+根据文件名,哈希到一个段上
+frag_t CInode::pick_dirfrag(const string& dn)
+
+根据段名,获取段对应的目录对象
+CDir* get_dirfrag(frag_t fg)
+
+MDSCacheObject定义见mdstype.h
+MDSCacheObject的几个属性如下:
+  __u32 state;     // state bits
+  __s32      ref;       // reference count
+  // replication (across mds cluster)
+  __s16        replica_nonce; // [replica] defined on replica
+  map<int,int> replica_map;   // [auth] mds -> nonce
+
+CDir CInode都继承自MDSCacheObject
+
+MDS由MDS类实现
+
+* encode 函数
+  用于解释消息的辅助函数
+  见encoding.h
+
+* 元数据遍历
+path_traverse
+
+
+* CInode CDentry CDir 关系
+
+  CDentry
+  {
+    string name;
+    __u32 hash;
+    snapid_t first, last;
+    CDir *dir;     // containing dirfrag
+
+    struct linkage_t {
+      CInode *inode;
+      inodeno_t remote_ino;
+      unsigned char remote_d_type;
+    };
+    linkage_t linkage;
+    list<linkage_t> projected;
+    version_t version;  // dir version when last touched.
+    version_t projected_version;  // what it will be when i unlock/commit.
+  }
+
+  CDir
+  {
+    CInode          *inode;  // my inode
+    frag_t           frag;   // my frag
+    fnode_t fnode;
+    snapid_t first;
+    map<snapid_t,old_rstat_t> dirty_old_rstat;  // [value.first,key]
+    // my inodes with dirty rstat data
+    elist<CInode*> dirty_rstat_inodes; 
+  }
+* choose_mds
+static int __choose_mds(struct ceph_mds_client *mdsc,
+			struct ceph_mds_request *req)
+
+* capability
+见caps.c注释:
+/*
+ * Capability management
+ *
+ * The Ceph metadata servers control client access to inode metadata
+ * and file data by issuing capabilities, granting clients permission
+ * to read and/or write both inode field and file data to OSDs
+ * (storage nodes).  Each capability consists of a set of bits
+ * indicating which operations are allowed.
+ *
+ * If the client holds a *_SHARED cap, the client has a coherent value
+ * that can be safely read from the cached inode.
+ *
+ * In the case of a *_EXCL (exclusive) or FILE_WR capabilities, the
+ * client is allowed to change inode attributes (e.g., file size,
+ * mtime), note its dirty state in the ceph_cap, and asynchronously
+ * flush that metadata change to the MDS.
+ *
+ * In the event of a conflicting operation (perhaps by another
+ * client), the MDS will revoke the conflicting client capabilities.
+ *
+ * In order for a client to cache an inode, it must hold a capability
+ * with at least one MDS server.  When inodes are released, release
+ * notifications are batched and periodically sent en masse to the MDS
+ * cluster to release server state.
+ */
+
+
+client.h:
+struct InodeCap {
+  MDSSession *session;
+  Inode *inode;
+  xlist<InodeCap*>::item cap_item;
+
+  uint64_t cap_id;
+  unsigned issued;
+  unsigned implemented;
+  unsigned wanted;   // as known to mds.
+  uint64_t seq, issue_seq;
+  __u32 mseq;  // migration seq
+  __u32 gen;
+
+  InodeCap() : session(NULL), inode(NULL), cap_item(this), issued(0),
+               implemented(0), wanted(0), seq(0), issue_seq(0), mseq(0), gen(0) {}
+};
+
+Briefly, caps are short for capabilities. They are issued by the MDS
+to clients to describe what the client is allowed to do with an inode
+and its associated file. There are capabilities to, for instance, let
+the client buffer writes, cache reads, and adjust certain kinds of
+metadata (mtime, et al).
+The wanted capabilities are caps the client wants but doesn't have.
+Issued caps are ones the client has been granted, and (IIRC)
+implemented caps are a subset of the issued caps describing which caps
+the client has actually made use of. It's useful for determining
+whether the client has dirty metadata and whatnot
+
+* 重试机制
+等待事件,然后重新派发消息,重新执行消息处理流程
+例如:void Server::handle_client_open(MDRequest *mdr)中
+cur->add_waiter(CInode::WAIT_TRUNC, new C_MDS_RetryRequest(mdcache, mdr))
+
+/* n : 第几个路径 
+   一个请求中可能有两个路径,如link操作
+*/
+
+
+
+
+* Snapshots
+ * Snapshots in ceph are driven in large part by cooperation from the
+ * client.  In contrast to local file systems or file servers that
+ * implement snapshots at a single point in the system, ceph's
+ * distributed access to storage requires clients to help decide
+ * whether a write logically occurs before or after a recently created
+ * snapshot.
+ *
+ * This provides a perfect instantanous client-wide snapshot.  Between
+ * clients, however, snapshots may appear to be applied at slightly
+ * different points in time, depending on delays in delivering the
+ * snapshot notification.
+ *
+ * Snapshots are _not_ file system-wide.  Instead, each snapshot
+ * applies to the subdirectory nested beneath some directory.  This
+ * effectively divides the hierarchy into multiple "realms," where all
+ * of the files contained by each realm share the same set of
+ * snapshots.  An individual realm's snap set contains snapshots
+ * explicitly created on that realm, as well as any snaps in its
+ * parent's snap set _after_ the point at which the parent became it's
+ * parent (due to, say, a rename).  Similarly, snaps from prior parents
+ * during the time intervals during which they were the parent are included.
+ *
+ * The client is spared most of this detail, fortunately... it must only
+ * maintains a hierarchy of realms reflecting the current parent/child
+ * realm relationship, and for each realm has an explicit list of snaps
+ * inherited from prior parents.
+ *
+ * A snap_realm struct is maintained for realms containing every inode
+ * with an open cap in the system.  (The needed snap realm information is
+ * provided by the MDS whenever a cap is issued, i.e., on open.)  A 'seq'
+ * version number is used to ensure that as realm parameters change (new
+ * snapshot, new parent, etc.) the client's realm hierarchy is updated.
+ *
+ * The realm hierarchy drives the generation of a 'snap context' for each
+ * realm, which simply lists the resulting set of snaps for the realm.  This
+ * is attached to any writes sent to OSDs.
+ */
+/*
+ * Unfortunately error handling is a bit mixed here.  If we get a snap
+ * update, but don't have enough memory to update our realm hierarchy,
+ * it's not clear what we can do about it (besides complaining to the
+ * console).
+ */
+
+
+
+* Auth
+In short, the ceph auth system allows each entity that participates in the
+ceph cluster (services and clients) to have a unique id. A session is being
+created when an entity needs to communicate with another one, and upon its
+establishment the receiving side can be sure that the client (in this
+client-server connection, though it can be any entity, not necessarily a
+client) is who it says he is.
+
+1. Secrets Repository
+
+Each entity has a type (mon, osd, mds, client) and a name. Each entity needs
+to have a record in the monitors auth state machine. This record is the
+security record for this entity and it holds this specific entity's secret
+and the different caps for different services. Each service has its own set
+of caps and they basically set the things this entity can do. Most
+in-cluster operations are filtered based on the entity-type, so that certain
+operation can only be done by the cluster members (e.g., operation that can
+only be done by mon, osd, mds). The clients operations are filtered based on
+the caps that the clients have for the specific service type. For example, a
+client can have a read-only permission to access one pool on the osd, while
+it has a read/write access to another.
+
+2. Initial Contact
+
+When an entity connects to another entity, it needs to specify which
+authentication protocol it is going to use for that connection. At the
+moment there could be 3 options: unknown, none, cephx. The first contact for
+each entity would be with the monitor which also has the role of the
+authentication server. For this connection, all the entities will use the
+'unknown' protocol as one has not been chosen yet. After successfully
+connecting to the monitor, the entity sends a list of supported
+authentication protocols from which the monitor will choose the one that
+will be used. At the moment there are 2 options auth-none, which is
+basically a do-nothing authentication, and auth-cephx, which is our
+Kerberos-like implementation.
+
+3. Cephx
+
+a. Getting the Auth-Ticket
+
+With the monitor's response that acknowledges the use of the cephx protocol
+for the rest of this entity's life, it also submits a challenge. The entity
+needs to respond this challenge with a challenge of its own and a response
+that hashes those two challenges, using the entity's secret as the key. Upon
+receiving this, the monitor (authenticator) knows that the entity is really
+who it claims to be. The first response, is thus the 'auth' ticket, which
+allows the entity to request tickets for connecting to other entities, and a
+session key that will be used in conjunction with this ticket, and also
+encoded inside this ticket.
+
+b. Getting the Services Ticket
+
+Now, that the entity (e.g., client, osd, mds) has the auth ticket, it can
+send it with a list of requested services it wants to connect to. Note that
+the authorizer is not obliged to accept all the requests, and it really
+depends on the permissions that this entity has. Each service ticket will
+hold the caps this entity has for this service. The service ticket is
+encrypted, using a secret that the service knows (more about it later). Each
+ticket has a corresponding session key as with the auth ticket.
+
+c. Authorizing
+
+Now, after the entity acquired the requested tickets to access the different
+services it can actually connect to them. After connecting, it will use
+'auth-cephx' as the selected auth protocol, and will supply an
+'authorize-me' message that will consist of the ticket and some data (e.g.,
+timestamp) encoded using the session key. The service will need be able to
+decode the ticket using one of its internal keys, and decode the supplied
+data using the session key embedded in the ticket. The response would
+consist of the data altered (e.g., timestamp + 1) encoded using the session
+key. After the entity successfully decodes this response, it is acknowledged
+that this connection has been authenticated.
+
+d. Rotating Secrets
+
+One of the issues that we discusses was that we didn't want to require the
+entire cluster of the different services hold the same secret, which could
+be highly insecure. This led to a problem -- how do we send the client a
+single ticket for the osds (or for all the mds) so that each of them will be
+able to decrypt. The solution we came up was that each of the osds will have
+a different 'master' key, but all of them will share secrets that will
+change after a while. The same goes for the mds's. So when the mon creates a
+ticket for the osds, it uses this 'rotating' secret so that all of the osds
+will be able to decrypt it. Note that the services always keep 3 different
+rotating secrets -- the previous one, the current and the next one, so that
+there's no need to synchronize the entire cluster whenever one times out.
+We don't use the rotating secrets for the monitors, and all the monitors are
+sharing the same master key.
+
+
+* find_ino_peer
+
+ // -- find_ino_peer --
+  struct find_ino_peer_info_t {
+    inodeno_t ino;
+    tid_t tid;
+    Context *fin;
+    int hint;
+    int checking;
+    set<int> checked;
+
+    find_ino_peer_info_t() : tid(0), fin(NULL), hint(-1), checking(-1) {}
+  };
+
+/* ---------------------------- */
+
+/*
+ * search for a given inode on MDS peers.  optionally start with the given node.
+   hint: 提示向hint制定的节点查找
+   只通过ino获取它对应的路径字符串
+*/
+void MDCache::find_ino_peers(inodeno_t ino, Context *c, int hint)
+{
+  dout(5) << "find_ino_peers " << ino << " hint " << hint << dendl;
+  assert(!have_inode(ino));
+
+  tid_t tid = ++find_ino_peer_last_tid;
+  find_ino_peer_info_t& fip = find_ino_peer[tid];
+  fip.ino = ino;
+  fip.tid = tid;
+  fip.fin = c;
+  fip.hint = hint;
+  fip.checked.insert(mds->whoami);
+  _do_find_ino_peer(fip);
+}
+
+void MDCache::_do_find_ino_peer(find_ino_peer_info_t& fip)
+{
+  set<int> all, active;
+  mds->mdsmap->get_active_mds_set(active);
+  mds->mdsmap->get_mds_set(all);
+
+  dout(10) << "_do_find_ino_peer " << fip.tid << " " << fip.ino
+           << " active " << active << " all " << all
+           << " checked " << fip.checked
+           << dendl;
+
+  int m = -1;
+  if (fip.hint >= 0) {
+    m = fip.hint;
+    fip.hint = -1;
+  } else {
+    for (set<int>::iterator p = active.begin(); p != active.end(); p++)
+      // 不是本节点，并且没有查找失败过的节点
+      if (*p != mds->whoami &&
+          fip.checked.count(*p) == 0) {
+        m = *p;
+        break;
+      }
+  }
+  if (m < 0) {
+    if (all.size() > active.size()) {
+      dout(10) << "_do_find_ino_peer waiting for more peers to be active" << dendl;
+    } else {
+      dout(10) << "_do_find_ino_peer failed on " << fip.ino << dendl;
+      // 告诉查找者，查找失败
+      fip.fin->finish(-ESTALE);
+      delete fip.fin;
+      find_ino_peer.erase(fip.tid);
+    }
+  } else {
+    fip.checking = m;
+    // 想指定mds发送查找消息
+    mds->send_message_mds(new MMDSFindIno(fip.tid, fip.ino), m);
+  }
+}
+
+//MDS 处理查询ino的函数
+void MDCache::handle_find_ino(MMDSFindIno *m)
+{
+  dout(10) << "handle_find_ino " << *m << dendl;
+  //生成查找Ino的应答消息
+  MMDSFindInoReply *r = new MMDSFindInoReply(m->tid);
+  //在缓冲中查找ino
+  CInode *in = get_inode(m->ino);
+  if (in) {
+    in->make_path(r->path);
+    dout(10) << " have " << r->path << " " << *in << dendl;
+  }
+  mds->messenger->send_message(r, m->get_connection());
+  m->put();
+}
+
+// 处理查询ino的应答
+void MDCache::handle_find_ino_reply(MMDSFindInoReply *m)
+{
+  map<tid_t, find_ino_peer_info_t>::iterator p = find_ino_peer.find(m->tid);
+  if (p != find_ino_peer.end()) {
+    dout(10) << "handle_find_ino_reply " << *m << dendl;
+    find_ino_peer_info_t& fip = p->second;
+
+    // success?
+    // 本地缓冲已经有了
+    if (get_inode(fip.ino)) {
+      dout(10) << "handle_find_ino_reply successfully found " << fip.ino << dendl;
+      // TODO 什么意思
+      mds->queue_waiter(fip.fin);
+      find_ino_peer.erase(p);
+      m->put();
+      return;
+    }
+
+    int from = m->get_source().num();
+    if (fip.checking == from)
+      fip.checking = -1;
+    fip.checked.insert(from);
+
+    if (!m->path.empty()) {
+      // we got a path!
+      vector<CDentry*> trace;
+      int r = path_traverse(NULL, m, NULL, m->path, &trace, NULL, MDS_TRAVERSE_DISCOVER);
+      // 延迟处理
+      if (r > 0)
+        return;
+      // get_inode(fip.ino) 找不到，是不是就意味着path_traverse不返回>0,就是<0?
+      dout(0) << "handle_find_ino_reply failed with " << r << " on " << m->path
+              << ", retrying" << dendl;
+      fip.checked.clear();
+      _do_find_ino_peer(fip);
+    } else {
+      // nope, continue.
+      _do_find_ino_peer(fip);
+    }
+  } else {
+    dout(10) << "handle_find_ino_reply tid " << m->tid << " dne" << dendl;
+  }
+  m->put();
+}
+
+
+* discover
+
+  // -- discover --
+  struct discover_info_t {
+    tid_t tid;
+    int mds;
+    inodeno_t ino; //是 base ino ?
+    frag_t frag;   // base 分片名 ?
+    snapid_t snap;
+    filepath want_path; 
+    inodeno_t want_ino;
+    bool want_base_dir;
+    bool want_xlocked;
+
+    discover_info_t() : tid(0), mds(-1), snap(CEPH_NOSNAP), want_base_dir(false), want_xlocked(false) {}
+  };
+
+ 对应消息类
+class MDiscover : public Message {
+  inodeno_t       base_ino;          // 1 -> root
+  frag_t          base_dir_frag;
+
+  snapid_t        snapid;
+  filepath        want;   // ... [/]need/this/stuff
+  inodeno_t       want_ino;
+
+  bool want_base_dir;
+  bool want_xlocked;
+  ...
+}
+
+// ========================================================================================
+// DISCOVER
+/*
+
+  - for all discovers (except base_inos, e.g. root, stray), waiters are attached
+  to the parent metadata object in the cache (pinning it).
+
+  - all discovers are tracked by tid, so that we can ignore potentially dup replies.
+
+*/
+
+void MDCache::_send_discover(discover_info_t& d)
+{
+  MDiscover *dis = new MDiscover(d.ino, d.frag, d.snap,
+                                 d.want_path, d.want_ino, d.want_base_dir, d.want_xlocked);
+  dis->set_tid(d.tid);
+  mds->send_message_mds(dis, d.mds);
+}
+
+//查找base ino
+void MDCache::discover_base_ino(inodeno_t want_ino,
+                                Context *onfinish,
+                                int from)
+{
+  dout(7) << "discover_base_ino " << want_ino << " from mds" << from << dendl;
+  if (waiting_for_base_ino[from].count(want_ino) == 0) {
+    discover_info_t& d = _create_discover(from);
+    d.ino = want_ino;
+    _send_discover(d);
+    waiting_for_base_ino[from][want_ino].push_back(onfinish);
+  }
+}
+
+
+void MDCache::open_foreign_mdsdir(inodeno_t ino, Context *fin)
+{
+  discover_base_ino(ino, fin, ino & (MAX_MDS-1));
+}
+
+
+/* This function DOES put the passed message before returning */
+void MDCache::handle_discover(MDiscover *dis)
+{
+  int whoami = mds->get_nodeid();
+  int from = dis->get_source_inst().name._num;
+
+  assert(from != whoami);
+
+  if (mds->get_state() < MDSMap::STATE_CLIENTREPLAY) {
+    int from = dis->get_source().num();
+    if (mds->get_state() < MDSMap::STATE_REJOIN ||
+        rejoin_ack_gather.count(from)) {
+      dout(0) << "discover_reply not yet active(|still rejoining), delaying" << dendl;
+      mds->wait_for_active(new C_MDS_RetryMessage(mds, dis));
+      return;
+    }
+  }
+
+
+  CInode *cur = 0;
+  MDiscoverReply *reply = new MDiscoverReply(dis);
+
+  snapid_t snapid = dis->get_snapid();
+
+  // get started.
+  if (MDS_INO_IS_BASE(dis->get_base_ino())) {
+    // wants root
+    dout(7) << "handle_discover from mds" << from
+            << " wants base + " << dis->get_want().get_path()
+            << " snap " << snapid
+            << dendl;
+
+    cur = get_inode(dis->get_base_ino());
+
+    // add root
+    reply->starts_with = MDiscoverReply::INODE;
+    replicate_inode(cur, from, reply->trace);
+    dout(10) << "added base " << *cur << dendl;
+  }
+  else {
+    // there's a base inode
+    cur = get_inode(dis->get_base_ino(), snapid);
+    if (!cur && snapid != CEPH_NOSNAP) {
+      cur = get_inode(dis->get_base_ino());
+      if (!cur->is_multiversion())
+        cur = NULL;  // nope!
+    }
+
+    if (!cur) {
+      dout(7) << "handle_discover mds" << from
+              << " don't have base ino " << dis->get_base_ino() << "." << snapid
+              << dendl;
+      reply->set_flag_error_dir();
+    } else if (dis->wants_base_dir()) {
+      dout(7) << "handle_discover mds" << from
+              << " wants basedir+" << dis->get_want().get_path()
+              << " has " << *cur
+              << dendl;
+    } else {
+      dout(7) << "handle_discover mds" << from
+              << " wants " << dis->get_want().get_path()
+              << " has " << *cur
+              << dendl;
+    }
+  }
+
+  assert(reply);
+
+  // add content
+  // do some fidgeting to include a dir if they asked for the base dir, or just root.
+  for (unsigned i = 0;
+       cur && (i < dis->get_want().depth() || dis->get_want().depth() == 0);
+       i++) {
+
+    // -- figure out the dir
+
+    // is *cur even a dir at all?
+    if (!cur->is_dir()) {
+      dout(7) << *cur << " not a dir" << dendl;
+      reply->set_flag_error_dir();
+      break;
+    }
+
+    // pick frag
+    frag_t fg;
+    if (dis->get_want().depth()) {
+      // dentry specifies
+      fg = cur->pick_dirfrag(dis->get_dentry(i));
+    } else {
+      // requester explicity specified the frag
+      fg = dis->get_base_dir_frag();
+      assert(dis->wants_base_dir() || dis->get_want_ino() || MDS_INO_IS_BASE(dis->get_base_ino()));
+    }
+    CDir *curdir = cur->get_dirfrag(fg);
+
+    if ((!curdir && !cur->is_auth()) ||
+        (curdir && !curdir->is_auth())) {
+
+      /* before:
+       * ONLY set flag if empty!!
+       * otherwise requester will wake up waiter(s) _and_ continue with discover,
+       * resulting in duplicate discovers in flight,
+       * which can wreak havoc when discovering rename srcdn (which may move)
+       */
+
+      if (reply->is_empty()) {
+        // only hint if empty.
+        //  someday this could be better, but right now the waiter logic isn't smart enough.
+
+        // hint
+        if (curdir) {
+          dout(7) << " not dirfrag auth, setting dir_auth_hint for " << *curdir << dendl;
+          reply->set_dir_auth_hint(curdir->authority().first);
+        } else {
+          dout(7) << " dirfrag not open, not inode auth, setting dir_auth_hint for "
+                  << *cur << dendl;
+          reply->set_dir_auth_hint(cur->authority().first);
+        }
+
+        // note error dentry, if any
+        //  NOTE: important, as it allows requester to issue an equivalent discover
+        //        to whomever we hint at.
+        if (dis->get_want().depth() > i)
+          reply->set_error_dentry(dis->get_dentry(i));
+      }
+
+      break;
+    }
+
+    // open dir?
+    if (!curdir)
+      curdir = cur->get_or_open_dirfrag(this, fg);
+    assert(curdir);
+    assert(curdir->is_auth());
+
+    // is dir frozen?
+    if (curdir->is_frozen()) {
+      if (reply->is_empty()) {
+        dout(7) << *curdir << " is frozen, empty reply, waiting" << dendl;
+        curdir->add_waiter(CDir::WAIT_UNFREEZE, new C_MDS_RetryMessage(mds, dis));
+        reply->put();
+        return;
+      } else {
+        dout(7) << *curdir << " is frozen, non-empty reply, stopping" << dendl;
+        break;
+      }
+    }
+
+    // add dir
+    if (reply->is_empty() && !dis->wants_base_dir()) {
+      dout(7) << "handle_discover not adding unwanted base dir " << *curdir << dendl;
+      // make sure the base frag is correct, though, in there was a refragment since the
+      // original request was sent.
+      reply->set_base_dir_frag(curdir->get_frag());
+    } else {
+      assert(!curdir->is_ambiguous_auth()); // would be frozen.
+      if (!reply->trace.length())
+        reply->starts_with = MDiscoverReply::DIR;
+      replicate_dir(curdir, from, reply->trace);
+      dout(7) << "handle_discover added dir " << *curdir << dendl;
+    }
+
+    // lookup
+    CDentry *dn = 0;
+    if (dis->get_want_ino()) {
+      // lookup by ino
+      CInode *in = get_inode(dis->get_want_ino(), snapid);
+      if (in && in->is_auth() && in->get_parent_dn()->get_dir() == curdir)
+        dn = in->get_parent_dn();
+    } else if (dis->get_want().depth() > 0) {
+      // lookup dentry
+      dn = curdir->lookup(dis->get_dentry(i), snapid);
+    } else
+      break; // done!
+
+    // incomplete dir?
+    if (!dn) {
+      if (!curdir->is_complete()) {
+        // readdir
+        dout(7) << "incomplete dir contents for " << *curdir << ", fetching" << dendl;
+        if (reply->is_empty()) {
+          // fetch and wait
+          curdir->fetch(new C_MDS_RetryMessage(mds, dis));
+          reply->put();
+          return;
+        } else {
+          // initiate fetch, but send what we have so far
+          curdir->fetch(0);
+          break;
+        }
+      }
+
+      // don't have wanted ino in this dir?
+      if (dis->get_want_ino()) {
+        // set error flag in reply
+        dout(7) << "no ino " << dis->get_want_ino() << " in this dir, flagging error in "
+                << *curdir << dendl;
+        reply->set_flag_error_ino();
+        break;
+      }
+
+      // is this a new mds dir?
+      /*
+        if (curdir->ino() == MDS_INO_CEPH) {
+        char t[10];
+        snprintf(t, sizeof(t), "mds%d", from);
+        if (t == dis->get_dentry(i)) {
+        // yes.
+        _create_mdsdir_dentry(curdir, from, t, new C_MDS_RetryMessage(mds, dis));
+        //_create_system_file(curdir, t, create_system_inode(MDS_INO_MDSDIR(from), S_IFDIR),
+        //new C_MDS_RetryMessage(mds, dis));
+        reply->put();
+        return;
+        }
+        }
+      */
+
+      // send null dentry
+      dout(7) << "dentry " << dis->get_dentry(i) << " dne, returning null in "
+              << *curdir << dendl;
+      dn = curdir->add_null_dentry(dis->get_dentry(i));
+    }
+    assert(dn);
+
+    CDentry::linkage_t *dnl = dn->get_linkage();
+
+    // xlocked dentry?
+    //  ...always block on non-tail items (they are unrelated)
+    //  ...allow xlocked tail disocvery _only_ if explicitly requested
+    bool tailitem = (dis->get_want().depth() == 0) || (i == dis->get_want().depth() - 1);
+    if (dn->lock.is_xlocked()) {
+      // is this the last (tail) item in the discover traversal?
+      if (tailitem && dis->wants_xlocked()) {
+        dout(7) << "handle_discover allowing discovery of xlocked tail " << *dn << dendl;
+      } else {
+        dout(7) << "handle_discover blocking on xlocked " << *dn << dendl;
+        dn->lock.add_waiter(SimpleLock::WAIT_RD, new C_MDS_RetryMessage(mds, dis));
+        reply->put();
+        return;
+      }
+    }
+
+    // frozen inode?
+    if (dnl->is_primary() && dnl->get_inode()->is_frozen()) {
+      if (tailitem && dis->wants_xlocked()) {
+        dout(7) << "handle_discover allowing discovery of frozen tail " << *dnl->get_inode() << dendl;
+      } else if (reply->is_empty()) {
+        dout(7) << *dnl->get_inode() << " is frozen, empty reply, waiting" << dendl;
+        dnl->get_inode()->add_waiter(CDir::WAIT_UNFREEZE, new C_MDS_RetryMessage(mds, dis));
+        reply->put();
+        return;
+      } else {
+        dout(7) << *dnl->get_inode() << " is frozen, non-empty reply, stopping" << dendl;
+        break;
+      }
+    }
+
+    // add dentry
+    if (!reply->trace.length())
+      reply->starts_with = MDiscoverReply::DENTRY;
+    replicate_dentry(dn, from, reply->trace);
+    dout(7) << "handle_discover added dentry " << *dn << dendl;
+
+    if (!dnl->is_primary()) break;  // stop on null or remote link.
+
+    // add inode
+    CInode *next = dnl->get_inode();
+    assert(next->is_auth());
+
+    replicate_inode(next, from, reply->trace);
+    dout(7) << "handle_discover added inode " << *next << dendl;
+
+    // descend, keep going.
+    cur = next;
+    continue;
+  }
+
+  // how did we do?
+  assert(!reply->is_empty());
+  dout(7) << "handle_discover sending result back to asker mds" << from << dendl;
+  mds->send_message(reply, dis->get_connection());
+
+  dis->put();
+}
+
+
+/* This function DOES put the passed message before returning */
+void MDCache::handle_discover_reply(MDiscoverReply *m)
+{
+  /*
+    if (mds->get_state() < MDSMap::STATE_ACTIVE) {
+    dout(0) << "discover_reply NOT ACTIVE YET" << dendl;
+    m->put();
+    return;
+    }
+  */
+  dout(7) << "discover_reply " << *m << dendl;
+  if (m->is_flag_error_dir())
+    dout(7) << " flag error, dir" << dendl;
+  if (m->is_flag_error_dn())
+    dout(7) << " flag error, dentry = " << m->get_error_dentry() << dendl;
+  if (m->is_flag_error_ino())
+    dout(7) << " flag error, ino = " << m->get_wanted_ino() << dendl;
+
+  list<Context*> finished, error;
+  int from = m->get_source().num();
+
+  // starting point
+  CInode *cur = get_inode(m->get_base_ino());
+  bufferlist::iterator p = m->trace.begin();
+
+  int next = m->starts_with;
+
+  // decrement discover counters
+  if (m->get_tid()) {
+    map<tid_t,discover_info_t>::iterator p = discovers.find(m->get_tid());
+    if (p != discovers.end()) {
+      dout(10) << " found tid " << m->get_tid() << dendl;
+      discovers.erase(p);
+    } else {
+      dout(10) << " tid " << m->get_tid() << " not found, must be dup reply" << dendl;
+    }
+  }
+
+  // discover may start with an inode
+  if (!p.end() && next == MDiscoverReply::INODE) {
+    cur = add_replica_inode(p, NULL, finished);
+    dout(7) << "discover_reply got base inode " << *cur << dendl;
+    assert(cur->is_base());
+
+    next = MDiscoverReply::DIR;
+
+    // take waiters?
+    if (cur->is_base() &&
+        waiting_for_base_ino[from].count(cur->ino())) {
+      finished.swap(waiting_for_base_ino[from][cur->ino()]);
+      waiting_for_base_ino[from].erase(cur->ino());
+    }
+  }
+  assert(cur);
+
+  // loop over discover results.
+  // indexes follow each ([[dir] dentry] inode)
+  // can start, end with any type.
+  while (!p.end()) {
+    // dir
+    frag_t fg;
+    CDir *curdir = 0;
+    if (next == MDiscoverReply::DIR)
+      curdir = add_replica_dir(p, cur, m->get_source().num(), finished);
+    else {
+      // note: this can only happen our first way around this loop.
+      if (p.end() && m->is_flag_error_dn()) {
+        fg = cur->pick_dirfrag(m->get_error_dentry());
+        curdir = cur->get_dirfrag(fg);
+      } else
+        curdir = cur->get_dirfrag(m->get_base_dir_frag());
+    }
+
+    // dentry error?
+    if (p.end() && (m->is_flag_error_dn() || m->is_flag_error_ino())) {
+      // error!
+      assert(cur->is_dir());
+      if (curdir) {
+        if (m->get_error_dentry().length()) {
+          dout(7) << " flag_error on dentry " << m->get_error_dentry()
+                  << ", triggering dentry" << dendl;
+          curdir->take_dentry_waiting(m->get_error_dentry(),
+                                      m->get_wanted_snapid(), m->get_wanted_snapid(), error);
+        } else {
+          dout(7) << " flag_error on ino " << m->get_wanted_ino()
+                  << ", triggering ino" << dendl;
+          curdir->take_ino_waiting(m->get_wanted_ino(), error);
+        }
+      } else {
+        dout(7) << " flag_error on dentry " << m->get_error_dentry()
+                << ", triggering dir?" << dendl;
+        cur->take_waiting(CInode::WAIT_DIR, error);
+      }
+      break;
+    }
+    assert(curdir);
+
+    if (p.end())
+      break;
+
+    // dentry
+    CDentry *dn = add_replica_dentry(p, curdir, finished);
+
+    if (p.end())
+      break;
+
+    // inode
+    cur = add_replica_inode(p, dn, finished);
+
+    next = MDiscoverReply::DIR;
+  }
+
+  // dir error?
+  // or dir_auth hint?
+  if (m->is_flag_error_dir() && !cur->is_dir()) {
+    // not a dir.
+    cur->take_waiting(CInode::WAIT_DIR, error);
+  } else if (m->is_flag_error_dir() ||
+             (m->get_dir_auth_hint() != CDIR_AUTH_UNKNOWN &&
+              m->get_dir_auth_hint() != mds->get_nodeid())) {
+    int who = m->get_dir_auth_hint();
+    if (who == mds->get_nodeid()) who = -1;
+    if (who >= 0)
+      dout(7) << " dir_auth_hint is " << m->get_dir_auth_hint() << dendl;
+
+    // try again?
+    if (m->get_error_dentry().length()) {
+      // wanted a dentry
+      frag_t fg = cur->pick_dirfrag(m->get_error_dentry());
+      CDir *dir = cur->get_dirfrag(fg);
+      filepath relpath(m->get_error_dentry(), 0);
+      if (dir) {
+        // don't actaully need the hint, now
+        if (dir->lookup(m->get_error_dentry()) == 0 &&
+            dir->is_waiting_for_dentry(m->get_error_dentry().c_str(), m->get_wanted_snapid()))
+          discover_path(dir, m->get_wanted_snapid(), relpath, 0, m->get_wanted_xlocked());
+        else
+          dout(7) << " doing nothing, have dir but nobody is waiting on dentry "
+                  << m->get_error_dentry() << dendl;
+      } else {
+        if (cur->is_waiter_for(CInode::WAIT_DIR))
+          discover_path(cur, m->get_wanted_snapid(), relpath, 0, m->get_wanted_xlocked(), who);
+        else
+          dout(7) << " doing nothing, nobody is waiting for dir" << dendl;
+      }
+    } else {
+      // wanted just the dir
+      frag_t fg = m->get_base_dir_frag();
+      if (cur->get_dirfrag(fg) == 0 && cur->is_waiter_for(CInode::WAIT_DIR))
+        discover_dir_frag(cur, fg, 0, who);
+      else
+        dout(7) << " doing nothing, nobody is waiting for dir" << dendl;
+    }
+  }
+
+  // waiters
+  finish_contexts(error, -ENOENT);  // finish errors directly
+  mds->queue_waiters(finished);
+
+  // done
+  m->put();
+}
+
+
+
+void MDCache::open_foreign_mdsdir(inodeno_t ino, Context *fin)
+{
+  discover_base_ino(ino, fin, ino & (MAX_MDS-1));
+}
+
+
+
+* monitor
+// 有一组monitor通过paxos算法解决一致性问题？
+/* 
+ *  It runs on each machine in the Monitor   
+ * Cluster. The election of a leader for the paxos algorithm only happens 
+ * once per machine via the elector. There is a separate paxos instance (state) 
+ * kept for each of the system components: Object Store Device (OSD) Monitor, 
+ * Placement Group (PG) Monitor, Metadata Server (MDS) Monitor, and Client Monitor.
+ */
+
+mon_client.c注释
+/*
+ * Interact with Ceph monitor cluster.  Handle requests for new map
+ * versions, and periodically resend as needed.  Also implement
+ * statfs() and umount().
+ *
+ * A small cluster of Ceph "monitors" are responsible for managing critical
+ * cluster configuration and state information.  An odd number (e.g., 3, 5)
+ * of cmon daemons use a modified version of the Paxos part-time parliament
+ * algorithm to manage the MDS map (mds cluster membership), OSD map, and
+ * list of clients who have mounted the file system.
+ *
+ * We maintain an open, active session with a monitor at all times in order to
+ * receive timely MDSMap updates.  We periodically send a keepalive byte on the
+ * TCP socket to ensure we detect a failure.  If the connection does break, we
+ * randomly hunt for a new monitor.  Once the connection is reestablished, we
+ * resend any outstanding requests.
+ */
+
+/*
+ * The monitor map enumerates the set of all monitors.
+ */
+struct ceph_monmap {
+        struct ceph_fsid fsid;
+        u32 epoch;
+        u32 num_mon;
+        struct ceph_entity_inst mon_inst[0];
+};
+
+
+
+* ceph_entity_name
+/*
+ * entity_name -- logical name for a process participating in the
+ * network, e.g. 'mds0' or 'osd3'.
+ */
+struct ceph_entity_name {
+        __u8 type;      /* CEPH_ENTITY_TYPE_* */
+        __le64 num;
+} __attribute__ ((packed));
+
+
+* session
+
+  1、开始session，向monitor发送消息
+  mon_client.c: __open_session()
+
+   monclient.cc
+
+  2、monitor处理session消息
+  为mon_client分配一个global id，回复mon_client.
+  bool AuthMonitor::prep_auth(MAuth *m, bool paxos_writable)
+
+  3、接受session回复，获取global id,
+    如果获取到auth，那么就向monitor发送获取mdsmap/odsmap的请求
+    mon_client.c: handle_auth_reply()
+    void MonClient::handle_auth(MAuthReply *m)
+
+* WHY
+  所有的角色都与monitor交互吗？注册？
+  都作为mon client角色与 monitor交互
+
+* paxos算法实现
+
+  MMonPaxos.h中定义常量
+  const static int OP_COLLECT =   1; // proposer: propose round
+  const static int OP_LAST =      2; // voter:    accept proposed round
+  const static int OP_BEGIN =     3; // proposer: value proposed for this round
+  const static int OP_ACCEPT =    4; // voter:    accept propsed value
+  const static int OP_COMMIT =    5; // proposer: notify learners of agreed value
+  const static int OP_LEASE =     6; // leader: extend peon lease
+  const static int OP_LEASE_ACK = 7; // peon: lease ack
+
+
+  涉及7个状态
+  1、proposer 向voter发送OP_COLLECT消息，起始propose round。
+  2、voter 接受OP_COLLECT消息，开始accept proposed round,向proposer回应OP_LAST消息。
+  3、

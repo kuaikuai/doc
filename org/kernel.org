@@ -1,0 +1,4470 @@
+#+OPTIONS: "\n:t"
+内核代码分析心得
+
+http://www.kerneltravel.net/?page_id=8
+
+/阅读代码，弄懂意思后，使用图形在脑子中演练一遍其执行过程。/
+/如果代码场景合适的话，阅读时就是使用图形思考代码。/
+/思考才是进步的本质/
+
+/要分析代码为什么这么写。/
+/如果让你写，你会写成什么样子的。/
+
+/理解代码时，要从上往下理解，先理解模块，概要流程，后分析细节/
+
+历史邮件列表地址：http://zh-kernel.org/pipermail/linux-kernel/
+
+* 启动过程
+* 邮件列表内容整理
+** 非root用户也访问的/dev下设备
+   Linux下/dev下的设备文件都要是root用户才能访问。那如果我要访问这些文件有没什么办法可以让非root用户也访问的，除了改文件访问权限啊，那个不可移植的。谢谢～
+
+   你可以通过修改udev的规则，来改变/dev/下面设备文件的属主。
+
+** 关于在内核中写文件的问题
+   我的意思是你最好改变一下思路，比如建立一个netlink
+   socket，然后内核需要记录文件的时候往里边写，定义你自己的协议，用一个守护进程去等，有消息就写到文件里。为什么一定要直接在内核里访问文件呢？既然不建议在内核里直接访问文件，那自然是有一些道理的吧。
+   类似syslog
+   为什么一定要在内核里写文件，而且要一直写呢？像内核日志那样，用通信，一个守护进程来访问文件，不是挺好么？ 
+** 高精度定时
+   通常的高精度定时的做法是用hrtimer 挂一个定时器
+   定时器中调度一个tasklet
+   tasklet会在下半部中执行 应该能满足大部分实时的需求了
+
+** 两个模块依赖问题 inosmod no symbol version for xxx
+现有两个模块, mod1, mod2
+mod2中需要使用mod1中的函数He1, 所以我在mod1的最后加了
+EXPORT_SYMBOL(He1);
+
+然后依次加载mod1,mod2，  insmod mod2 时提示 “mod2: no symbol version for
+He1; mod2:
+Unkown symbol He1”
+google 下，知道要加 -DEXPORT_SYMTAB 编译选项，可添加后不成功，怀疑我的
+Makefile 写的不对，下面是源码
+希望前辈们指导下 Makefile 哪里错了。# 我是在源码树外面编译驱动模块的
+
+#+BEGIN_SRC C
+/*mod1.c*/
+#include <linux/init.h>
+#include <linux/module.h>
+MODULE_LICENSE("Dual BSD/GPL");
+static int He1(void) 
+{
+      printk(KERN_INFO "He1..\n");
+    return 0;
+}
+EXPORT_SYMBOL(He1);
+
+static int __init hello_init(void)
+{
+        printk(KERN_ALERT "Hello, world\n");
+        return 0;
+}
+
+static void __exit hello_exit(void)
+{
+        printk(KERN_ALERT "Goodbye, cruel world\n");
+}
+
+module_init(hello_init);
+module_exit(hello_exit);
+
+/*mod1's Makefile*/
+#! /bin/bash
+KERNEL=/usr/src/linux-headers-2.6.32-23-generic/
+
+obj-m := -DEXPORT_SYMTAB -DMODULE
+obj-m := mod1.o
+default:
+make -C $(KERNEL) M=`pwd` modules
+
+--------------------------------------------------------------
+
+/*mod2.c*/
+
+#include <linux/init.h>
+#include <linux/module.h>
+MODULE_LICENSE("Dual BSD/GPL");
+
+static int He2(void)
+{
+
+extern int He1(void);
+He1();
+printk(KERN_INFO "He2..\n");
+return 0;
+
+}
+
+static int __init hello_init(void)
+{
+
+He2();
+
+        printk(KERN_ALERT "Hello, world\n");
+        return 0;
+}
+
+static void __exit hello_exit(void)
+{
+        printk(KERN_ALERT "Goodbye, cruel world\n");
+}
+
+module_init(hello_init);
+module_exit(hello_exit);
+
+/*mod2's Makfile*/
+#! /bin/bash
+KERNEL=/usr/src/linux-headers-2.6.32-23-generic/
+obj-m := -DEXPORT_SYMTAB -DMODULE
+obj-m := mod2.o
+default:
+make -C $(KERNEL) M=`pwd` modules
+#+END_SRC
+
+*解决办法：*
+在 mod2 Makefile 中指定 mod1编译后 生存的符号文件Module.symvers文件，
+
+KBUILD_EXTRA_SYMBOLS := ~/mydriv/tp/mod1/Module.symvers
+或者
+obj-y := ../mod1/  # mod1 目录
+
+具体在 Document/kbuild/module.txt 7.3 节有描述
+
+* 阅读linux，查看历史的PATCH，讨论可以加深理解
+* 阅读linux一个心得
+由于代码量太大，必须形成一个大局观，在大局观的指导下阅读细节，才能不被细节淹没。
+大局观之下需要一个相对小的大局观，逐步细化。
+* head.S中建立临时页表
+#+begin_src asm
+/*
+ * Initialize page tables.  This creates a PDE and a set of page
+ * tables, which are located immediately beyond _end.  The variable
+ * init_pg_tables_end is set up to point to the first "safe" location.
+ * Mappings are created both at virtual address 0 (identity mapping)
+ * and PAGE_OFFSET for up to _end+sizeof(page tables)+INIT_MAP_BEYOND_END.
+ *
+ * Warning: don't use %esi or the stack in this code.  However, %esp
+ * can be used as a GPR if you really need it...
+ */
+/*
+ * 初始化页表，这里创建一个PDE(页目录项)和一些页表，它们紧接在_end后面。
+　　把虚拟地址０和PAGE_OFFSET映射到_end+sizeof(page tables)+INIT_MAP_BEYOND_END空间中。
+ */
+/* pg0临时 第一个页表
+   swapper_pg_dir 页目录表开始地址
+　 boot阶段只使用4M内存？？
+*/
+page_pde_offset = (__PAGE_OFFSET >> 20);
+        /*  pg0地址在内核编译的时候， 已经是加上0xc0000000了，
+　　　 减去0xc00000000得到对应的物理地址 */
+        movl $(pg0 - __PAGE_OFFSET), %edi
+        movl $(swapper_pg_dir - __PAGE_OFFSET), %edx
+　　/* 页表项的属性 */
+        movl 0x007, %eax                        /* 0x007 = PRESENT+RW+USER */
+10:
+        /* 0x007页目录项属性 %edi页表项地址，生成一个PDE项 */
+        leal 0x007(%edi),%ecx                        /* Create PDE entry */
+        /*  恒等映射的页目录项 */
+        movl %ecx,(%edx)                        /* Store identity PDE entry */
+　　　　/* 映射内核空间的页目录项 */
+        movl %ecx,page_pde_offset(%edx)                /* Store kernel PDE entry */
+        addl ,%edx
+        movl 24, %ecx
+11:
+        /* stosl 将%eax写入%edi指向内存，并移动%edi指针到下一单元*/
+　　　　/*  这个循环用于初始化pg0的页表项 */
+        stosl
+        /* %eax */
+        addl 0x1000,%eax
+        loop 11b
+        /* End condition: we must map up to and including INIT_MAP_BEYOND_END */
+        /* bytes beyond the end of our own page tables; the +0x007 is the attribute bits */
+　　　　/* 结束条件：我们映射一直到（包括）INIT_MAP_BEYOND_END 
+           +0x007是属性位
+　　　内核到底要建立多少页表， 也就是要映射多少内存空间， 取决于这个判断条件。
+　　　在内核初始化程中内核只要保证能映射到包括内核的代码段，数据段，初始页表
+　　　和用于存放动态数据结构的128k大小的空间就行 */
+        leal (INIT_MAP_BEYOND_END+0x007)(%edi),%ebp
+        cmpl %ebp,%eax
+        jb 10b
+        movl %edi,(init_pg_tables_end - __PAGE_OFFSET)
+#+end_src
+
+* 疑问：32位linux的支持最大内存
+  32位linux的支持最大内存
+  我开始一直傻傻地疑惑：既然高端内存都是使用线性地址重复映射实际的物理地址，
+  那么貌似可以支持无限的内存。
+  
+  但是仔细想一下内存分页的映射方式，
+  不论某个线性地址对应的页目录项和页表项里如何填写，
+  最终起作用的就是最后页表项里填写的页地址。 
+  而页表项长度是32位的，也就是说实际映射的物理地址必定不会大于4G。
+  
+  对于32位服务器而言，4G确实很紧张。
+  为了满足这部分需求，intel在Pentium Pro处理器，引起一种PAE机制，
+  将CPU的地址引脚增加到36，这样可以访问64G内存了。
+  但是32位cpu的线性地址仍然是32位，为了实现32位线性地址到36位物理地址的转换，
+  采用不同于以前的映射方式，
+  根据上面4G的情况，可以得出32位页表项肯定不够用了，
+  你使用32位的页表项，无论怎么填，都不能填入36位的物理地址，
+  所以页表项长度要增加，实际上就增加到64位，现在够用了。
+
+* /dev/mem和/dev/kmem使用
+   /dev/mem: 物理内存的全镜像。可以用来访问物理内存。
+   /dev/kmem: kernel看到的虚拟内存的全镜像。可以用来访问kernel的内容。
+      
+   /dev/mem 用来访问物理IO设备，比如X用来访问显卡的物理内存，或嵌入式中访问GPIO。
+   用法一般就是open，然后mmap，接着可以使用map之后的地址来访问物理内存。这其实就是实现用户空间驱动的一种方法。
+   /dev/kmem 一般可以用来查看kernel的变量，或者用作rootkit之类的。
+   
+   通过/dev/mem设备文件和mmap系统调用，可以将线性地址描述的物理内存映射到进程 
+   的地址空间，然后就可以直接访问这段内存了。 
+   比如，标准VGA 16色模式的实模式地址是A000:0000，而线性地址则是A0000。设定显 
+   存大小为0x10000，则可以如下操作 
+   #+begin_src c
+   mem_fd  = open( "/dev/mem", O_RDWR ); 
+   vga_mem = mmap( 0, 0x10000, PROT_READ | PROT_WRITE, MAP_SHARED, 
+   mem_fd, 0xA0000 ); 
+   close( mem_fd ); 
+   #+end_src
+   然后直接对vga_mem进行访问，就可以了。当然，如果是操作VGA显卡，还要获得I/O 
+   端口的访问权限，以便进行直接的I/O操作，用来设置模式/调色板/选择位面等等 
+   
+   在工控领域中还有一种常用的方法，用来在内核和应用程序之间高效传递数据: 
+   
+   假定系统有64M物理内存，则可以通过lilo通知内核只使用63M，而保留1M物理内 
+   存作为数据交换使用(使用 mem=63M 标记)。 
+   然后打开/dev/mem设备，并将63M开始的1M地址空间映射到进程的地址空间。
+
+   使用/dev/kmem查看kernel变量 从lwn.net学到的
+   实例代码如下：
+#+begin_src c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/poll.h>
+#include <sys/mman.h>
+
+int page_size;
+#define PAGE_SIZE page_size
+#define PAGE_MASK (~(PAGE_SIZE-1))
+
+void get_var (unsigned long addr) {
+        off_t ptr = addr & ~(PAGE_MASK);
+        off_t offset = addr & PAGE_MASK;
+        int i = 0;
+        char *map;
+        static int kfd = -1;
+
+        kfd = open("/dev/kmem",O_RDONLY);
+        if (kfd < 0) {
+                perror("open");
+                exit(0);
+        }
+
+        map = mmap(NULL,PAGE_SIZE,PROT_READ,MAP_SHARED,kfd,offset);
+        if (map == MAP_FAILED) {
+                perror("mmap");
+                exit(-1);
+        }
+        /* 假定这里是字符串 */
+        printf("%s\n",map+ptr);
+
+        return;
+}
+
+int main(int argc, char **argv)
+{
+        FILE *fp;
+        char addr_str[11]="0x";
+        char var[51];
+        unsigned long addr;
+        char ch;
+        int r;
+        
+        if (argc != 2) {
+                fprintf(stderr,"usage: %s System.map\n",argv[0]);
+                exit(-1);
+        }
+
+        if ((fp = fopen(argv[1],"r")) == NULL) {
+                perror("fopen");
+                exit(-1);
+        }
+
+        do {
+                r = fscanf(fp,"%8s %c %50s\n",&addr_str[2],&ch,var);
+                if (strcmp(var,"modprobe_path")==0)
+                        break;
+        } while(r > 0);
+        if (r < 0) {
+                printf("could not find modprobe_path\n");
+                exit(-1);
+        }
+        page_size = getpagesize();
+        addr = strtoul(addr_str,NULL,16);
+        printf("found modprobe_path at (%s) %08lx\n",addr_str,addr);
+        get_var(addr);
+}
+#+end_src
+运行：
+ ./tmap /boot/System.map
+found modprobe_path at (0xc03aa900) c03aa900
+/sbin/modprobe
+
+* setup memory 代码分析
+几个重要的宏的含义：
+VMALLOC_RESERVE ：为vmalloc（）函数访问内核空间所保留的内存区，大小为128MB。
+MAXMEM ：内核能够直接映射的最大RAM容量，为1GB－128MB＝896MB（-PAGE_OFFSET就等于1GB）
+MAXMEM_PFN ：返回由内核能直接映射的最大物理页面数。
+MAX_NONPAE_PFN ：给出在4GB之上第一个页面的页面号。当页面扩充（PAE）功能启用时，才能访问4GB以上的内存。
+/* 
+   获取足够的信息，以便初始化boot memory allocator
+*/
+#+BEGIN_SRC c
+static unsigned long __init setup_memory(void)
+{
+        unsigned long bootmap_size, start_pfn, max_low_pfn;
+
+        /*
+         * partially used pages are not usable - thus
+         * we are rounding upwards:
+         */
+        start_pfn = PFN_UP(init_pg_tables_end);
+
+        /* 遍历e820映射表，查找最高可用的页框号*/
+        find_max_pfn();
+        /* 获取内核可以直接映射访问的最大页号 (ZONE_NORMAL) */
+        max_low_pfn = find_max_low_pfn();
+
+#ifdef CONFIG_HIGHMEM
+        highstart_pfn = highend_pfn = max_pfn;
+        if (max_pfn > max_low_pfn) {
+                highstart_pfn = max_low_pfn;
+        }
+        printk(KERN_NOTICE "%ldMB HIGHMEM available.\n",
+                pages_to_mb(highend_pfn - highstart_pfn));
+#endif
+        printk(KERN_NOTICE "%ldMB LOWMEM available.\n",
+                        pages_to_mb(max_low_pfn));
+        /*
+         * Initialize the boot-time allocator (with low memory only):
+         */
+        /* 初始化启动时的内存分配器，仅使用低端内存 */
+        bootmap_size = init_bootmem(start_pfn, max_low_pfn);
+        /* 读取e820映射，调用free_bootmem(), 将页面对应的位图置空
+        （因为init_bootmem 中将所有位图置１) */
+        register_bootmem_low_pages(max_low_pfn);
+
+        /*
+         * Reserve the bootmem bitmap itself as well. We do this in two
+         * steps (first step was init_bootmem()) because this catches
+         * the (very unlikely) case of us accidentally initializing the
+         * bootmem allocator with an invalid RAM area.
+         */
+        /* 保留allocator位图使用的页，即将对应的位图置位。
+            HIGH_MEMORY为1MB，即内核开始的地方 */
+        reserve_bootmem(HIGH_MEMORY, (PFN_PHYS(start_pfn) +
+                         bootmap_size + PAGE_SIZE-1) - (HIGH_MEMORY));
+
+        /*
+         * reserve physical page 0 - it's a special BIOS page on many boxes,
+         * enabling clean reboots, SMP operation, laptop functions.
+         */
+        /* 保留物理页面０，这是特殊的BIOS使用的页面 */
+        reserve_bootmem(0, PAGE_SIZE);
+
+        /* reserve EBDA region, it's a 4K region */
+        reserve_ebda_region();
+
+    /* could be an AMD 768MPX chipset. Reserve a page  before VGA to prevent
+       PCI prefetch into it (errata #56). Usually the page is reserved anyways,
+       unless you have no PS/2 mouse plugged in. */
+       if (boot_cpu_data.x86_vendor == X86_VENDOR_AMD &&
+            boot_cpu_data.x86 == 6)
+             reserve_bootmem(0xa0000 - 4096, 4096);
+
+#ifdef CONFIG_SMP
+        /*
+         * But first pinch a few for the stack/trampoline stuff
+         * FIXME: Don't need the extra page at 4K, but need to fix
+         * trampoline before removing it. (see the GDT stuff)
+         */
+        reserve_bootmem(PAGE_SIZE, PAGE_SIZE);
+#endif
+#ifdef CONFIG_ACPI_SLEEP
+        /*
+         * Reserve low memory region for sleep support.
+         */
+        acpi_reserve_bootmem();
+#endif
+#ifdef CONFIG_X86_FIND_SMP_CONFIG
+        /*
+         * Find and reserve possible boot-time SMP configuration:
+         */
+        find_smp_config();
+#endif
+
+#ifdef CONFIG_BLK_DEV_INITRD
+        if (LOADER_TYPE && INITRD_START) {
+                if (INITRD_START + INITRD_SIZE <= (max_low_pfn << PAGE_SHIFT)) {
+                        reserve_bootmem(INITRD_START, INITRD_SIZE);
+                        initrd_start =
+                                INITRD_START ? INITRD_START + PAGE_OFFSET : 0;
+                        initrd_end = initrd_start+INITRD_SIZE;
+                }
+                else {
+                        printk(KERN_ERR "initrd extends beyond end of memory "
+                            "(0x%08lx > 0x%08lx)\ndisabling initrd\n",
+                            INITRD_START + INITRD_SIZE,
+                            max_low_pfn << PAGE_SHIFT);
+                        initrd_start = 0;
+                }
+        }
+#endif
+        return max_low_pfn;
+}
+
+
+/* 
+   确定max_low_pfn和highmem_pages
+*/
+unsigned long __init find_max_low_pfn(void)
+{
+        unsigned long max_low_pfn;
+
+        max_low_pfn = max_pfn;
+        /* max_low_pfn 大于 896MB, 置为896MB */
+        if (max_low_pfn > MAXMEM_PFN) {
+                if (highmem_pages == -1)
+                        highmem_pages = max_pfn - MAXMEM_PFN;
+                if (highmem_pages + MAXMEM_PFN < max_pfn)
+                        max_pfn = MAXMEM_PFN + highmem_pages;
+                if (highmem_pages + MAXMEM_PFN > max_pfn) {
+                        printk("only %luMB highmem pages available, ignoring highmem size of %uMB.\n", pages_to_mb(max_pfn - MAXMEM_PFN), pages_to_mb(highmem_pages));
+                        highmem_pages = 0;
+                }
+                max_low_pfn = MAXMEM_PFN;
+#ifndef CONFIG_HIGHMEM
+                /* Maximum memory usable is what is directly addressable */
+                printk(KERN_WARNING "Warning only %ldMB will be used.\n",
+                                        MAXMEM>>20);
+                / 没有内核配置HIGHMEM时，max_pfn 大于 4GB对应的页号，输出提示*/
+                if (max_pfn > MAX_NONPAE_PFN)
+                        printk(KERN_WARNING "Use a PAE enabled kernel.\n");
+                else
+                        printk(KERN_WARNING "Use a HIGHMEM enabled kernel.\n");
+                max_pfn = MAXMEM_PFN;
+#else /* !CONFIG_HIGHMEM */
+#ifndef CONFIG_X86_PAE
+                if (max_pfn > MAX_NONPAE_PFN) {
+                        max_pfn = MAX_NONPAE_PFN;
+                        printk(KERN_WARNING "Warning only 4GB will be used.\n");
+                        printk(KERN_WARNING "Use a PAE enabled kernel.\n");
+                }
+#endif /* !CONFIG_X86_PAE */
+#endif /* !CONFIG_HIGHMEM */
+        } else {
+                if (highmem_pages == -1)
+                        highmem_pages = 0;
+#ifdef CONFIG_HIGHMEM
+                if (highmem_pages >= max_pfn) {
+                        printk(KERN_ERR "highmem size specified (%uMB) is bigger than pages available (%luMB)!.\n", pages_to_mb(highmem_pages), pages_to_mb(max_pfn));
+                        highmem_pages = 0;
+                }
+                if (highmem_pages) {
+　　　　　　　　　　　　/* 为什么呢？
+                        if (max_low_pfn-highmem_pages < 64*1024*1024/PAGE_SIZE){
+                                printk(KERN_ERR "highmem size %uMB results in smaller than 64MB lowmem, ignoring it.\n", pages_to_mb(highmem_pages));
+                                highmem_pages = 0;
+                        }
+                        max_low_pfn -= highmem_pages;
+                }
+#else
+                if (highmem_pages)
+                        printk(KERN_ERR "ignoring highmem size on non-highmem kernel!\n");
+#endif
+        }
+        return max_low_pfn;
+}
+#+END_SRC
+
+* Boot memory allocator启动过程中的内存分配器
+参见 <Understanding The Linux Virtual Memory Manager>
+分配器，采用最简单的First Fit的策略，
+使用位图记录已分配的内存页，对应的位置1，表明对应页面的已经分配。
+分配器的数据结构：
+#+begin_src c
+typedef struct bootmem_data {
+ unsigned long node_boot_start;
+ unsigned long node_low_pfn;
+ void *node_bootmem_map;  指向位图
+ unsigned long last_offset;  最后一次分配在页中的偏移值
+ unsigned long last_pos;     最后一次分配内存时使用的页框号
+ unsigned long last_success; /* 上一次分配的起始页，用于加快搜索 */
+} bootmem_data_t;
+#+end_src
+#+begin_src c
+/*
+  初始化bootmem数据结构
+  mapstart 位图起始页框号
+  start    起始页框号
+  end      结束页框号
+ */
+static unsigned long __init init_bootmem_core (pg_data_t *pgdat,
+        unsigned long mapstart, unsigned long start, unsigned long end)
+{
+        bootmem_data_t *bdata = pgdat->bdata;
+        unsigned long mapsize = ((end - start)+7)/8;
+
+        pgdat->pgdat_next = pgdat_list;
+        pgdat_list = pgdat;
+
+        mapsize = (mapsize + (sizeof(long) - 1UL)) & ~(sizeof(long) - 1UL);
+        bdata->node_bootmem_map = phys_to_virt(mapstart << PAGE_SHIFT);
+        bdata->node_boot_start = (start << PAGE_SHIFT);
+        bdata->node_low_pfn = end;
+
+        /*
+         * Initially all pages are reserved - setup_arch() has to
+         * register free RAM areas explicitly.
+         */
+        memset(bdata->node_bootmem_map, 0xff, mapsize);
+
+        return mapsize;
+}
+
+/*
+ * We 'merge' subsequent allocations to save space. We might 'lose'
+ * some fraction of a page if allocations cannot be satisfied due to
+ * size constraints on boxes where there is physical RAM space
+ * fragmentation - in these cases (mostly large memory boxes) this
+ * is not a problem.
+ *
+ * On low memory boxes we get it right in 100% of the cases.
+ *
+ * alignment has to be a power of 2 value.
+ *
+ * NOTE:  This function is _not_ reentrant.
+ */
+/* 《ULVM》中说：
+   goal is the preferred address to allocate above if possible.
+*/
+申请内存
+static void * __init
+__alloc_bootmem_core(struct bootmem_data *bdata, unsigned long size,
+                unsigned long align, unsigned long goal)
+{
+        unsigned long offset, remaining_size, areasize, preferred;
+        unsigned long i, start = 0, incr, eidx;
+        void *ret;
+
+        if(!size) {
+                printk("__alloc_bootmem_core(): zero-sized request\n");
+                BUG();
+        }
+        /* align 是2的指数*/
+        BUG_ON(align & (align-1));
+        /* 最后页面的相对序号，用于位图 */
+        eidx = bdata->node_low_pfn - (bdata->node_boot_start >> PAGE_SHIFT);
+        offset = 0;
+        /* 计算偏移值 */
+        if (align &&
+            (bdata->node_boot_start & (align - 1UL)) != 0)
+                offset = (align - (bdata->node_boot_start & (align - 1UL)));
+        offset >>= PAGE_SHIFT;
+
+        /*
+         * We try to allocate bootmem pages above 'goal'
+         * first, then we try to allocate lower pages.
+         */
+        /* preferred是根据goal计算的偏移值 */
+        if (goal && (goal >= bdata->node_boot_start) && 
+            ((goal >> PAGE_SHIFT) < bdata->node_low_pfn)) {
+                preferred = goal - bdata->node_boot_start;
+
+                if (bdata->last_success >= preferred)
+                        preferred = bdata->last_success;
+        } else
+                preferred = 0;
+
+        preferred = ((preferred + align - 1) & ~(align - 1)) >> PAGE_SHIFT;
+        preferred += offset;
+        /* 满足size大小，需要使用的大小 */
+        areasize = (size+PAGE_SIZE-1)/PAGE_SIZE;
+        /* 如果对齐要求跳过大于一个页面的大小 */
+        incr = align >> PAGE_SHIFT ? : 1;
+
+restart_scan:
+        for (i = preferred; i < eidx; i += incr) {
+                unsigned long j;
+                i = find_next_zero_bit(bdata->node_bootmem_map, eidx, i);
+                i = ALIGN(i, incr);
+                if (test_bit(i, bdata->node_bootmem_map))
+                        continue;
+                for (j = i + 1; j < i + areasize; ++j) {
+                        if (j >= eidx)
+                                goto fail_block;
+                        if (test_bit (j, bdata->node_bootmem_map))
+                                goto fail_block;
+                }
+                start = i;
+                goto found;
+        fail_block:
+                i = ALIGN(j, incr);
+        }
+        /* 按照preferred指定的偏移值，无法找到满足条件，从offset开始重新找 */
+        if (preferred > offset) {
+                preferred = offset;
+                goto restart_scan;
+        }
+        return NULL;
+
+found:
+        bdata->last_success = start << PAGE_SHIFT;
+        BUG_ON(start >= eidx);
+
+        /*
+         * Is the next page of the previous allocation-end the start
+         * of this allocation's buffer? If yes then we can 'merge'
+         * the previous partial page with this allocation.
+         */
+        /* 上次分配的最后页的下页是这次分配的页面吗？如果是我们把之前的部分页面‘合并’
+         （也就利用起来）到这个分配中。
+         */
+        /* 如果对齐小于一页，最后页还有剩余空间（即：last_offset!=0)，
+           且最后的页号与我们找到的页相邻。
+         */
+        if (align < PAGE_SIZE &&
+            bdata->last_offset && bdata->last_pos+1 == start) {
+                offset = (bdata->last_offset+align-1) & ~(align-1);
+                BUG_ON(offset > PAGE_SIZE);
+                remaining_size = PAGE_SIZE-offset;
+                /* 我们需要的大小size 小于 最后页的剩余空间大小 */
+                if (size < remaining_size) {
+                        areasize = 0;
+                        /* last_pos unchanged */
+                        bdata->last_offset = offset+size;
+                        ret = phys_to_virt(bdata->last_pos*PAGE_SIZE + offset +
+                                                bdata->node_boot_start);
+                } else { /* 大于 最后页的剩余空间大小 */
+                        remaining_size = size - remaining_size;
+                        areasize = (remaining_size+PAGE_SIZE-1)/PAGE_SIZE;
+                        ret = phys_to_virt(bdata->last_pos*PAGE_SIZE + offset +
+                                                bdata->node_boot_start);
+                        bdata->last_pos = start+areasize-1;
+                        bdata->last_offset = remaining_size;
+                }
+                bdata->last_offset &= ~PAGE_MASK;
+        } else {
+                bdata->last_pos = start + areasize - 1;
+                bdata->last_offset = size & ~PAGE_MASK;
+                ret = phys_to_virt(start * PAGE_SIZE + bdata->node_boot_start);
+        }
+
+        /*
+         * Reserve the area now:
+         */
+        /* 设置新分配页面对应的位图，保留页面 */
+        for (i = start; i < start+areasize; i++)
+                if (unlikely(test_and_set_bit(i, bdata->node_bootmem_map)))
+                        BUG();
+        memset(ret, 0, size);
+        return ret;
+}
+#+end_src
+
+释放内存，显然实现相当简单，
+计算出需要清零的位图的起始和结束位，循环清空一下，大功告成。
+
+毕竟是boot memory，用完了，简单释放一下，
+至于还有没有照顾到了（sidx和eidx存在round up/down的问题），最后释放boot memory allocator本身，所有的东西都被释放了，
+#+begin_src c
+static void __init free_bootmem_core(bootmem_data_t *bdata, unsigned long addr, unsigned long size)
+{
+        unsigned long i;
+        unsigned long start;
+        /*
+         * round down end of usable mem, partially free pages are
+         * considered reserved.
+         */
+        unsigned long sidx;
+        unsigned long eidx = (addr + size - bdata->node_boot_start)/PAGE_SIZE;
+        unsigned long end = (addr + size)/PAGE_SIZE;
+
+        BUG_ON(!size);
+        BUG_ON(end > bdata->node_low_pfn);
+
+        if (addr < bdata->last_success)
+                bdata->last_success = addr;
+
+        /*
+         * Round up the beginning of the address.
+         */
+        start = (addr + PAGE_SIZE-1) / PAGE_SIZE;
+        sidx = start - (bdata->node_boot_start/PAGE_SIZE);
+
+        for (i = sidx; i < eidx; i++) {
+                if (unlikely(!test_and_clear_bit(i, bdata->node_bootmem_map)))
+                        BUG();
+        }
+}
+#+end_src
+boot memory allocator 寿终正寝，
+buddy memory allocator 上场
+#+begin_src c
+static unsigned long __init free_all_bootmem_core(pg_data_t *pgdat)
+{
+        struct page *page;
+        bootmem_data_t *bdata = pgdat->bdata;
+        unsigned long i, count, total = 0;
+        unsigned long idx;
+        unsigned long *map; 
+        int gofast = 0;
+
+        BUG_ON(!bdata->node_bootmem_map);
+
+        count = 0;
+        /* first extant page of the node */
+        page = virt_to_page(phys_to_virt(bdata->node_boot_start));
+        idx = bdata->node_low_pfn - (bdata->node_boot_start >> PAGE_SHIFT);
+        map = bdata->node_bootmem_map;
+        /* Check physaddr is O(LOG2(BITS_PER_LONG)) page aligned */
+        /* 检查node_boot_start对应的页框号是否是BITS_PER_LONG对齐的？ */
+        if (bdata->node_boot_start == 0 ||
+            ffs(bdata->node_boot_start) - PAGE_SHIFT > ffs(BITS_PER_LONG))
+                gofast = 1;
+        for (i = 0; i < idx; ) {
+                unsigned long v = ~map[i / BITS_PER_LONG];
+                /* 起始页框号是BITS_PER_LONG对齐
+                   如果对应的一个LONG长度的位图是0xffffffff，特殊处理，加快处理速度
+                if (gofast && v == ~0UL) {
+                        int j, order;
+
+                        count += BITS_PER_LONG;
+                        __ClearPageReserved(page);
+                        order = ffs(BITS_PER_LONG) - 1;
+                        set_page_refs(page, order);
+                        for (j = 1; j < BITS_PER_LONG; j++) {
+                                if (j + 16 < BITS_PER_LONG)
+                                        prefetchw(page + j + 16);
+                                __ClearPageReserved(page + j);
+                        }
+                        /* 调用buddy allocator的释放函数将页面释放到free_list */
+                        __free_pages(page, order);
+                        i += BITS_PER_LONG;
+                        page += BITS_PER_LONG;
+                } else if (v) {
+                        /* 最基本的方法，逐位判断 */
+                        unsigned long m;
+                        for (m = 1; m && i < idx; m<<=1, page++, i++) {
+                                if (v & m) {
+                                        count++;
+                                        __ClearPageReserved(page);
+                                        set_page_refs(page, 0);
+                                        __free_page(page);
+                                }
+                        }
+                } else {
+                        i+=BITS_PER_LONG;
+                        page += BITS_PER_LONG;
+                }
+        }
+        total += count;
+
+        /*
+         * Now free the allocator bitmap itself, it's not
+         * needed anymore:
+         */
+        /* 释放分配器位图占用的内存 */
+        page = virt_to_page(bdata->node_bootmem_map);
+        count = 0;
+        for (i = 0; i < ((bdata->node_low_pfn-(bdata->node_boot_start >> PAGE_SHIFT))/8 + PAGE_SIZE-1)/PAGE_SIZE; i++,page++) {
+                count++;
+                __ClearPageReserved(page);
+                set_page_count(page, 1);
+                __free_page(page);
+        }
+        total += count;
+        bdata->node_bootmem_map = NULL;
+
+        return total;
+}
+#+end_src
+
+* sanitize_e820_map代码分析
+
+  整理e820 映射表 
+  算法概要：
+  在change_point记录分别区域的起始点和结束点的地址。
+  根据点的地址进行排序。
+  例如有区域A、B
+     A 1111111
+     B ____2__
+  假定地址起始位置为0
+  那么排序后的结果是：0 4 5 6
+  然后在根据排序后的结果判定是否存在重叠、然后生成整理后的区域。
+#+begin_src c
+/*
+ * Sanitize the BIOS e820 map.
+ *
+ * Some e820 responses include overlapping entries.  The following 
+ * replaces the original e820 map with a new one, removing overlaps.
+ *
+ */
+struct change_member {
+ struct e820entry *pbios; /* pointer to original bios entry */
+ unsigned long long addr; /* address for this change point */
+};
+struct change_member change_point_list[2*E820MAX] __initdata;
+struct change_member *change_point[2*E820MAX] __initdata;
+struct e820entry *overlap_list[E820MAX] __initdata;
+struct e820entry new_bios[E820MAX] __initdata;
+
+static int __init sanitize_e820_map(struct e820entry * biosmap, char * pnr_map)
+{
+        struct change_member *change_tmp;
+        unsigned long current_type, last_type;
+        unsigned long long last_addr;
+        int chgidx, still_changing;
+        int overlap_entries;
+        int new_bios_entry;
+        int old_nr, new_nr, chg_nr;
+        int i;
+
+        /*
+                Visually we're performing the following (1,2,3,4 = memory types)...
+
+                Sample memory map (w/overlaps):
+                   ____22__________________
+                   ______________________4_
+                   ____1111________________
+                   _44_____________________
+                   11111111________________
+                   ____________________33__
+                   ___________44___________
+                   __________33333_________
+                   ______________22________
+                   ___________________2222_
+                   _________111111111______
+                   _____________________11_
+                   _________________4______
+
+                Sanitized equivalent (no overlap):
+                   1_______________________
+                   _44_____________________
+                   ___1____________________
+                   ____22__________________
+                   ______11________________
+                   _________1______________
+                   __________3_____________
+                   ___________44___________
+                   _____________33_________
+                   _______________2________
+                   ________________1_______
+                   _________________4______
+                   ___________________2____
+                   ____________________33__
+                   ______________________4_
+        */
+
+        /* if there's only one memory region, don't bother */
+        if (*pnr_map < 2)
+                return -1;
+
+        old_nr = *pnr_map;
+
+        /* bail out if we find any unreasonable addresses in bios map */
+        for (i=0; i<old_nr; i++)
+                if (biosmap[i].addr + biosmap[i].size < biosmap[i].addr)
+                        return -1;
+
+        /* create pointers for initial change-point information (for sorting) */
+        for (i=0; i < 2*old_nr; i++)
+                change_point[i] = &change_point_list[i];
+
+        /* record all known change-points (starting and ending addresses),
+           omitting those that are for empty memory regions */
+        /* 生成点地址的记录*/
+        chgidx = 0;
+        for (i=0; i < old_nr; i++)        {
+                if (biosmap[i].size != 0) {
+                        change_point[chgidx]->addr = biosmap[i].addr;
+                        change_point[chgidx++]->pbios = &biosmap[i];
+                        change_point[chgidx]->addr = biosmap[i].addr + biosmap[i].size;
+                        change_point[chgidx++]->pbios = &biosmap[i];
+                }
+        }
+        chg_nr = chgidx;            /* true number of change-points */
+
+        /* sort change-point list by memory addresses (low -> high) */
+        /* 按照点的地址，由低到高进行排序*/
+        still_changing = 1;
+        while (still_changing)        {
+                still_changing = 0;
+                for (i=1; i < chg_nr; i++)  {
+                        /* if <current_addr> > <last_addr>, swap */
+                        /* or, if current=<start_addr> & last=<end_addr>, swap */
+                        /* 如果当前点地址小于上一个点的地址，交换两个点 */
+                        /* 或者，当前点是区域的起始点，并且当前点地址等于上一个点的地址，
+                            且上一点是某区域的结束点 */
+                        if ((change_point[i]->addr < change_point[i-1]->addr) ||
+                                ((change_point[i]->addr == change_point[i-1]->addr) &&
+                                 (change_point[i]->addr == change_point[i]->pbios->addr) &&
+                                 (change_point[i-1]->addr != change_point[i-1]->pbios->addr))
+                           )
+                        {
+                                change_tmp = change_point[i];
+                                change_point[i] = change_point[i-1];
+                                change_point[i-1] = change_tmp;
+                                still_changing=1;
+                        }
+                }
+        }
+
+        /* create a new bios memory map, removing overlaps */
+        overlap_entries=0;         /* number of entries in the overlap table */
+        new_bios_entry=0;         /* index for creating new bios map entries */
+        last_type = 0;                 /* start with undefined memory type */
+        last_addr = 0;                 /* start with 0 as last starting address */
+        /* loop through change-points, determining affect on the new bios map */
+        for (chgidx=0; chgidx < chg_nr; chgidx++)
+        {
+                /* keep track of all overlapping bios entries */
+                /* 记录当前重叠的区域，实际就是尚未“配对”的起始点 */
+                if (change_point[chgidx]->addr == change_point[chgidx]->pbios->addr)
+                {
+                        /* add map entry to overlap list (> 1 entry implies an overlap) */
+                        overlap_list[overlap_entries++]=change_point[chgidx]->pbios;
+                }
+                else
+                {
+                        /* remove entry from list (order independent, so swap with last) */
+                        /* 当遇到区域的结束点时，会走到该分支，表明该区域结束了，
+                          把记录从overlap list中删除，这里用最后一条记录覆盖记录，并减少overlap计数的办法*/
+                        for (i=0; i<overlap_entries; i++)
+                        {
+                                if (overlap_list[i] == change_point[chgidx]->pbios)
+                                        overlap_list[i] = overlap_list[overlap_entries-1];
+                        }
+                        overlap_entries--;
+                }
+                /* if there are overlapping entries, decide which "type" to use */
+                /* (larger value takes precedence -- 1=usable, 2,3,4,4+=unusable) */
+                /* 决定重叠区的类型 */
+                current_type = 0;
+                for (i=0; i<overlap_entries; i++)
+                        if (overlap_list[i]->type > current_type)
+                                current_type = overlap_list[i]->type;
+                /* continue building up new bios map based on this information */
+                /* 当前区的类型与上一个区类型不同时 */
+                if (current_type != last_type)        {
+                        /* 生成上一个区的大小 */
+                        if (last_type != 0)         {
+                                new_bios[new_bios_entry].size =
+                                        change_point[chgidx]->addr - last_addr;
+                                /* move forward only if the new size was non-zero */
+                                if (new_bios[new_bios_entry].size != 0)
+                                        if (++new_bios_entry >= E820MAX)
+                                                break;         /* no more space left for new bios entries */
+                        }
+                        /* 记录新区的信息，起始地址和类型 */
+                        if (current_type != 0)        {
+                                new_bios[new_bios_entry].addr = change_point[chgidx]->addr;
+                                new_bios[new_bios_entry].type = current_type;
+                                last_addr=change_point[chgidx]->addr;
+                        }
+                        last_type = current_type;
+                }
+        }
+        new_nr = new_bios_entry;   /* retain count for new bios entries */
+
+        /* copy new bios mapping into original location */
+        memcpy(biosmap, new_bios, new_nr*sizeof(struct e820entry));
+        *pnr_map = new_nr;
+
+        return 0;
+}
+#+end_src
+
+* 从BIOS 获取系统内存映射 
+** INT 15h, AX=E820h - Query System Address Map
+Real mode only.
+
+This call returns a memory map of all the installed RAM, and of physical memory ranges reserved by the BIOS. The address map is returned by making successive calls to this API, each returning one "run" of physical address information. Each run has a type which dictates how this run of physical address range should be treated by the operating system.
+
+If the information returned from INT 15h, AX=E820h in some way differs from INT 15h, AX=E801h or INT 15h AH=88h, then the information returned from E820h supersedes what is returned from these older interfaces. This allows the BIOS to return whatever information it wishes to for compatibility reasons.
+
+Input:
+| EAX   | Function Code E820h                                                                                                                                                                                                                                                                                                            |
+| EBX   | Continuation Contains the "continuation value" to get the next run of physical memory.  This is the value returned by a previous call to this routine.  If this is the first call, EBX must contain zero.                                                                                                                      |
+| ES:DI | Buffer Pointer Pointer to an  Address Range Descriptor structure which the BIOS is to fill in.                                                                                                                                                                                                                                 |
+| ECX   | Buffer Size The length in bytes of the structure passed to the BIOS.  The BIOS will fill in at most ECX bytes of the structure or however much of the structure the BIOS implements.  The minimum size which must be supported by both the BIOS and the caller is 20 bytes.  Future implementations may extend this structure. |
+| EDX   | Signature 'SMAP' -  Used by the BIOS to verify the caller is requesting the system map information to be returned in ES:DI.                                                                                                                                                                                                    |
+Output:
+| CF | Carry Flag Non-Carry - indicates no error
+| EAX | Signature 'SMAP' - Signature to verify correct BIOS revision.
+| ES:DI | Buffer Pointer Returned Address Range Descriptor pointer. Same value as on input.
+| ECX | Buffer Size Number of bytes returned by the BIOS in the address range descriptor.  The minimum size structure returned by the BIOS is 20 bytes.
+| EBX | Continuation Contains the continuation value to get the next address descriptor.  The actual significance of the continuation value is up to the discretion of the BIOS.  The caller must pass the continuation value unchanged as input to the next iteration of the E820 call in order to get the next Address Range Descriptor.  A return value of zero means that this is the last descriptor.  Note that the BIOS indicate that the last valid descriptor has been returned by either returning a zero as the continuation value, or by returning carry.
+Address Range Descriptor Structure
+| Offset in Bytes | Name         | Description                     |
+|               0 | BaseAddrLow  | Low 32 Bits of Base Address     |
+|               4 | BaseAddrHigh | High 32 Bits of Base Address    |
+|               8 | LengthLow    | Low 32 Bits of Length in Bytes  |
+|              12 | LengthHigh   | High 32 Bits of Length in Bytes |
+|              16 | Type         | Address type of  this range.    |
+|                 |              |                                 |
+The BaseAddrLow and BaseAddrHigh together are the 64 bit BaseAddress of this range. The BaseAddress is the physical address of the start of the range being specified.
+
+The LengthLow and LengthHigh together are the 64 bit Length of this range. The Length is the physical contiguous length in bytes of a range being specified.
+
+The Type field describes the usage of the described address range as defined in the table below.
+| Value | Pneumonic            | Description                                                                                                                                                                                                                                                                              |
+|     1 | AddressRangeMemory   | This run is available RAM usable by the operating system.                                                                                                                                                                                                                                |
+|     2 | AddressRangeReserved | This run of addresses is in use or reserved by the system, and must not be used by the operating system.                                                                                                                                                                                 |
+| Other | Undefined            | Undefined - Reserved for future use.  Any range of this type must be treated by the OS as if the type returned was AddressRangeReserved. The BIOS can use the AddressRangeReserved address range type to block out various addresses as "not suitable" for use by a programmable device. |
+
+
+Some of the reasons a BIOS would do this are:
+The address range contains system ROM. 
+The address range contains RAM in use by the ROM. 
+The address range is in use by a memory mapped system device. 
+The address range is for whatever reason are unsuitable for a standard device to use as a device memory space. 
+
+Assumptions and Limitations
+1. The BIOS will return address ranges describing base board memory and ISA or PCI memory that is contiguous with that baseboard memory. 
+2. The BIOS WILL NOT return a range description for the memory mapping of PCI devices, ISA Option ROM's, and ISA plug & play cards. This is because the OS has mechanisms available to detect them. 
+3. The BIOS will return chipset defined address holes that are not being used by devices as reserved. 
+4. Address ranges defined for base board memory mapped I/O devices (for example APICs) will be returned as reserved. 
+5. All occurrences of the system BIOS will be mapped as reserved. This includes the area below 1 MB, at 16 MB (if present) and at end of the address space (4 gig). 
+6. Standard PC address ranges will not be reported. Example video memory at A0000 to BFFFF physical will not be described by this function. The range from E0000 to EFFFF is base board specific and will be reported as suits the bas board. 
+7. All of lower memory is reported as normal memory. It is OS's responsibility to handle standard RAM locations reserved for specific uses, for example: the interrupt vector table(0:0) and the BIOS data area(40:0). 
+Example address map
+This sample address map describes a machine which has 128 MB RAM, 640K of base memory and 127 MB extended. The base memory has 639K available for the user and 1K for an extended BIOS data area. There is a 4 MB Linear Frame Buffer (LFB) based at 12 MB. The memory hole created by the chipset is from 8 M to 16 M. There are memory mapped APIC devices in the system. The IO Unit is at FEC00000 and the Local Unit is at FEE00000. The system BIOS is remapped to 4G - 64K.
+
+Note that the 639K endpoint of the first memory range is also the base memory size reported in the BIOS data segment at 40:13.
+
+Key to types: "ARM" is AddressRangeMemory, "ARR" is AddressRangeReserved.
+| Base (Hex) | Length | Type | Description                                                                                                                    |
+| 0000 0000  | 639K   | ARM  | Available Base memory - typically the same value as is returned via the INT 12 function.                                       |
+| 0009 FC00  | 1K     | ARR  | Memory reserved for use by the BIOS(s). This area typically includes the Extended BIOS data area.                              |
+| 000F 0000  | 64K    | ARR  | System BIOS                                                                                                                    |
+| 0010 0000  | 7M     | ARM  | Extended memory, this is not limited to the 64 MB address range.                                                               |
+| 0080 0000  | 8M     | ARR  | Chipset memory hole required to support the LFB mapping at 12 MB.                                                              |
+| 0100 0000  | 120M   | ARM  | Base board RAM relocated above a chipset memory hole.                                                                          |
+| FEC0 0000  | 4K     | ARR  | IO APIC memory mapped I/O at FEC00000.  Note the range of addresses required for an APIC device may vary from base OEM to OEM. |
+| FEE0 0000  | 4K     | ARR  | Local APIC memory mapped I/O at FEE00000.                                                                                      |
+| FFFF 0000  | 64K    | ARR  | Remapped System BIOS at end of address space.                                                                                  |
+|            |        |      |                                                                                                                                |
+** Sample operating system usage
+
+The following code segment is intended to describe the algorithm needed when calling the Query System Address Map function. It is an implementation example and uses non standard mechanisms.
+#+begin_src c
+    E820Present = FALSE;
+    Regs.ebx = 0;
+    do {
+        Regs.eax = 0xE820;
+        Regs.es  = SEGMENT (&Descriptor);
+        Regs.di  = OFFSET  (&Descriptor);
+        Regs.ecx = sizeof  (Descriptor);
+        Regs.edx = 'SMAP';
+
+        _int( 0x15, Regs );
+
+        if ((Regs.eflags & EFLAG_CARRY)  ||  Regs.eax != 'SMAP') {
+            break;
+        }
+
+        if (Regs.ecx < 20  ||  Regs.ecx > sizeof (Descriptor) ) {
+            // bug in bios - all returned descriptors must be
+            // at least 20 bytes long, and can not be larger then
+            // the input buffer.
+
+            break;
+        }
+
+        E820Present = TRUE;
+ .
+        .
+        .
+        Add address range Descriptor.BaseAddress through
+        Descriptor.BaseAddress + Descriptor.Length
+        as type Descriptor.Type
+ .
+        .
+        .
+
+    } while (Regs.ebx != 0);
+
+    if (!E820Present) {
+ .
+        .
+        .
+ call INT 15h, AX=E801h and/or INT 15h, AH=88h to obtain old style
+ memory information
+ .
+        .
+        .
+    }
+#+end_src
+** INT 15h, AX=E801h - Get Memory Size for Large Configurations
+Real mode only (as far as I know).
+
+Originally defined for EISA servers, this interface is capable of reporting up to 4 GB of RAM. While not nearly as flexible as E820h, it is present in many more systems.
+Input:
+ AX Function Code E801h
+Output:
+| CF | Carry Flag Non-Carry - indicates no error                                         |
+| AX | Extended 1 Number of contiguous KB between 1 and 16 MB, maximum 0x3C00 = 15 MB.   |
+| BX | Extended 2 Number of contiguous 64 KB blocks between 16 MB and 4 GB.              |
+| CX | Configured 1 Number of contiguous KB between 1 and 16 MB, maximum 0x3C00 = 15 MB. |
+| DX | Configured 2 Number of contiguous 64 KB blocks between 16 MB and 4 GB.            |
+
+Not sure what this difference between the "Extended" and "Configured" numbers are, but they appear to be identical, as reported from the BIOS.
+
+NOTE: It is possible for a machine using this interface to report a memory hole just under 16 MB (Count 1 is less than 15 MB, but Count 2 is non-zero).
+
+** INT 15h, AH=88h - Get Extended Memory Size
+Real mode only.
+
+This interface is quite primitive. It returns a single value for contiguous memory above 1 MB. The biggest limitation is that the value returned is a 16-bit value, in KB, so it has a maximum saturation of just under 64 MB even presuming it returns as much as it can. On some systems, it won't return anything above the 16 MB boundary.
+The one useful point is that it works on every PC available.
+Input:
+ AH Function Code 88h
+Output:
+ CF Carry Flag Non-Carry - indicates no error
+ AX Memory Count Number of contiguous KB above 1 MB.
+
+* 从BIOS 获取系统内存映射（二）
+Zero-page.txt中描述：
+Offset    Type               Description
+------         ----                   ----------- 
+  0       32 bytes             struct screen_info, SCREEN_INFO ATTENTION, overlaps the following !!! 
+  2       unsigned short   EXT_MEM_K, extended memory size in Kb (from int 0x15)
+  ...
+  0x1e0 unsigned long  ALT_MEM_K, alternative mem check, in Kb 
+  0x1e8 char                   number of entries in E820MAP (below)
+
+读取e820表的代码
+每次读取长度20的entry，循环最多读取32项。
+#+begin_src asm
+Setup.S：
+....
+loader_ok:
+# Get memory size (extended mem, kB)
+
+ xorl %eax, %eax
+ movl %eax, (0x1e0)   <---ALT_MEM_K
+#ifndef STANDARD_MEMORY_BIOS_CALL
+ movb %al, (E820NR)
+# Try three different memory detection schemes.  First, try
+# e820h, which lets us assemble a memory map, then try e801h,
+# which returns a 32-bit memory size, and finally 88h, which
+# returns 0-64m
+
+# method E820H:
+# the memory map from hell.  e820h returns memory classified into
+# a whole bunch of different types, and allows memory holes and
+# everything.  We scan through this memory map and build a list
+# of the first 32 memory areas, which we return at [E820MAP].
+# This is documented at http://www.acpi.info/, in the ACPI 2.0 specification.
+
+#define SMAP  0x534d4150
+
+meme820:
+ xorl %ebx, %ebx   # continuation counter
+ movw $E820MAP, %di   # point into the whitelist
+      # so we can have the bios
+      # directly write into it.
+
+jmpe820:
+ movl $ 0x0000e820, %eax  # e820, upper word zeroed
+ movl $SMAP, %edx   # ascii 'SMAP'
+ movl $ 20, %ecx   # size of the e820rec
+ pushw %ds    # data record.
+ popw %es
+ int $ 0x15    # make the call
+ jc bail820    # fall to e801 if it fails
+
+ cmpl $SMAP, %eax   # check the return is `SMAP'
+ jne bail820    # fall to e801 if it fails
+
+# cmpl $ 1, 16(%di)   # is this usable memory?
+# jne again820
+
+ # If this is usable memory, we save it by simply advancing %di by
+ # sizeof(e820rec).
+ #
+good820:
+ movb (E820NR), %al   # up to 32 entries
+ cmpb $E820MAX, %al
+ jnl bail820
+
+ incb (E820NR)
+ movw %di, %ax
+ addw $ 20, %ax
+ movw %ax, %di
+again820:
+ cmpl $ 0, %ebx   # check to see if
+ jne jmpe820    # %ebx is set to EOF
+bail820:
+
+# 通过E801获取内存大小
+# method E801H:
+# memory size is in 1k chunksizes, to avoid confusing loadlin.
+# we store the 0xe801 memory size in a completely different place,
+# because it will most likely be longer than 16 bits.
+# (use 1e0 because that's what Larry Augustine uses in his
+# alternative new memory detection scheme, and it's sensible
+# to write everything into the same place.)
+
+meme801:
+ stc     # fix to work around buggy
+ xorw %cx,%cx    # BIOSes which dont clear/set
+ xorw %dx,%dx    # carry on pass/error of
+      # e801h memory size call
+      # or merely pass cx,dx though
+      # without changing them.
+ movw $ 0xe801, %ax
+ int $ 0x15
+ jc mem88
+
+ cmpw $ 0x0, %cx   # Kludge to handle BIOSes
+ jne e801usecxdx   # which report their extended
+ cmpw $ 0x0, %dx   # memory in AX/BX rather than
+ jne e801usecxdx   # CX/DX.  The spec I have read
+ movw %ax, %cx   # seems to indicate AX/BX 
+ movw %bx, %dx   # are more reasonable anyway...
+
+e801usecxdx:
+ andl $ 0xffff, %edx   # clear sign extend
+ shll , %edx   # and go from 64k to 1k chunks
+ movl %edx, (0x1e0)   # store extended memory size
+ andl $ 0xffff, %ecx   # clear sign extend
+  addl %ecx, (0x1e0)   # and add lower memory into
+      # total size.
+
+＃通过88获取内存大小
+# Ye Olde Traditional Methode.  Returns the memory size (up to 16mb or
+# 64mb, depending on the bios) in ax.
+mem88:
+
+#endif
+ movb $ 0x88, %ah
+ int $ 0x15
+ movw %ax, (2)　　<---EXT_MEM_K
+#+end_src
+
+将e820的表读到内存后，由machine_specific_memory_setup函数使用
+#+begin_src c
+static char * __init machine_specific_memory_setup(void)
+{
+        char *who;
+
+
+        who = "BIOS-e820";
+
+        /*
+         * Try to copy the BIOS-supplied E820-map.
+         *
+         * Otherwise fake a memory map; one section from 0k->640k,
+         * the next section from 1mb->appropriate_mem_k
+         */
+        sanitize_e820_map(E820_MAP, &E820_MAP_NR);
+        if (copy_e820_map(E820_MAP, E820_MAP_NR) < 0) {
+                unsigned long mem_size;
+
+                /* compare results from other methods and take the greater */
+                if (ALT_MEM_K < EXT_MEM_K) {
+                        mem_size = EXT_MEM_K;
+                        who = "BIOS-88";
+                } else {
+                        mem_size = ALT_MEM_K;
+                        who = "BIOS-e801";
+                }
+
+                e820.nr_map = 0;
+                add_memory_region(0, LOWMEMSIZE(), E820_RAM);
+                add_memory_region(HIGH_MEMORY, mem_size << 10, E820_RAM);
+          }
+        return who;
+}
+#+end_src
+* 高端内存永久映射
+
+如何通过线性地址找到其对应物理页面？
+通过各级页表项映射，一路找下来就找到了。
+那么反过来，通过页面如何获取其对应的线性地址呢？
+１、低端内存通过page_to_pfn宏获取页面的pfn，从而线性地址就确定了。
+２、为什么高端内存不能采用相同的方法呢？
+#+begin_src c
+#define page_to_pfn(pg)							\
+({									\
+	struct page *__page = pg;					\
+	struct zone *__zone = page_zone(__page);			\
+	(unsigned long)(__page - __zone->zone_mem_map)			\
+		+ __zone->zone_start_pfn;				\
+})
+#+end_src
+按照低端内存的方式,每个page映射的线性地址是固定的,不能满足我们重用线性地址的要求.
+
+#+begin_src c
+#define PA_HASH_ORDER	7
+/*
+ * Describes one page->virtual association
+ */
+struct page_address_map {
+	struct page *page;
+	void *virtual;
+	struct list_head list;
+};
+/*
+ * Hash table bucket
+ */
+ /*使用page_address_htable存放page_address_map结构*/
+static struct page_address_slot {
+	struct list_head lh;			/* List of page_address_maps */
+	spinlock_t lock;			/* Protect this bucket's list */
+} ____cacheline_aligned_in_smp page_address_htable[1<<PA_HASH_ORDER];
+
+static struct page_address_slot *page_slot(struct page *page)
+{
+	return &page_address_htable[hash_ptr(page, PA_HASH_ORDER)];
+}
+/* page_address 返回page结构对应的线性地址 
+   对于低端内存，通过page获取pfn，然后<<PAGE_SIZE,就获取线性地址。
+   对于高端内存，通过查找哈希表，找到page与线性地址对应关系的page_address_map结构。
+*/
+void *page_address(struct page *page)
+{
+        unsigned long flags;
+        void *ret;
+        struct page_address_slot *pas;
+
+        if (!PageHighMem(page))
+                return lowmem_page_address(page);
+
+        pas = page_slot(page);
+        ret = NULL;
+        spin_lock_irqsave(&pas->lock, flags);
+        if (!list_empty(&pas->lh)) {
+                struct page_address_map *pam;
+
+                list_for_each_entry(pam, &pas->lh, list) {
+                        if (pam->page == page) {
+                                ret = pam->virtual;
+                                goto done;
+                        }
+                }
+        }
+done:
+        spin_unlock_irqrestore(&pas->lock, flags);
+        return ret;
+}
+#+end_src
+由于只给高端内存保留少量很少的页表项，
+所以内核需要重复使用这些页表项，用于映射大量的物理地址。
+为了管理这页表项，使用pkmap_count数组记录每一个页表项的使用情况。
+数组每一项对应一个页表项的计数。
+计数为0，表明页表项空闲。
+计数为1，表明页表项没有映射，但是还不能使用，因为对应TLB没有刷新，
+如果我们在其中填入物理地址，由于TLB，所以新的内存不会起作用。
+计数n大于1时，表明页表项在使用，实际引用计数为n-1。
+
+kmap_high 将高端页框映射一个线性地址
+#+begin_src c
+void fastcall *kmap_high(struct page *page)
+{
+	unsigned long vaddr;
+
+	/*
+	 * For highmem pages, we can't trust "virtual" until
+	 * after we have the lock.
+	 *
+	 * We cannot call this from interrupts, as it may block
+	 */
+         /* 这个函数不允许在中断中调用，因为它会阻塞 */
+	spin_lock(&kmap_lock);
+        /* 判断页面是否已经映射 */
+	vaddr = (unsigned long)page_address(page);
+	if (!vaddr)
+		vaddr = map_new_virtual(page);
+        /* 增加对应地址的记数*/
+	pkmap_count[PKMAP_NR(vaddr)]++;
+	if (pkmap_count[PKMAP_NR(vaddr)] < 2)
+		BUG();
+	spin_unlock(&kmap_lock);
+	return (void*) vaddr;
+}
+
+
+static inline unsigned long map_new_virtual(struct page *page)
+{
+	unsigned long vaddr;
+	int count;
+
+start:
+	count = LAST_PKMAP;
+	/* Find an empty entry */
+	for (;;) {
+		last_pkmap_nr = (last_pkmap_nr + 1) & LAST_PKMAP_MASK;
+                /* 遍历到最后,仍没有找到 */
+		if (!last_pkmap_nr) {
+                        /* 刷新计数为1的页表项 */
+			flush_all_zero_pkmaps();
+			count = LAST_PKMAP;
+		}
+		if (!pkmap_count[last_pkmap_nr])
+			break;	/* Found a usable entry */
+		if (--count)
+			continue;
+
+		/*
+		 * Sleep for somebody else to unmap their entries
+		 */
+		{
+			DECLARE_WAITQUEUE(wait, current);
+
+			__set_current_state(TASK_UNINTERRUPTIBLE);
+			add_wait_queue(&pkmap_map_wait, &wait);
+			spin_unlock(&kmap_lock);
+			schedule();
+			remove_wait_queue(&pkmap_map_wait, &wait);
+			spin_lock(&kmap_lock);
+
+			/* Somebody else might have mapped it while we slept */
+			if (page_address(page))
+				return (unsigned long)page_address(page);
+
+			/* Re-start */
+			goto start;
+		}
+	}
+	vaddr = PKMAP_ADDR(last_pkmap_nr);
+	set_pte(&(pkmap_page_table[last_pkmap_nr]), mk_pte(page, kmap_prot));
+        /* 计数置一!! */
+	pkmap_count[last_pkmap_nr] = 1;
+	set_page_address(page, (void *)vaddr);
+
+	return vaddr;
+}
+
+/* 在哈希表中记录page与线性地址的对应关系
+   为了加快性能,使用一个page_address结构的pool.
+   这个手法虽然常用,但值的学习
+ */
+void set_page_address(struct page *page, void *virtual)
+{
+	unsigned long flags;
+	struct page_address_slot *pas;
+	struct page_address_map *pam;
+
+	BUG_ON(!PageHighMem(page));
+
+	pas = page_slot(page);
+	if (virtual) {		/* Add */
+		BUG_ON(list_empty(&page_address_pool));
+
+		spin_lock_irqsave(&pool_lock, flags);
+		pam = list_entry(page_address_pool.next,
+				struct page_address_map, list);
+		list_del(&pam->list);
+		spin_unlock_irqrestore(&pool_lock, flags);
+
+		pam->page = page;
+		pam->virtual = virtual;
+
+		spin_lock_irqsave(&pas->lock, flags);
+		list_add_tail(&pam->list, &pas->lh);
+		spin_unlock_irqrestore(&pas->lock, flags);
+	} else {		/* Remove */
+		spin_lock_irqsave(&pas->lock, flags);
+		list_for_each_entry(pam, &pas->lh, list) {
+			if (pam->page == page) {
+				list_del(&pam->list);
+				spin_unlock_irqrestore(&pas->lock, flags);
+				spin_lock_irqsave(&pool_lock, flags);
+				list_add_tail(&pam->list, &page_address_pool);
+				spin_unlock_irqrestore(&pool_lock, flags);
+				goto done;
+			}
+		}
+		spin_unlock_irqrestore(&pas->lock, flags);
+	}
+done:
+	return;
+}
+/*
+   为了加快性能,使用一个page_address结构的pool.
+   这个手法虽然常用,但值的学习。
+   初始化
+*/
+static struct page_address_map page_address_maps[LAST_PKMAP];
+
+void __init page_address_init(void)
+{
+	int i;
+
+	INIT_LIST_HEAD(&page_address_pool);
+	for (i = 0; i < ARRAY_SIZE(page_address_maps); i++)
+		list_add(&page_address_maps[i].list, &page_address_pool);
+	for (i = 0; i < ARRAY_SIZE(page_address_htable); i++) {
+		INIT_LIST_HEAD(&page_address_htable[i].lh);
+		spin_lock_init(&page_address_htable[i].lock);
+	}
+	spin_lock_init(&pool_lock);
+}
+
+#+end_src
+
+* 疑问：free_all_bootmem后pagetable_init()使用alloc_bootmem申请的页表被释放了？!  :question:
+???
+
+* 伙伴算法中MAX_ORDER宏的含义
+#+begin_src c
+  struct zone {
+    ...
+    struct free_area	free_area[MAX_ORDER];
+    ...
+  };
+#+end_src
+  MAX_ORDER为free_area数组的大小,这数组元素实际的max order = MAX_ORDER - 1
+  所以我们可以在例如
+  __free_pages_bulk中循环while(order < MAX_ORDER - 1),
+  以MAX_ORDER-1作为基准.
+  或者我们可以将MAX_ORDER理解成一个不包含的上界.例如数学中这样的表达[0, MAX_ORDER)
+
+* 伙伴算法只能分配2^(MAX_ORDER - 1)个页吗?                         :question:
+* zone_watermark_ok 理解
+  这个函数有两个作用：
+  1、保证现在有满足要求的空闲页面数
+  2、保证这些空闲页能分配满足order要求（共mark大小）的连续页面
+  那么满足下面条件
+  order大于k的空闲页：块大小至少为2^(k-1)，起码有min/2^(k-1)的空闲页框
+  就能保证能够分配到满足要求的连续页面吗？
+#+begin_src c
+/*
+ * Return 1 if free pages are above 'mark'. This takes into account the order
+ * of the allocation.
+ */
+int zone_watermark_ok(struct zone *z, int order, unsigned long mark,
+		      int classzone_idx, int can_try_harder, int gfp_high)
+{
+	/* free_pages my go negative - that's OK */
+	long min = mark, free_pages = z->free_pages - (1 << order) + 1;
+	int o;
+
+	if (gfp_high)
+		min -= min / 2;
+	if (can_try_harder)
+		min -= min / 4;
+
+	if (free_pages <= min + z->lowmem_reserve[classzone_idx])
+		return 0;
+	for (o = 0; o < order; o++) {
+		/* At the next order, this order's pages become unavailable */
+		free_pages -= z->free_area[o].nr_free << o;
+
+		/* Require fewer higher order pages to be free */
+		min >>= 1;
+
+		if (free_pages <= min)
+			return 0;
+	}
+	return 1;
+}
+#+end_src
+* 内存 inode
+  inode的状态：
+  | I_NEW     | 刚分配，但未填入合法数据 |
+  | I_LOCK    | 正在IO传输               |
+  | I_DIRTY   | 内容已经修改             |
+  | I_FREEING | 正在被释放               |
+  | I_CLEAR   | 内容不在有用             |
+
+
+  分成I_FREEING 和 I_CLEAR两个状态是什么意义？
+  先变成I_FREEING，然后才能转换到I_CLEAR
+  I_FREEING 标明disk inode内容正在被释放
+  I_CLEAR 标明 内存inode已经“空”了，无有用的内容了。
+  只有处于I_CLEAR 的内存inode 才能被释放。
+
+  自旋锁inode_lock，来实现对所有inode缓存链表的互斥访问
+  那么大负荷时，会不会出现自旋锁争用？
+  函数prune_icache在可释放的没用节点链表inode_unused上扫描需删除的‘目标’节点，
+  这些节点被移到一个临时链表 freeable，接着通过dispose_list函数来释放外面的节点锁inode_lock，
+  然后把临时链表上的节点进行清除buffer，刷新页，销毁inode。
+#+begin_src c
+/*
+ * Scan `goal' inodes on the unused list for freeable ones. They are moved to
+ * a temporary list and then are freed outside inode_lock by dispose_list().
+ *
+ * Any inodes which are pinned purely because of attached pagecache have their
+ * pagecache removed.  We expect the final iput() on that inode to add it to
+ * the front of the inode_unused list.  So look for it there and if the
+ * inode is still freeable, proceed.  The right inode is found 99.9% of the
+ * time in testing on a 4-way.
+ *
+ * If the inode has metadata buffers attached to mapping->private_list then
+ * try to remove them.
+ */
+
+static void prune_icache(int nr_to_scan)
+{
+        LIST_HEAD(freeable);
+        int nr_pruned = 0;
+        int nr_scanned;
+        unsigned long reap = 0;
+
+        down(&iprune_sem);
+        spin_lock(&inode_lock);
+        for (nr_scanned = 0; nr_scanned < nr_to_scan; nr_scanned++) {
+                struct inode *inode;
+
+                if (list_empty(&inode_unused))
+                        break;
+
+                inode = list_entry(inode_unused.prev, struct inode, i_list);
+                /* 若节点还使用，把inode移到inode_unused头部，留着以后再使用 */
+                if (inode->i_state || atomic_read(&inode->i_count)) {
+                        list_move(&inode->i_list, &inode_unused);
+                        continue;
+                }
+                if (inode_has_buffers(inode) || inode->i_data.nrpages) {
+                        /* 增加inode引用计数,防止inode被另作它用*/
+                        __iget(inode);
+                        spin_unlock(&inode_lock);
+                        if (remove_inode_buffers(inode))
+                                reap += invalidate_inode_pages(&inode->i_data);
+                        iput(inode);
+                        spin_lock(&inode_lock);
+
+                        if (inode != list_entry(inode_unused.next,
+                                                struct inode, i_list))
+                                continue;        /* wrong inode or list_empty */
+                        if (!can_unuse(inode))
+                                continue;
+                }
+                hlist_del_init(&inode->i_hash);
+                list_del_init(&inode->i_sb_list);
+                list_move(&inode->i_list, &freeable);
+                inode->i_state |= I_FREEING;
+                nr_pruned++;
+        }
+        inodes_stat.nr_unused -= nr_pruned;
+        spin_unlock(&inode_lock);
+
+        dispose_list(&freeable);
+        up(&iprune_sem);
+
+        if (current_is_kswapd())
+                mod_page_state(kswapd_inodesteal, reap);
+        else
+                mod_page_state(pginodesteal, reap);
+}
+
+/*
+ * If we try to find an inode in the inode hash while it is being deleted, we
+ * have to wait until the filesystem completes its deletion before reporting
+ * that it isn't found.  This is because iget will immediately call
+ * ->read_inode, and we want to be sure that evidence of the deletion is found
+ * by ->read_inode.
+ * This is called with inode_lock held.
+ */
+static void __wait_on_freeing_inode(struct inode *inode)
+{
+	wait_queue_head_t *wq;
+	DEFINE_WAIT_BIT(wait, &inode->i_state, __I_LOCK);
+
+	/*
+	 * I_FREEING and I_CLEAR are cleared in process context under
+	 * inode_lock, so we have to give the tasks who would clear them
+	 * a chance to run and acquire inode_lock.
+	 */
+         /* 等待generic_delete_inode或prune_inode */
+	if (!(inode->i_state & I_LOCK)) {
+		spin_unlock(&inode_lock);
+		yield();
+		spin_lock(&inode_lock);
+		return;
+	}
+        /* 等待generic_delete_inode删除inode */
+	wq = bit_waitqueue(&inode->i_state, __I_LOCK);
+	prepare_to_wait(wq, &wait.wait, TASK_UNINTERRUPTIBLE);
+	spin_unlock(&inode_lock);
+	schedule();
+	finish_wait(wq, &wait.wait);
+	spin_lock(&inode_lock);
+}
+
+
+/*
+ * Tell the filesystem that this inode is no longer of any interest and should
+ * be completely destroyed.
+ *
+ * We leave the inode in the inode hash table until *after* the filesystem's
+ * ->delete_inode completes.  This ensures that an iget (such as nfsd might
+ * instigate) will always find up-to-date information either in the hash or on
+ * disk.
+ *
+ * I_FREEING is set so that no-one will take a new reference to the inode while
+ * it is being deleted.
+ */
+/*
+ * 为什么调用->delete_inode后才将inode从hash表中移出呢？
+   具体文件系统的delete_inode回调函数并不释放inode,只删除disk inode，在内存inode置I_CLEAR标志。
+   所以在这其间iget查找该inode可以知道inode正在被删除。
+ */
+void generic_delete_inode(struct inode *inode)
+{
+	struct super_operations *op = inode->i_sb->s_op;
+
+	list_del_init(&inode->i_list);
+	list_del_init(&inode->i_sb_list);
+	inode->i_state|=I_FREEING;
+	inodes_stat.nr_inodes--;
+	spin_unlock(&inode_lock);
+
+	if (inode->i_data.nrpages)
+		truncate_inode_pages(&inode->i_data, 0);
+
+	security_inode_delete(inode);
+
+	if (op->delete_inode) {
+		void (*delete)(struct inode *) = op->delete_inode;
+		if (!is_bad_inode(inode))
+			DQUOT_INIT(inode);
+		/* s_op->delete_inode internally recalls clear_inode() */
+		delete(inode);
+	} else
+		clear_inode(inode);
+	spin_lock(&inode_lock);
+	hlist_del_init(&inode->i_hash);
+	spin_unlock(&inode_lock);
+	wake_up_inode(inode);
+	if (inode->i_state != I_CLEAR)
+		BUG();
+	destroy_inode(inode);
+}
+
+/* grab：抓
+通过查看代码，发现这个函数用于具体文件系统调用，
+当inode被置为I_CLEAR时，具体文件系统有责任在调用igrab时过滤掉I_CLEAR的inode
+*/
+struct inode *igrab(struct inode *inode)
+{
+	spin_lock(&inode_lock);
+        /*  这里不需要判断I_CLEAR吗？ */
+	if (!(inode->i_state & I_FREEING))
+		__iget(inode);
+	else
+		/*
+		 * Handle the case where s_op->clear_inode is not been
+		 * called yet, and somebody is calling igrab
+		 * while the inode is getting freed.
+		 */
+		inode = NULL;
+	spin_unlock(&inode_lock);
+	return inode;
+}
+/*  举例FAT文件系统中的代码 */
+/*
+  FAT op->clear_inode
+ */
+static void fat_clear_inode(struct inode *inode)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(inode->i_sb);
+
+	if (is_bad_inode(inode))
+		return;
+	lock_kernel();
+	spin_lock(&sbi->inode_hash_lock);
+	fat_cache_inval_inode(inode);
+        /* 将内部inode 从内部hash中移出 */
+	hlist_del_init(&MSDOS_I(inode)->i_fat_hash);
+	spin_unlock(&sbi->inode_hash_lock);
+	unlock_kernel();
+}
+
+struct inode *fat_iget(struct super_block *sb, loff_t i_pos)
+{
+	struct msdos_sb_info *sbi = MSDOS_SB(sb);
+	struct hlist_head *head = sbi->inode_hashtable + fat_hash(sb, i_pos);
+	struct hlist_node *_p;
+	struct msdos_inode_info *i;
+	struct inode *inode = NULL;
+
+	spin_lock(&sbi->inode_hash_lock);
+	hlist_for_each_entry(i, _p, head, i_fat_hash) {
+		BUG_ON(i->vfs_inode.i_sb != sb);
+		if (i->i_pos != i_pos)
+			continue;
+                /* 调用igrab时，I_CLEAR的inode不会出现这里，因为op->clear_inode已经清除了。 */
+		inode = igrab(&i->vfs_inode);
+		if (inode)
+			break;
+	}
+	spin_unlock(&sbi->inode_hash_lock);
+	return inode;
+}
+
+
+#+end_src
+
+
+Date	Tue, 2 Jun 2009 06:27:29 -0400
+From	Jeff Layton <>
+Subject	Re: [PATCH] skip I_CLEAR state inodes
+
+On Tue, 2 Jun 2009 16:55:23 +0800
+Wu Fengguang <fengguang.wu@intel.com> wrote:
+
+> On Tue, Jun 02, 2009 at 05:38:35AM +0800, Eric Sandeen wrote:
+> > Wu Fengguang wrote:
+> > > Add I_CLEAR tests to drop_pagecache_sb(), generic_sync_sb_inodes() and
+> > > add_dquot_ref().
+> > > 
+> > > clear_inode() will switch inode state from I_FREEING to I_CLEAR,
+> > > and do so _outside_ of inode_lock. So any I_FREEING testing is
+> > > incomplete without the testing of I_CLEAR.
+> > > 
+> > > Masayoshi MIZUMA first discovered the bug in drop_pagecache_sb() and
+> > > Jan Kara reminds fixing the other two cases. Thanks!
+> > 
+> > Is there a reason it's not done for __sync_single_inode as well?
+> 
+> It missed the glance because it don't have an obvious '|' in the line ;)
+> 
+> > Jeff Layton asked the question and I'm following it up :)
+> > 
+> > __sync_single_inode currently only tests I_FREEING, but I think we are
+> > safe because __sync_single_inode sets I_SYNC, and clear_inode waits for
+> > I_SYNC to be cleared before it changes I_STATE.
+> 
+> But I_SYNC is removed just before the I_FREEING test, so we still have
+> a small race window?
+> 
+
+Yes, I think so. __sync_single_inode clears I_SYNC but doesn't wake up
+the wait queue until the end of the function. So I think it's possible
+(though unlikely) that another thread can race in and change the state
+to I_CLEAR before the I_FREEING check.
+
+> > On the other hand, testing I_CLEAR here probably would be safe anyway,
+> > and it'd be bonus points for consistency?
+> 
+> So let's add the I_CLEAR test?
+> 
+> > Same basic question for generic_sync_sb_inodes, which has a
+> > BUG_ON(inode->i_state & I_FREEING), seems like this could check I_CLWAR
+> > as well?
+> 
+> Yes, we can add I_CLEAR here to catch more error condition.
+> 
+> Thanks,
+> Fengguang
+> 
+> ---
+> skip I_CLEAR state inodes in writeback routines
+> 
+> The I_FREEING test in __sync_single_inode() is racy because
+> clear_inode() can set i_state to I_CLEAR between the clear of I_SYNC
+> and the test of I_FREEING.
+> 
+> Also extend the coverage of BUG_ON(I_FREEING) to I_CLEAR.
+> 
+> Reported-by: Jeff Layton <jlayton@redhat.com>
+> Reported-by: Eric Sandeen <sandeen@sandeen.net>
+> Signed-off-by: Wu Fengguang <fengguang.wu@intel.com>
+> ---
+>  fs/fs-writeback.c |    4 ++--
+>  1 file changed, 2 insertions(+), 2 deletions(-)
+> 
+> --- linux.orig/fs/fs-writeback.c
+> +++ linux/fs/fs-writeback.c
+> @@ -316,7 +316,7 @@ __sync_single_inode(struct inode *inode,
+>  	spin_lock(&inode_lock);
+>  	WARN_ON(inode->i_state & I_NEW);
+>  	inode->i_state &= ~I_SYNC;
+> -	if (!(inode->i_state & I_FREEING)) {
+> +	if (!(inode->i_state & (I_FREEING | I_CLEAR))) {
+>  		if (!(inode->i_state & I_DIRTY) &&
+>  		    mapping_tagged(mapping, PAGECACHE_TAG_DIRTY)) {
+>  			/*
+> @@ -518,7 +518,7 @@ void generic_sync_sb_inodes(struct super
+>  		if (current_is_pdflush() && !writeback_acquire(bdi))
+>  			break;
+> 
+> -		BUG_ON(inode->i_state & I_FREEING);
+> +		BUG_ON(inode->i_state & (I_FREEING | I_CLEAR));
+>  		__iget(inode);
+>  		pages_skipped = wbc->pages_skipped;
+>  		__writeback_single_inode(inode, wbc);
+
+Acked-by: Jeff Layton <jlayton@redhat.com>
+
+Date	Tue, 19 Dec 2006 10:57:56 +0100
+From	Jan Blunck <>
+Subject	[PATCH] igrab() should check for I_CLEAR
+
+When igrab() is calling __iget() on an inode it should check if clear_inode()
+has been called on the inode already. Otherwise there is a race window between
+clear_inode() and destroy_inode() where igrab() calls __iget() which leads to
+already free inodes on the inode lists.
+* radix_tree 算法理解
+#+begin_src c
+radix_tree_gang_lookup
+在radix树中查找偏移量为first_index，个数为max_items的连续页面
+其中关键要理解__lookup函数的写法
+/**
+ *	radix_tree_gang_lookup - perform multiple lookup on a radix tree
+ *	@root:		radix tree root
+ *	@results:	where the results of the lookup are placed
+ *	@first_index:	start the lookup from this key
+ *	@max_items:	place up to this many items at *results
+ *
+ *	Performs an index-ascending scan of the tree for present items.  Places
+ *	them at *@results and returns the number of items which were placed at
+ *	*@results.
+ *
+ *	The implementation is naive.
+ */
+unsigned int
+radix_tree_gang_lookup(struct radix_tree_root *root, void **results,
+			unsigned long first_index, unsigned int max_items)
+{
+	const unsigned long max_index = radix_tree_maxindex(root->height);
+	unsigned long cur_index = first_index;
+	unsigned int ret = 0;
+
+	while (ret < max_items) {
+		unsigned int nr_found;
+		unsigned long next_index;	/* Index of next search */
+
+		if (cur_index > max_index)
+			break;
+
+		nr_found = __lookup(root, results + ret, cur_index,
+					max_items - ret, &next_index);
+		ret += nr_found;
+		if (next_index == 0)
+			break;
+		cur_index = next_index;
+	}
+	return ret;
+}
+
+/* 从index偏移起，查找最多max_items个页 */
+/* 算法概要：
+   从index算出第一层节点索引，开始查找非空节点，
+   如果找到，就在算出第二层节点索引，再查找非空节点，如此循环，
+   一直到最底层叶子层，将叶子层中保存的页指针最多取出max_iterm个。 
+*/
+static unsigned int
+__lookup(struct radix_tree_root *root, void **results, unsigned long index,
+	unsigned int max_items, unsigned long *next_index)
+{
+	unsigned int nr_found = 0;
+	unsigned int shift;
+	unsigned int height = root->height;
+	struct radix_tree_node *slot;
+
+	shift = (height-1) * RADIX_TREE_MAP_SHIFT;
+	slot = root->rnode;
+
+	while (height > 0) {
+                /* 获取起始槽号 */
+		unsigned long i = (index >> shift) & RADIX_TREE_MAP_MASK;
+                /* 从起始槽号，查找非空的槽 */
+		for ( ; i < RADIX_TREE_MAP_SIZE; i++) {
+			if (slot->slots[i] != NULL)
+				break;
+                        /* 到这里，表明index对应槽为空，所以index值调整为对应下一个槽号的值。 */
+                        /* index中shift位之前的值清0，既然槽已经为空了，该槽的子节点肯定不存在，所以shift位之前的数没有意义了。 */
+			index &= ~((1UL << shift) - 1);
+                        /* index shift位加1 */
+			index += 1UL << shift;
+			if (index == 0)
+				goto out;	/* 32-bit wraparound */
+		}
+		if (i == RADIX_TREE_MAP_SIZE)
+			goto out;
+		height--;
+                /* 深度搜索到叶子层，将叶子中保存的页数据结构指针 赋给输出参数 */
+		if (height == 0) {	/* Bottom level: grab some items */
+			unsigned long j = index & RADIX_TREE_MAP_MASK;
+
+			for ( ; j < RADIX_TREE_MAP_SIZE; j++) {
+				index++;
+				if (slot->slots[j]) {
+					results[nr_found++] = slot->slots[j];
+					if (nr_found == max_items)
+						goto out;
+				}
+			}
+		}
+		shift -= RADIX_TREE_MAP_SHIFT;
+		slot = slot->slots[i];
+	}
+out:
+	*next_index = index;
+	return nr_found;
+}
+#+end_src
+
+#+BEGIN_EXAMPLE
++---+---+---+---+---+----+
+|   |   |   |   |   |... |
++---+---+---+---+---+----+
+  !
+  V                          ^
++---+---+---+---+---+----+   !
+|   |   |   |   |   |... |   ! 增加新层
++---+---+---+---+---+----+   !
+  !
+  V
++---+---+---+---+---+----+
+|   |   |   |   |   |... |
++---+---+---+---+---+----+
+
+#+END_EXAMPLE
+#+begin_src c
+/*树增高 */
+static int radix_tree_extend(struct radix_tree_root *root, unsigned long index)
+{
+        struct radix_tree_node *node;
+        unsigned int height;
+        char tags[RADIX_TREE_TAGS];
+        int tag;
+
+        /* Figure out what the height should be.  */
+        /* 算出能满足index的合适的树高*/
+        height = root->height + 1;
+        while (index > radix_tree_maxindex(height))
+                height++;
+
+        if (root->rnode == NULL) {
+                root->height = height;
+                goto out;
+        }
+
+        /*
+         * Prepare the tag status of the top-level node for propagation
+         * into the newly-pushed top-level node(s)
+         */
+        /*
+         *  保留顶层结点的tag状态，以便修改新节点的tag状态，将tag状态推到新上层节点
+         */
+        for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
+                int idx;
+
+                tags[tag] = 0;
+                for (idx = 0; idx < RADIX_TREE_TAG_LONGS; idx++) {
+                        if (root->rnode->tags[tag][idx]) {
+                                tags[tag] = 1;
+                                break;
+                        }
+                }
+        }
+        /* 开始增长上层，生成新顶点rnode，新顶点rnode的0槽 指向 旧顶点rnode */
+        do {
+                if (!(node = radix_tree_node_alloc(root)))
+                        return -ENOMEM;
+
+                /* Increase the height.  */
+                /* 将原来的最高层节点，设置为新节点slot[0] */
+                node->slots[0] = root->rnode;
+
+                /* Propagate the aggregated tag info into the new root */
+                /* 把tag状态传播到新节点 */
+                for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
+                        if (tags[tag])
+                                //由于原来最高层节点指针在新节点的slot[0]，所以tag_set的offset参数为0
+                                tag_set(node, tag, 0);
+                }
+
+                node->count = 1;
+                root->rnode = node;
+                root->height++;
+        } while (height > root->height);
+out:
+        return 0;
+}
+
+int radix_tree_insert(struct radix_tree_root *root,
+                        unsigned long index, void *item)
+{
+        struct radix_tree_node *node = NULL, *tmp, **slot;
+        unsigned int height, shift;
+        int offset;
+        int error;
+
+        /* Make sure the tree is high enough.  */
+        /* 确保树足够高*/
+        if ((!index && !root->rnode) ||
+                        index > radix_tree_maxindex(root->height)) {
+                /*树增高 */
+                error = radix_tree_extend(root, index);
+                if (error)
+                        return error;
+        }
+        /* slot：指向特定槽的指针 */
+        slot = &root->rnode;
+        height = root->height;
+        //最高层索引的位移
+        shift = (height-1) * RADIX_TREE_MAP_SHIFT;
+
+        offset = 0;                        /* uninitialised var warning */
+        while (height > 0) {
+                //遇到槽为空，需要增加节点
+                if (*slot == NULL) {
+                        /* Have to add a child node.  */
+                        if (!(tmp = radix_tree_node_alloc(root)))
+                                return -ENOMEM;
+                        *slot = tmp;
+                        if (node)
+                                node->count++;//槽计数增加
+                }
+
+                /* Go a level down */
+                /* 进入下一层 */
+                offset = (index >> shift) & RADIX_TREE_MAP_MASK;
+                node = *slot;
+                slot = (struct radix_tree_node **)(node->slots + offset);
+                shift -= RADIX_TREE_MAP_SHIFT;
+                height--;
+        }
+
+        if (*slot != NULL)
+                return -EEXIST;
+        if (node) {
+                /* 最低叶子节点是新增加，增加父节点的计数 */
+                node->count++;
+                BUG_ON(tag_get(node, 0, offset));
+                BUG_ON(tag_get(node, 1, offset));
+        }
+
+        *slot = item;
+        return 0;
+}
+#+end_src 
+*疑问*：如果清理tag的工作和清理slot的工作能不能放在一起呢？
+注意radix_tree_delete中数据结构struct radix_tree_path的引入，简化了问题的处理。
+如果不使用这么一种结构呢？该如何达到同样的目地？
+#+begin_src c
+struct radix_tree_path {
+	struct radix_tree_node *node, **slot;
+	int offset;
+};
+#+end_src
+struct radix_tree_path中 各个字段含义：
+| node   | 指向当前层的节点             |
+| slot   | 指向下层路径经过的槽         |
+| offset | 下层槽在节点所有槽中的偏移量 |
+算法概要：
+根据index在root指定的radix_tree中遍历，把从根到叶子节点的路径记录在radix_tree_path中。
+然后在从radix_tree_path路径的低部(叶子节点)，开始处理。
+#+begin_src c
+/**
+ *	radix_tree_delete    -    delete an item from a radix tree
+ *	@root:		radix tree root
+ *	@index:		index key
+ *
+ *	Remove the item at @index from the radix tree rooted at @root.
+ *
+ *	Returns the address of the deleted item, or NULL if it was not present.
+ */
+void *radix_tree_delete(struct radix_tree_root *root, unsigned long index)
+{
+	struct radix_tree_path path[RADIX_TREE_MAX_PATH], *pathp = path;
+	struct radix_tree_path *orig_pathp;
+	unsigned int height, shift;
+	void *ret = NULL;
+	char tags[RADIX_TREE_TAGS];
+	int nr_cleared_tags;
+
+	height = root->height;
+	if (index > radix_tree_maxindex(height))
+		goto out;
+        /* 遍历radix，把遍历路径记录在path中 */
+	shift = (height - 1) * RADIX_TREE_MAP_SHIFT;
+	pathp->node = NULL;
+	pathp->slot = &root->rnode;
+        
+	while (height > 0) {
+		int offset;
+
+		if (*pathp->slot == NULL)
+			goto out;
+
+		offset = (index >> shift) & RADIX_TREE_MAP_MASK;
+		pathp[1].offset = offset;
+		pathp[1].node = *pathp[0].slot;
+		pathp[1].slot = (struct radix_tree_node **)
+				(pathp[1].node->slots + offset);
+		pathp++;
+		shift -= RADIX_TREE_MAP_SHIFT;
+		height--;
+	}
+
+	ret = *pathp[0].slot;
+        //槽为空，表明页之前不存在，故不需要删除了。
+	if (ret == NULL)
+	goto out;
+
+	orig_pathp = pathp;
+
+	/*
+	 * Clear all tags associated with the just-deleted item
+	 */
+        /* 从路径末端，逆向遍历路径，沿途清理tag */
+	memset(tags, 0, sizeof(tags));
+	do {
+		int tag;
+                /* nr_cleared_tags 已经清理完毕的tag数 */
+		nr_cleared_tags = RADIX_TREE_TAGS;
+		for (tag = 0; tag < RADIX_TREE_TAGS; tag++) {
+			int idx;
+                        /* 低层tag不为空，没有必要处理了 */
+			if (tags[tag])
+				continue;
+                        /* 低层的tag都是空，清理父节点的tag*/
+			tag_clear(pathp[0].node, tag, pathp[0].offset);
+                        /* 判断当前层的tag*/
+			for (idx = 0; idx < RADIX_TREE_TAG_LONGS; idx++) {
+				if (pathp[0].node->tags[tag][idx]) {
+					tags[tag] = 1;
+                                        /* tag非空，也就是一个tag清理完毕 */
+					nr_cleared_tags--;
+					break;
+				}
+			}
+		}
+                /* 处理上一层 */
+		pathp--;
+	} while (pathp[0].node && nr_cleared_tags);
+        /* 逆向遍历路径 */
+	pathp = orig_pathp;
+        /* 叶子节点中记录页的槽置空*/
+	*pathp[0].slot = NULL;
+        /* 非槽计数变0后, 表明该节点没有存在的必要了*/
+	while (pathp[0].node && --pathp[0].node->count == 0) {
+		pathp--;//上层
+		BUG_ON(*pathp[0].slot == NULL);
+                //清空上层的对应的槽
+		*pathp[0].slot = NULL;
+		radix_tree_node_free(pathp[1].node);
+	}
+	if (root->rnode == NULL)
+		root->height = 0;
+out:
+	return ret;
+}
+
+#+end_src
+* dput 分析
+理解dput之前，看一下d_delete的注释很有帮助。
+#+begin_src c
+/*当删除一个文件时，我们有两个选择：
+ * - 把这个detry变为负状态
+ * - 从hash表中移出这个detry，并释放它。
+ *
+ * 通常，我们只将其置成负状态，但是如果别人还使用这个detry或者inode
+ * 我们就不能这样做了，而从从hash表中移出这个detry，等到没有人使用它时，再删除它。
+ */
+
+ /*
+ * When a file is deleted, we have two options:
+ * - turn this dentry into a negative dentry
+ * - unhash this dentry and free it.
+ *
+ * Usually, we want to just turn this into
+ * a negative dentry, but if anybody else is
+ * currently using the dentry or the inode
+ * we can't do that and we fall back on removing
+ * it from the hash queues and waiting for
+ * it to be deleted later when it has no users
+ */
+ 
+/**
+ * d_delete - delete a dentry
+ * @dentry: The dentry to delete
+ *
+ * Turn the dentry into a negative dentry if possible, otherwise
+ * remove it from the hash queues so it can be deleted later
+ */
+ 
+void d_delete(struct dentry * dentry)
+{
+ /*
+  * Are we the only user?
+  */
+ spin_lock(&dcache_lock);
+ spin_lock(&dentry->d_lock);
+ if (atomic_read(&dentry->d_count) == 1) {
+  dentry_iput(dentry);
+  return;
+ }
+
+ if (!d_unhashed(dentry))
+  __d_drop(dentry);
+
+ spin_unlock(&dentry->d_lock);
+ spin_unlock(&dcache_lock);
+}
+
+/*
+ * 我们不想把不在任何hash链表中的dentry项放到未使用链表中，
+ * 我们更愿意立即除掉它们。
+ *
+ * 然而，那意味着我们不得不向上遍历那些等待被删除的父dentry（它可能只是在等待它最后一个子项离去）
+ *
+ * 这个尾递归是我们手工编写，因为我们不想依赖编器能做好这个（gcc通常不能）。
+ * 真正的递归会吃掉我们的栈空间。
+ */
+/*
+ * This is dput
+ *
+ * This is complicated by the fact that we do not want to put
+ * dentries that are no longer on any hash chain on the unused
+ * list: we'd much rather just get rid of them immediately.
+ *
+ * However, that implies that we have to traverse the dentry
+ * tree upwards to the parents which might _also_ now be
+ * scheduled for deletion (it may have been only waiting for
+ * its last child to go away).
+ *
+ * This tail recursion is done by hand as we don't want to depend
+ * on the compiler to always get this right (gcc generally doesn't).
+ * Real recursion would eat up our stack space.
+ */
+
+/*
+ * dput - release a dentry
+ * @dentry: dentry to release
+ *
+ * Release a dentry. This will drop the usage count and if appropriate
+ * call the dentry unlink method as well as removing it from the queues and
+ * releasing its resources. If the parent dentries were scheduled for release
+ * they too may now get deleted.
+ *
+ * no dcache lock, please.
+ */
+
+void dput(struct dentry *dentry)
+{
+        if (!dentry)
+                return;
+
+repeat:
+        if (atomic_read(&dentry->d_count) == 1)
+                might_sleep();
+        if (!atomic_dec_and_lock(&dentry->d_count, &dcache_lock))
+                return;
+
+        spin_lock(&dentry->d_lock);
+        if (atomic_read(&dentry->d_count)) {
+                spin_unlock(&dentry->d_lock);
+                spin_unlock(&dcache_lock);
+                return;
+        }
+
+        /*
+         * AV: ->d_delete() is _NOT_ allowed to block now.
+         */
+        if (dentry->d_op && dentry->d_op->d_delete) {
+                if (dentry->d_op->d_delete(dentry))
+                        goto unhash_it;
+        }
+        /* Unreachable? Get rid of it */
+        /* 判断 dentry 是否从 dcache 的哈希链上移除了。
+           如果是，表示该元数据对应的对象已经被删除了，此时可以释放该元数据 */
+         if (d_unhashed(dentry))
+                goto kill_it;
+          if (list_empty(&dentry->d_lru)) {
+                  dentry->d_flags |= DCACHE_REFERENCED;
+                  list_add(&dentry->d_lru, &dentry_unused);
+                  dentry_stat.nr_unused++;
+          }
+         spin_unlock(&dentry->d_lock);
+        spin_unlock(&dcache_lock);
+        return;
+
+unhash_it:
+        __d_drop(dentry);
+
+kill_it: {
+/* 释放dentry, 后递归处理上一层目录的dentry,因为删除本dentry，父dentry的引用也需要减少。
+ */
+                struct dentry *parent;
+
+                /* If dentry was on d_lru list
+                 * delete it from there
+                 */
+                  if (!list_empty(&dentry->d_lru)) {
+                          list_del(&dentry->d_lru);
+                          dentry_stat.nr_unused--;
+                  }
+                  list_del(&dentry->d_child);
+                dentry_stat.nr_dentry--;        /* For d_free, below */
+                /*drops the locks, at that point nobody can reach this dentry */
+                dentry_iput(dentry);
+                parent = dentry->d_parent;
+                d_free(dentry);
+                if (dentry == parent)
+                        return;
+                dentry = parent;
+                goto repeat;
+        }
+}
+#+end_src 
+
+* 32位linux的支持最大内存
+我开始一直傻傻地疑惑：既然高端内存都是使用线性地址重复映射实际的物理地址，
+那么貌似可以支持无限的内存。
+
+但是仔细想一下内存分页的映射方式，
+不论某个线性地址对应的页目录项和页表项里如何填写，
+最终起作用的就是最后页表项里填写的页地址。
+
+而页表项长度是32位的，也就是说实际映射的物理地址必定不会大于4G。
+
+对于32位服务器而言，4G确实很紧张。
+为了满足这部分需求，intel在Pentium Pro处理器，引起一种PAE机制，
+将CPU的地址引脚增加到36，这样可以访问64G内存了。
+但是 32位cpu的线性地址仍然是32位，为了实现32位线性地址到36位物理地址的转换，
+采用不同于以前的映射方式，
+根据上面4G的情况，可以得出32位页表项肯定不够用了，
+你使用32位的页表项，无论怎么填，都不能填入36位的物理地址，
+所以页表项长度要增加，实际上就增加到64位，现在够用了。
+
+* /dev/mem和/dev/kmem的使用
+/dev/mem: 物理内存的全镜像。可以用来访问物理内存。
+/dev/kmem: kernel看到的虚拟内存的全镜像。可以用来访问kernel的内容。
+
+/dev/mem 用来访问物理IO设备，比如X用来访问显卡的物理内存，或嵌入式中访问GPIO。用法一般就是open，
+然后mmap，接着可以使用map之后的地址来访问物理内存。这其实就是实现用户空间驱动的一种方法。
+/dev/kmem 一般可以用来查看kernel的变量，或者用作rootkit之类的。
+
+通过/dev/mem设备文件和mmap系统调用，可以将线性地址描述的物理内存映射到进程
+的地址空间，然后就可以直接访问这段内存了。
+
+比如，标准VGA 16色模式的实模式地址是A000:0000，而线性地址则是A0000。设定显
+存大小为0x10000，则可以如下操作
+#+begin_src c
+    mem_fd  = open( "/dev/mem", O_RDWR );
+    vga_mem = mmap( 0, 0x10000, PROT_READ | PROT_WRITE, MAP_SHARED,
+                    mem_fd, 0xA0000 );
+    close( mem_fd );
+#+end_src
+然后直接对vga_mem进行访问，就可以了。当然，如果是操作VGA显卡，还要获得I/O
+端口的访问权限，以便进行直接的I/O操作，用来设置模式/调色板/选择位面等等
+
+在工控领域中还有一种常用的方法，用来在内核和应用程序之间高效传递数据:
+
+ 假定系统有64M物理内存，则可以通过lilo通知内核只使用63M，而保留1M物理内
+  存作为数据交换使用(使用 mem=63M 标记)。
+ 然后打开/dev/mem设备，并将63M开始的1M地址空间映射到进程的地址空间。
+
+使用/dev/kmem查看kernel变量,
+我从lwn.net学到的
+实例代码：
+#+begin_src c
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdarg.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <errno.h>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/poll.h>
+#include <sys/mman.h>
+
+int page_size;
+#define PAGE_SIZE page_size
+#define PAGE_MASK (~(PAGE_SIZE-1))
+
+void get_var (unsigned long addr) {
+        off_t ptr = addr & ~(PAGE_MASK);
+        off_t offset = addr & PAGE_MASK;
+        int i = 0;
+        char *map;
+        static int kfd = -1;
+
+        kfd = open("/dev/kmem",O_RDONLY);
+        if (kfd < 0) {
+                perror("open");
+                exit(0);
+        }
+
+        map = mmap(NULL,PAGE_SIZE,PROT_READ,MAP_SHARED,kfd,offset);
+        if (map == MAP_FAILED) {
+                perror("mmap");
+                exit(-1);
+        }
+        /* 假定这里是字符串 */
+        printf("%s\n",map+ptr);
+
+        return;
+}
+
+int main(int argc, char **argv)
+{
+        FILE *fp;
+        char addr_str[11]="0x";
+        char var[51];
+        unsigned long addr;
+        char ch;
+        int r;
+       
+        if (argc != 2) {
+                fprintf(stderr,"usage: %s System.map\n",argv[0]);
+                exit(-1);
+        }
+
+        if ((fp = fopen(argv[1],"r")) == NULL) {
+                perror("fopen");
+                exit(-1);
+        }
+
+        do {
+                r = fscanf(fp,"%8s %c %50s\n",&addr_str[2],&ch,var);
+                if (strcmp(var,"modprobe_path")==0)
+                        break;
+        } while(r > 0);
+        if (r < 0) {
+                printf("could not find modprobe_path\n");
+                exit(-1);
+        }
+        page_size = getpagesize();
+        addr = strtoul(addr_str,NULL,16);
+        printf("found modprobe_path at (%s) %08lx\n",addr_str,addr);
+        get_var(addr);
+}
+#+end_src 
+运行：
+#+begin_src c
+# ./tmap /boot/System.map
+found modprobe_path at (0xc03aa900) c03aa900
+/sbin/modprobe
+#+end_src
+
+* 请求端口代码request_resource 自己混沌的地方
+#+begin_src c
+/* Return the conflict entry if you can't request it */
+static struct resource * __request_resource(struct resource *root, struct resource *new)
+{
+        unsigned long start = new->start;
+        unsigned long end = new->end;
+        struct resource *tmp, **p;
+
+        if (end < start)
+                return root;
+        if (start < root->start)
+                return root;
+        if (end > root->end)
+                return root;
+        p = &root->child;
+        for (;;) {
+                tmp = *p;
+                /* tmp左边有剩余的满足条件的空间 */
+                if (!tmp || tmp->start > end) {
+                        new->sibling = tmp;
+                        *p = new;
+                        new->parent = root;
+                        return NULL;
+                }
+                p = &tmp->sibling;
+                /*  到这里，结束点超过来tmp区域的开始位置 */
+                /*  判断tmp，与new是否存在交叉 */
+                if (tmp->end < start) //new区域超过了tmp区域
+                        continue;
+                return tmp;
+        }
+}
+#+end_src
+上面代码：
+从左到右（由小到大）循环遍历。
+存在一个循环不变量，那就每次循环开始，都能保证new的起始位置在之前遍历的区域的外面，其这些区域都在自己的左边。
+所以每次只检查结束位置是否落在tmp区域前即可。
+
+循环不变量的手法，我需要好好学习。
+
+下面两个区域所示
+a---------------a   b--------------b
+          A                     B
+
+b---------------b   a--------------a
+          B                     A
+
+A与B不重合的条件是：
+1、A_end < B_start | | A_start > B_end
+由上式可以推出A与B重合的条件是：
+2、 A_end >= B_start  && A_start >= B_end
+其实表达式2，可以这样理解，链条上套在一起的两个环，把它们想像成两个区域
+
+所以上面代码中只要两IF语句都不满足，那么可能存在区域冲突，所以直接返回冲突的区域。
+
+* 内存页表为什么采用多级表
+对于X86来讲，一般采用两级页表，但是为什么采用分页呢？大都说为了节省内存。
+如何节省，书上讲一通，我照着理解了，但是总不深刻。
+不如形成自己的想法。
+现在按照自己思路推导一下：
+以x86的4G内存的系统来说，如果只使用一级页表，一个页表项映射一页内存，那对于一个进程来讲，需要使用1M个页表项，这些页表项占4M内存。
+显然很浪费内存。
+为了节省内存，那我们可以先使用1k个页表项，它们刚好占用了一个页的内容，当进程的需要的内存超过1k*4k也就是4M时，我们再分配需要的页表项。
+为了考虑问题方便，再假设进程访问的地址空间不存在跳越，也就说，当前页表项允许访问4M内的内存，进程却访问大于8M的内存。
+那进程访问超过4M 但小于8M的内存地址时，我们新分配1k个页表项，于是目前存在两个的页表，那么进程需要在某个地方存放这些页表的起始地址，
+这就形成一种两级表的结构。
+其实之所以节省内存，是因为大部分进程不会对4G内存全访问到。
+如果确实页表全分配了，那细算一下，需要1K个的页目录项+1M 个页表项，反而多用了4k内存。
+
+如果我们不按照分级的方式呢？我们就一定要一级呢！？
+既然一层，页表项太多，我们能不能减少访问 4G需要的页表项数。
+书上只告诉你说一个页表项指向一个页框。如果我一个页框4M，那页表项的数目从1M个就减少为1k个。
+这就是 extended paging。
+
+* VFS follow_mount()一族函数中“up”、"down"意思
+  可以这样理解，路径树或者加载路径树的树根在顶部，叶子在底部，
+  属于传统计算机科学中树的表达方式。
+ “down”的方向：背离根路径。
+ “up”的方向：指向根路径
+* 块设备
+#+begin_src c
+/*
+ * generic_make_request: hand a buffer to its device driver for I/O
+ * @bio:  The bio describing the location in memory and on the device.
+ *
+ * generic_make_request() is used to make I/O requests of block
+ * devices. It is passed a &struct bio, which describes the I/O that needs
+ * to be done.
+ *
+ * generic_make_request() does not return any status.  The
+ * success/failure status of the request, along with notification of
+ * completion, is delivered asynchronously through the bio->bi_end_io
+ * function described (one day) else where.
+ *
+ * The caller of generic_make_request must make sure that bi_io_vec
+ * are set to describe the memory buffer, and that bi_dev and bi_sector are
+ * set to describe the device address, and the
+ * bi_end_io and optionally bi_private are set to describe how
+ * completion notification should be signaled.
+ *
+ * generic_make_request and the drivers it calls may use bi_next if this
+ * bio happens to be merged with someone else, and may change bi_dev and
+ * bi_sector for remaps as it sees fit.  So the values of these fields
+ * should NOT be depended on after the call to generic_make_request.
+ */
+void generic_make_request(struct bio *bio)
+{
+        request_queue_t *q;
+        sector_t maxsector;
+        int ret, nr_sectors = bio_sectors(bio);
+
+        might_sleep();
+        /* Test device or partition size, when known. */
+        /* 块设备的最大扇区 */
+        maxsector = bio->bi_bdev->bd_inode->i_size >> 9;
+        if (maxsector) {
+                sector_t sector = bio->bi_sector;
+                /* bio数据大小超过了块设备所能容纳的 */
+                if (maxsector < nr_sectors || maxsector - nr_sectors < sector) {
+                        /*
+                         * This may well happen - the kernel calls bread()
+                         * without checking the size of the device, e.g., when
+                         * mounting a device.
+                         */
+                        /* 这可能发生在内核没有检查设备大小时就调用bread()，例如mount一个设备。*/
+                        handle_bad_sector(bio);
+                        goto end_io;
+                }
+        }
+
+        /*
+         * Resolve the mapping until finished. (drivers are
+         * still free to implement/resolve their own stacking
+         * by explicitly returning 0)
+         *
+         * NOTE: we don't repeat the blk_size check for each new device.
+         * Stacking drivers are expected to know what they are doing.
+         */
+        do {
+                char b[BDEVNAME_SIZE];
+                /*获取块设备相关的请求队列*/
+                q = bdev_get_queue(bio->bi_bdev);
+                if (!q) {
+                        printk(KERN_ERR
+                               "generic_make_request: Trying to access "
+                                "nonexistent block-device %s (%Lu)\n",
+                                bdevname(bio->bi_bdev, b),
+                                (long long) bio->bi_sector);
+end_io:
+                        bio_endio(bio, bio->bi_size, -EIO);
+                        break;
+                }
+
+                if (unlikely(bio_sectors(bio) > q->max_hw_sectors)) {
+                        printk("bio too big device %s (%u > %u)\n",
+                                bdevname(bio->bi_bdev, b),
+                                bio_sectors(bio),
+                                q->max_hw_sectors);
+                        goto end_io;
+                }
+                //TODO
+                if (test_bit(QUEUE_FLAG_DEAD, &q->queue_flags))
+                        goto end_io;
+                //TODO
+                block_wait_queue_running(q);
+
+                /*
+                 * If this device has partitions, remap block n
+                 * of partition p to block n+start(p) of the disk.
+                 */
+                /* 如果设备有分区，调整bio */
+                blk_partition_remap(bio);
+                /* 将bio插入请求队列q */
+                ret = q->make_request_fn(q, bio);
+        } while (ret);
+}
+
+
+/*
+ * If bio->bi_dev is a partition, remap the location
+ */
+static inline void blk_partition_remap(struct bio *bio)
+{
+        struct block_device *bdev = bio->bi_bdev;
+        /* 是分区 */
+        if (bdev != bdev->bd_contains) {
+                struct hd_struct *p = bdev->bd_part;
+
+                switch (bio->bi_rw) {
+                case READ:
+                        p->read_sectors += bio_sectors(bio);
+                        p->reads++;
+                        break;
+                case WRITE:
+                        p->write_sectors += bio_sectors(bio);
+                        p->writes++;
+                        break;
+                }
+                /* 调整相对于分区的起始扇区号转变为相对于整个磁盘的扇区号 */
+                bio->bi_sector += p->start_sect;
+                /* 设置为整个磁盘的块设备描述符 */
+                bio->bi_bdev = bdev->bd_contains;
+        }
+}
+#+end_src
+blk_plug_device()<深入理解linux内核（中文版）>
+翻译：功能是插入一个块设备，应不对的。
+plug vt.vi stop or fill (up) with a plug.以塞子塞住。
+例如plug a leak 塞住漏洞。
+plug (sth) in, 插上。
+我觉得这个函数的功能应理解为塞住块设备，才讲的通，又见
+__generic_unplug_device() 函数的注释：
+"remove the plug and let it rip"更能说明问题。
+英文版原文：
+if you are confused by the terms "plugging" and "unplugging",
+you might consider them equivalent to "de-activating" and "activating"
+The blk_plug_device() function plugs a block device or more precisely,
+a request queue serviced by some block devcie driver"
+中文版还把plug unplug 与 de-activate activate的对应关系搞反了。
+这一行混，英语还是很重要的。
+#+begin_src c
+/*
+ * remove the plug and let it rip..
+ */
+/* 拿掉塞子，让它去吧，（allow it to go for its maximum speed)
+
+void __generic_unplug_device(request_queue_t *q)
+{
+ if (test_bit(QUEUE_FLAG_STOPPED, &q->queue_flags))
+  return;
+
+ if (!blk_remove_plug(q))
+  return;
+
+ /*
+  * was plugged, fire request_fn if queue has stuff to do
+  */
+ if (elv_next_request(q))
+  q->request_fn(q);
+}
+
+// 这要函数的主要作用就是调用IO调度算法将bio合并，或插入到队列中合适的位置中去
+static int __make_request(request_queue_t *q, struct bio *bio)
+{
+        struct request *req, *freereq = NULL;
+        int el_ret, rw, nr_sectors, cur_nr_sectors, barrier, err;
+        sector_t sector;
+
+        sector = bio->bi_sector;
+        nr_sectors = bio_sectors(bio);
+        cur_nr_sectors = bio_cur_sectors(bio);
+
+        rw = bio_data_dir(bio);
+
+        /*
+         * low level driver can indicate that it wants pages above a
+         * certain limit bounced to low memory (ie for highmem, or even
+         * ISA dma in theory)
+         */
+        blk_queue_bounce(q, &bio);
+
+        spin_lock_prefetch(q->queue_lock);
+
+        barrier = bio_barrier(bio);
+        if (barrier && !(q->queue_flags & (1 << QUEUE_FLAG_ORDERED))) {
+                err = -EOPNOTSUPP;
+                goto end_io;
+        }
+
+again:
+        spin_lock_irq(q->queue_lock);
+        /* 队列空时，塞住队列，收集一下请求，可以增加请求排序优化的机会。
+           unplug定时器超时或者 加入的请求数大于队列的unplug_thresh时，
+           就会放开队列，提交请求给设备。
+       */
+        if (elv_queue_empty(q)) {
+                blk_plug_device(q);
+                goto get_rq;
+        }
+        if (barrier)
+                goto get_rq;
+
+        el_ret = elv_merge(q, &req, bio);
+        switch (el_ret) {
+                /* 向后合并 */
+                case ELEVATOR_BACK_MERGE:
+                        BUG_ON(!rq_mergeable(req));
+
+                        if (!q->back_merge_fn(q, req, bio))
+                                break;
+
+                        req->biotail->bi_next = bio;
+                        req->biotail = bio;
+                        req->nr_sectors = req->hard_nr_sectors += nr_sectors;
+                        drive_stat_acct(req, nr_sectors, 0);
+                        if (!attempt_back_merge(q, req))
+                                elv_merged_request(q, req);
+                        goto out;
+                /* 向前合并 */
+                case ELEVATOR_FRONT_MERGE:
+                        BUG_ON(!rq_mergeable(req));
+
+                        if (!q->front_merge_fn(q, req, bio))
+                                break;
+
+                        bio->bi_next = req->bio;
+                        req->bio = bio;
+
+                        /*
+                         * may not be valid. if the low level driver said
+                         * it didn't need a bounce buffer then it better
+                         * not touch req->buffer either...
+                         */
+                        req->buffer = bio_data(bio);
+                        req->current_nr_sectors = cur_nr_sectors;
+                        req->hard_cur_sectors = cur_nr_sectors;
+                        req->sector = req->hard_sector = sector;
+                        req->nr_sectors = req->hard_nr_sectors += nr_sectors;
+                        drive_stat_acct(req, nr_sectors, 0);
+                        if (!attempt_front_merge(q, req))
+                                elv_merged_request(q, req);
+                        goto out;
+
+                /*
+                 * elevator says don't/can't merge. get new request
+                 */
+                case ELEVATOR_NO_MERGE:
+                        break;
+
+                default:
+                        printk("elevator returned crap (%d)\n", el_ret);
+                        BUG();
+        }
+
+        /*
+         * Grab a free request from the freelist - if that is empty, check
+         * if we are doing read ahead and abort instead of blocking for
+         * a free slot.
+         */
+get_rq:
+        if (freereq) {
+                req = freereq;
+                freereq = NULL;
+        } else {
+                spin_unlock_irq(q->queue_lock);
+                if ((freereq = get_request(q, rw, GFP_ATOMIC)) == NULL) {
+                        /*
+                         * READA bit set
+                         */
+                        err = -EWOULDBLOCK;
+                        if (bio_rw_ahead(bio))
+                                goto end_io;
+       
+                        freereq = get_request_wait(q, rw);
+                }
+                goto again;
+        }
+
+        req->flags |= REQ_CMD;
+
+        /*
+         * inherit FAILFAST from bio (for read-ahead, and explicit FAILFAST)
+         */
+        if (bio_rw_ahead(bio) || bio_failfast(bio))
+                req->flags |= REQ_FAILFAST;
+
+        /*
+         * REQ_BARRIER implies no merging, but lets make it explicit
+         */
+        if (barrier)
+                req->flags |= (REQ_HARDBARRIER | REQ_NOMERGE);
+
+        req->errors = 0;
+        req->hard_sector = req->sector = sector;
+        req->hard_nr_sectors = req->nr_sectors = nr_sectors;
+        req->current_nr_sectors = req->hard_cur_sectors = cur_nr_sectors;
+        req->nr_phys_segments = bio_phys_segments(q, bio);
+        req->nr_hw_segments = bio_hw_segments(q, bio);
+        req->buffer = bio_data(bio);        /* see ->buffer comment above */
+        req->waiting = NULL;
+        req->bio = req->biotail = bio;
+        req->rq_disk = bio->bi_bdev->bd_disk;
+        req->start_time = jiffies;
+        //将新请求加入队列中去
+        add_request(q, req);
+out:
+        if (freereq)
+                __blk_put_request(q, freereq);
+        if (bio_sync(bio))//同步，立即处理请求
+                __generic_unplug_device(q);
+
+        spin_unlock_irq(q->queue_lock);
+        return 0;
+
+end_io:
+        bio_endio(bio, nr_sectors << 9, err);
+        return 0;
+}
+#+end_src 
+
+* 一个简单文件系统实验以及实现
+1、使用命令dd if=/dev/zero of=disk.img count=2880 产生一个镜像文件
+2、mkfs.yyfs disk.img，在disk.img创建yyfs文件系统。
+后续操作在虚拟机中（害怕将自己的主机弄崩溃）
+4、加载文件系统模块：insmod yyfs.ko
+5、加载镜像文件到/disk目录：mount -t yyfs disk.img /disk -o loop
+6、在/disk目录进行操作文件的操作。
+7、使用 sync命令将系统缓存的数据写入磁盘
+8、使用 hexdump disk.img 查看文件操作结果是否正确。
+* sync_inodes代码分析
+#+begin_src c
+void sync_inodes(int wait)
+{
+ struct super_block *sb;
+ //设置每个超级块 sb->s_syncing = 0，这样做的目的是什么？
+ set_sb_syncing(0);
+ while ((sb = get_super_to_sync()) != NULL) {//得到脏的超级块结构
+  sync_inodes_sb(sb, 0);
+  //写与块设备对应的所有脏数据，并等待写操作完成
+  sync_blockdev(sb->s_bdev);　
+  drop_super(sb);// 使用计数减1，即sb->s_count-1
+ }
+ if (wait) {
+  set_sb_syncing(0);
+  while ((sb = get_super_to_sync()) != NULL) {
+   sync_inodes_sb(sb, 1);
+   sync_blockdev(sb->s_bdev);
+   drop_super(sb);
+  }
+ }
+}
+
+void sync_inodes_sb(struct super_block *sb, int wait)
+{
+ struct writeback_control wbc = {
+  .sync_mode = wait ? WB_SYNC_ALL : WB_SYNC_HOLD,
+ };
+ unsigned long nr_dirty = read_page_state(nr_dirty);
+ unsigned long nr_unstable = read_page_state(nr_unstable);
+
+ wbc.nr_to_write = nr_dirty + nr_unstable +
+   (inodes_stat.nr_inodes - inodes_stat.nr_unused) +
+   nr_dirty + nr_unstable;
+ wbc.nr_to_write += wbc.nr_to_write / 2;  /* Bit more for luck */
+ spin_lock(&inode_lock);
+ sync_sb_inodes(sb, &wbc);
+ spin_unlock(&inode_lock);
+}
+#+end_src
+函数 sync_sb_inodes写回一个超级块的脏节点链表到块设备
+#+begin_src c
+static void
+sync_sb_inodes(struct super_block *sb, struct writeback_control *wbc)
+{
+ const unsigned long start = jiffies; /* livelock avoidance */
+
+ if (!wbc->for_kupdate || list_empty(&sb->s_io))
+  list_splice_init(&sb->s_dirty, &sb->s_io);
+
+ while (!list_empty(&sb->s_io)) {
+  struct inode *inode = list_entry(sb->s_io.prev,
+      struct inode, i_list);
+  struct address_space *mapping = inode->i_mapping;
+  struct backing_dev_info *bdi = mapping->backing_dev_info;
+  long pages_skipped;
+  //内存支持的文件系统，不能用writepage刷新页
+  if (bdi->memory_backed) {
+   list_move(&inode->i_list, &sb->s_dirty);
+   if (sb == blockdev_superblock) {
+    /*
+     * Dirty memory-backed blockdev: the ramdisk
+     * driver does this.  Skip just this inode
+     */
+     /* 内存支持的块设备：ramdisk处理，这里只跳过。
+    continue;
+   }
+   /*
+    * Dirty memory-backed inode against a filesystem other
+    * than the kernel-internal bdev filesystem.  Skip the
+    * entire superblock.
+    */
+　//内存支持文件系统的节点脏，而不是块设备支持的文件系统，
+　//跳过整个超级块
+   break;
+  }
+  //非阻塞刷新且设备写操作拥塞。TODO:bdi不理解
+  if (wbc->nonblocking && bdi_write_congested(bdi)) {
+   wbc->encountered_congestion = 1;
+   if (sb != blockdev_superblock)
+    break;  /* Skip a congested fs */ /* 英文注视不对吧？*/
+   list_move(&inode->i_list, &sb->s_dirty);
+   continue;  /* Skip a congested blockdev */ /* 跳过拥塞的块设备 */
+  }
+
+  if (wbc->bdi && bdi != wbc->bdi) {
+   if (sb != blockdev_superblock)
+    break;  /* fs has the wrong queue */
+   list_move(&inode->i_list, &sb->s_dirty);
+   continue;  /* blockdev has wrong queue */
+  }
+
+  /* Was this inode dirtied after sync_sb_inodes was called? */
+  if (time_after(inode->dirtied_when, start))
+   break;
+
+  /* Was this inode dirtied too recently? */
+  if (wbc->older_than_this && time_after(inode->dirtied_when,
+      *wbc->older_than_this))
+   break;
+
+  /* Is another pdflush already flushing this queue? */
+ /* 当前线程是pdflush或者该队列上已经有一个pdflush线程 */
+  if (current_is_pdflush() && !writeback_acquire(bdi))
+   break;
+
+  BUG_ON(inode->i_state & I_FREEING);
+  __iget(inode);
+  pages_skipped = wbc->pages_skipped;
+ //写回一个节点到设备
+  __writeback_single_inode(inode, wbc);
+  if (wbc->sync_mode == WB_SYNC_HOLD) {
+   inode->dirtied_when = jiffies;
+   list_move(&inode->i_list, &sb->s_dirty);
+  }
+  /* 当前线程是pdflush，释放队列上的互斥标志*/
+  if (current_is_pdflush())
+   writeback_release(bdi);
+  if (wbc->pages_skipped != pages_skipped) {
+   /*
+    * writeback is not making progress due to locked
+    * buffers.  Skip this inode for now.
+    */
+   list_move(&inode->i_list, &sb->s_dirty);
+  }
+  spin_unlock(&inode_lock);
+  cond_resched();
+  iput(inode);
+  spin_lock(&inode_lock);
+  if (wbc->nr_to_write <= 0)
+   break;
+ }
+ return;  /* Leave any unwritten inodes on s_io */
+}
+
+
+/*
+ * Write out an inode's dirty pages.  Called under inode_lock.
+ */
+static int
+__writeback_single_inode(struct inode *inode,
+   struct writeback_control *wbc)
+{
+ wait_queue_head_t *wqh;
+ //如果不是同步所有的且节点被锁住，将节点移到s_dirty链表中，等待后续处理。
+ if ((wbc->sync_mode != WB_SYNC_ALL) && (inode->i_state & I_LOCK)) {
+  list_move(&inode->i_list, &inode->i_sb->s_dirty);
+  return 0;
+ }
+
+ /*
+  * It's a data-integrity sync.  We must wait.
+  */
+ /*
+  * 注意这里等待inode解锁的方法
+  */
+ if (inode->i_state & I_LOCK) {
+  DEFINE_WAIT_BIT(wq, &inode->i_state, __I_LOCK);
+
+  wqh = bit_waitqueue(&inode->i_state, __I_LOCK);
+  do {
+   __iget(inode);
+   spin_unlock(&inode_lock);
+   __wait_on_bit(wqh, &wq, inode_wait,
+       TASK_UNINTERRUPTIBLE);
+   iput(inode);
+   spin_lock(&inode_lock);
+  } while (inode->i_state & I_LOCK);
+ }
+ return __sync_single_inode(inode, wbc);
+}
+
+/*
+ * Write a single inode's dirty pages and inode data out to disk.
+ * If `wait' is set, wait on the writeout.
+ *
+ * The whole writeout design is quite complex and fragile.  We want to avoid
+ * starvation of particular inodes when others are being redirtied, prevent
+ * livelocks, etc.
+ *
+ * Called under inode_lock.
+ */
+static int
+__sync_single_inode(struct inode *inode, struct writeback_control *wbc)
+{
+ unsigned dirty;
+ struct address_space *mapping = inode->i_mapping;
+ struct super_block *sb = inode->i_sb;
+ int wait = wbc->sync_mode == WB_SYNC_ALL;
+ int ret;
+
+ BUG_ON(inode->i_state & I_LOCK);
+
+ /* Set I_LOCK, reset I_DIRTY */
+ dirty = inode->i_state & I_DIRTY;
+ inode->i_state |= I_LOCK;
+ inode->i_state &= ~I_DIRTY;
+
+ spin_unlock(&inode_lock);
+ // 将节点对应的地址空间的数据写回设备
+ ret = do_writepages(mapping, wbc);
+
+ /* Don't write the inode if only I_DIRTY_PAGES was set */
+ /* 仅当设置I_DIRTY_PAGES标志时，不需要回写inode*/
+ if (dirty & (I_DIRTY_SYNC | I_DIRTY_DATASYNC)) {
+  /* 回写inode*/
+  int err = write_inode(inode, wait);
+  if (ret == 0)
+   ret = err;
+ }
+ /* 遍历所给地址空间的回写页的链表，等待他们所有的脏页写完*/
+ if (wait) {
+  int err = filemap_fdatawait(mapping);//TODO: 与do_writepages都有什么区别
+  if (ret == 0)
+   ret = err;
+ }
+
+ spin_lock(&inode_lock);
+ inode->i_state &= ~I_LOCK;
+ if (!(inode->i_state & I_FREEING)) {
+  if (!(inode->i_state & I_DIRTY) &&
+      mapping_tagged(mapping, PAGECACHE_TAG_DIRTY)) {
+   /*
+    * We didn't write back all the pages.  nfs_writepages()
+    * sometimes bales out without doing anything. Redirty
+    * the inode.  It is still on sb->s_io.
+    */
+   if (wbc->for_kupdate) {
+    /*
+     * For the kupdate function we leave the inode
+     * at the head of sb_dirty so it will get more
+     * writeout as soon as the queue becomes
+     * uncongested.
+     */
+    //对kupdate函数，我们节点在sb_dirty的头部，
+　//以便在队列变成不拥塞时它得到更多写机会
+    inode->i_state |= I_DIRTY_PAGES;
+    list_move_tail(&inode->i_list, &sb->s_dirty);
+   } else {
+    /*
+     * Otherwise fully redirty the inode so that
+     * other inodes on this superblock will get some
+     * writeout.  Otherwise heavy writing to one
+     * file would indefinitely suspend writeout of
+     * all the other files.
+     */
+    //再看一下
+    //完全重把节点设置成脏，以便在这个超级块上其它节点得到回写机会。
+　//否则，一个文件的较重的写操作将会把其它所有的文件的回写操作挂起
+    inode->i_state |= I_DIRTY_PAGES;
+    inode->dirtied_when = jiffies;
+    list_move(&inode->i_list, &sb->s_dirty);
+   }
+  } else if (inode->i_state & I_DIRTY) {
+   /*
+    * Someone redirtied the inode while were writing back
+    * the pages.
+    */
+    /*
+       回写页面过程中，有人把inode重新设为脏节点
+     */
+   list_move(&inode->i_list, &sb->s_dirty);
+  } else if (atomic_read(&inode->i_count)) {
+   /*
+    * The inode is clean, inuse
+    */
+   list_move(&inode->i_list, &inode_in_use);
+  } else {
+   /*
+    * The inode is clean, unused
+    */
+   list_move(&inode->i_list, &inode_unused);
+   inodes_stat.nr_unused++;
+  }
+ }
+ //唤醒节点上的等待队列
+ wake_up_inode(inode);
+ return ret;
+}
+#+end_src
+* do_writepages 分析
+#+begin_src c
+/* 遍历指定地址空间的脏页列表，对每一个页面调用writepage()
+/**
+ * mpage_writepages - walk the list of dirty pages of the given
+ * address space and writepage() all of them.
+ *
+ * @mapping: address space structure to write
+ * @wbc: subtract the number of written pages from *@wbc->nr_to_write
+ * @get_block: the filesystem's block mapper function.
+ *             If this is NULL then use a_ops->writepage.  Otherwise, go
+ *             direct-to-BIO.
+ *
+ * This is a library function, which implements the writepages()
+ * address_space_operation.
+ *
+ * If a page is already under I/O, generic_writepages() skips it, even
+ * if it's dirty.  This is desirable behaviour for memory-cleaning writeback,
+ * but it is INCORRECT for data-integrity system calls such as fsync().  fsync()
+ * and msync() need to guarantee that all the data which was dirty at the time
+ * the call was made get new I/O started against them.  If wbc->sync_mode is
+ * WB_SYNC_ALL then we were called for data integrity and we must wait for
+ * existing IO to complete.
+ */
+int
+mpage_writepages(struct address_space *mapping,
+  struct writeback_control *wbc, get_block_t get_block)
+{
+ struct backing_dev_info *bdi = mapping->backing_dev_info;
+ struct bio *bio = NULL;
+ sector_t last_block_in_bio = 0;
+ int ret = 0;
+ int done = 0;
+ int (*writepage)(struct page *page, struct writeback_control *wbc);
+ struct pagevec pvec;
+ int nr_pages;
+ pgoff_t index;
+ pgoff_t end = -1;  /* Inclusive */
+ int scanned = 0;
+ int is_range = 0;
+
+ if (wbc->nonblocking && bdi_write_congested(bdi)) {
+  wbc->encountered_congestion = 1;
+  return 0;
+ }
+
+ writepage = NULL;
+ if (get_block == NULL)
+  writepage = mapping->a_ops->writepage;
+
+ pagevec_init(&pvec, 0);
+ if (wbc->sync_mode == WB_SYNC_NONE) {
+  index = mapping->writeback_index; /* Start from prev offset */
+ } else {
+  index = 0;     /* whole-file sweep */
+  scanned = 1;
+ }
+ if (wbc->start || wbc->end) {
+  index = wbc->start >> PAGE_CACHE_SHIFT;
+  end = wbc->end >> PAGE_CACHE_SHIFT;
+  is_range = 1;
+  scanned = 1;
+ }
+retry:
+ //循环条件：没有完成，且页面索引小于end，且地址空间有脏页
+ while (!done && (index <= end) &&
+   //计算脏页数nr_pages，把查到的脏页放在pvec中
+   // pagevec_lookup_tag 调用 find_get_pages_tag
+   (nr_pages = pagevec_lookup_tag(&pvec, mapping, &index,
+   PAGECACHE_TAG_DIRTY,
+   min(end - index, (pgoff_t)PAGEVEC_SIZE-1) + 1))) {
+  unsigned i;
+
+  scanned = 1;
+  for (i = 0; i < nr_pages; i++) {
+     struct page *page = pvec.pages[i];
+
+     /*
+      * At this point we hold neither mapping->tree_lock nor
+      * lock on the page itself: the page may be truncated or
+      * invalidated (changing page->mapping to NULL), or even
+      * swizzled back from swapper_space to tmpfs file
+      * mapping
+      */
+　  /*在这个地方，我们不持有mapping->tree_lock锁和页本身的锁：
+　　 这页可能被剪除或无效（改变page->mapping为NULL），
+　　 或者甚至从交换空间欺骗地回到tmpfs文件映射中。最后嘛意思*/
+　 lock_page(page);
+
+      if (unlikely(page->mapping != mapping)) {//页的地址空间不对了
+         unlock_page(page);
+         continue;
+      }
+
+      if (unlikely(is_range) && page->index > end) {//所有页已经完成了
+        done = 1;
+        unlock_page(page);
+        continue;
+      }
+
+      if (wbc->sync_mode != WB_SYNC_NONE)
+         wait_on_page_writeback(page);
+      //如果页正在回写或者页已经不是以前的脏页了，跳过
+      if (PageWriteback(page) ||
+          !clear_page_dirty_for_io(page)) {
+         unlock_page(page);
+         continue;
+      }
+
+      if (writepage) {
+         ret = (*writepage)(page, wbc);
+         if (ret) {
+            if (ret == -ENOSPC)
+               set_bit(AS_ENOSPC, &mapping->flags);
+         else
+           set_bit(AS_EIO, &mapping->flags);
+        }
+      } else {
+          bio = mpage_writepage(bio, page, get_block,
+          &last_block_in_bio, &ret, wbc);
+      }
+      if (ret || (--(wbc->nr_to_write) <= 0))
+        done = 1;
+      if (wbc->nonblocking && bdi_write_congested(bdi)) {
+        wbc->encountered_congestion = 1;
+        done = 1;
+      }
+  }//end of for
+  pagevec_release(&pvec);
+  cond_resched();
+ }//end for while
+ if (!scanned && !done) {
+  /*
+   * We hit the last page and there is more work to be done: wrap
+   * back to the start of the file
+   */
+　//命中最后一页，有更多的工作要做：折回到文件的开始　
+  scanned = 1;
+  index = 0;
+  goto retry;
+ }
+ if (!is_range)
+  mapping->writeback_index = index;
+ if (bio)
+  mpage_bio_submit(WRITE, bio);
+ return ret;
+}
+
+/*
+ * Writing is not so simple.
+ *
+ * If the page has buffers then they will be used for obtaining the disk
+ * mapping.  We only support pages which are fully mapped-and-dirty, with a
+ * special case for pages which are unmapped at the end: end-of-file.
+ *
+ * If the page has no buffers (preferred) then the page is mapped here.
+ *
+ * If all blocks are found to be contiguous then the page can go into the
+ * BIO.  Otherwise fall back to the mapping's writepage().
+ *
+ * FIXME: This code wants an estimate of how many pages are still to be
+ * written, so it can intelligently allocate a suitably-sized BIO.  For now,
+ * just allocate full-size (16-page) BIOs.
+ */
+/*
+如果页上有buffer 那么这些buffer将被用来获得硬盘映射。我们仅支持整个已被映射且脏的页，
+还有特殊的情况：在文件结尾没被映射的页。如果页没有 buffers那么页在这儿被映射。
+如果所有的块被发现是连续的，那么页能直接进入BIO，否则，回到mapping的writepage()函数。
+函数mpage_writepage设计的目标是能估计还有多少页需要被写，这样它能智能地分配合适大小的BIO。
+但现在仅支持分配全部尺寸（16页）的BIO。
+*/
+static struct bio *
+mpage_writepage(struct bio *bio, struct page *page, get_block_t get_block,
+ sector_t *last_block_in_bio, int *ret, struct writeback_control *wbc)
+{
+    struct address_space *mapping = page->mapping;
+    struct inode *inode = page->mapping->host;
+    const unsigned blkbits = inode->i_blkbits;
+    unsigned long end_index;
+    const unsigned blocks_per_page = PAGE_CACHE_SIZE >> blkbits;
+    sector_t last_block;
+    sector_t block_in_file;
+    sector_t blocks[MAX_BUF_PER_PAGE];
+    unsigned page_block;
+    unsigned first_unmapped = blocks_per_page;
+    struct block_device *bdev = NULL;
+    int boundary = 0;
+    sector_t boundary_block = 0;
+    struct block_device *boundary_bdev = NULL;
+    int length;
+    struct buffer_head map_bh;
+    loff_t i_size = i_size_read(inode);
+
+    //页面有buffer
+    if (page_has_buffers(page)) {
+        struct buffer_head *head = page_buffers(page);
+        struct buffer_head *bh = head;
+
+        /* If they're all mapped and dirty, do it */
+        page_block = 0;
+        do {
+            BUG_ON(buffer_locked(bh));
+            if (!buffer_mapped(bh)) {
+                /*
+                 * unmapped dirty buffers are created by
+                 * __set_page_dirty_buffers -> mmapped data
+                 */
+                //未映射的buffer由__set_page_dirty_buffers创建
+                if (buffer_dirty(bh))
+                    goto confused;
+
+                if (first_unmapped == blocks_per_page)
+                    first_unmapped = page_block;
+                continue;
+            }
+
+            //不连续
+            if (first_unmapped != blocks_per_page)
+                goto confused;    /* hole -> non-hole */
+
+            if (!buffer_dirty(bh) || !buffer_uptodate(bh))
+                goto confused;
+            //判断是否跟前面的块缓存区连续
+            if (page_block) {
+                if (bh->b_blocknr != blocks[page_block-1] + 1)
+                    goto confused;
+            }
+            //blocks:用来交录提交的块号
+            blocks[page_block++] = bh->b_blocknr;
+            boundary = buffer_boundary(bh);
+            if (boundary) {
+                boundary_block = bh->b_blocknr;
+                boundary_bdev = bh->b_bdev;
+            }
+            bdev = bh->b_bdev;
+        } while ((bh = bh->b_this_page) != head);
+
+        if (first_unmapped)
+            goto page_is_mapped;
+
+        /*
+         * Page has buffers, but they are all unmapped. The page was
+         * created by pagein or read over a hole which was handled by
+         * block_read_full_page().  If this address_space is also
+         * using mpage_readpages then this can rarely happen.
+         */
+         /*页有buffer，但所有的buffer没被映射，这些页被在内存空洞上的pagein或读创建，
+            这些空洞被函数  block_read_full_page处理，如果address_space也用mpage_readpages，
+            那么这种情况很少发生。TODO:*/
+        goto confused;
+    }
+
+    /*
+     * The page has no buffers: map it to disk
+     */
+    /*
+     *  页面没有buff，将它映射到磁盘
+     */
+    BUG_ON(!PageUptodate(page));
+    //计算文件中页序号对应的块序号
+    block_in_file = page->index << (PAGE_CACHE_SHIFT - blkbits);
+    //最后的块号
+    last_block = (i_size - 1) >> blkbits;
+    map_bh.b_page = page;
+    for (page_block = 0; page_block < blocks_per_page; ) {
+
+        map_bh.b_state = 0;
+        if (get_block(inode, block_in_file, &map_bh, 1))
+            goto confused;
+        if (buffer_new(&map_bh)) //块是新的
+            ///找到块号对应的buffer，清除脏标识并等待
+            unmap_underlying_metadata(map_bh.b_bdev,
+                        map_bh.b_blocknr);
+        if (buffer_boundary(&map_bh)) {
+            boundary_block = map_bh.b_blocknr;
+            boundary_bdev = map_bh.b_bdev;
+        }
+        //不连续
+        if (page_block) {
+            if (map_bh.b_blocknr != blocks[page_block-1] + 1)
+                goto confused;
+        }
+        blocks[page_block++] = map_bh.b_blocknr;
+        boundary = buffer_boundary(&map_bh);
+        bdev = map_bh.b_bdev;
+        //page没有用完
+        if (block_in_file == last_block)
+            break;
+        block_in_file++;
+    }
+    BUG_ON(page_block == 0);
+
+    first_unmapped = page_block;
+
+page_is_mapped:
+    end_index = i_size >> PAGE_CACHE_SHIFT;
+    if (page->index >= end_index) {
+        /*
+         * The page straddles i_size.  It must be zeroed out on each
+         * and every writepage invokation because it may be mmapped.
+         * "A file is mapped in multiples of the page size.  For a file
+         * that is not a multiple of the page size, the remaining memory
+         * is zeroed when mapped, and writes to that region are not
+         * written out to the file."
+         */
+        /*如果该页跨过i_size，在每writepage函数调用它一定会被清零，
+           因为这页可能被映射。 一个文件映射多页，如果文件没有多页的大小，
+           则当映射时剩下的空间是0，并且写这块区域时，它不能被写入到文件中去。*/
+        unsigned offset = i_size & (PAGE_CACHE_SIZE - 1);
+        char *kaddr;
+
+        if (page->index > end_index || !offset)
+            goto confused;
+        kaddr = kmap_atomic(page, KM_USER0);
+        memset(kaddr + offset, 0, PAGE_CACHE_SIZE - offset);
+        flush_dcache_page(page);
+        kunmap_atomic(kaddr, KM_USER0);
+    }
+
+    /*
+     * This page will go to BIO.  Do we need to send this BIO off first?
+     */
+    if (bio && *last_block_in_bio != blocks[0] - 1)
+        bio = mpage_bio_submit(WRITE, bio);
+
+alloc_new:
+    if (bio == NULL) {
+        // blocks[0] << (blkbits - 9) 计算出起始扇区号，2^9 = 512
+        bio = mpage_alloc(bdev, blocks[0] << (blkbits - 9),
+                bio_get_nr_vecs(bdev), GFP_NOFS|__GFP_HIGH);
+        if (bio == NULL)
+            goto confused;
+    }
+
+    /*
+     * Must try to add the page before marking the buffer clean or
+     * the confused fail path above (OOM) will be very confused when
+     * it finds all bh marked clean (i.e. it will not write anything)
+     */
+    length = first_unmapped << blkbits;
+    if (bio_add_page(bio, page, length, 0) < length) {
+        bio = mpage_bio_submit(WRITE, bio);
+        goto alloc_new;
+    }
+
+    /*
+     * OK, we have our BIO, so we can now mark the buffers clean.  Make
+     * sure to only clean buffers which we know we'll be writing.
+     */
+    //OK, 我们有自己的BIO，因此我们现在能标识buffer为干净的，
+　//仅设置我们将写的buffer。
+    if (page_has_buffers(page)) {
+        struct buffer_head *head = page_buffers(page);
+        struct buffer_head *bh = head;
+        unsigned buffer_counter = 0;
+
+        do {
+            if (buffer_counter++ == first_unmapped)
+                break;
+            clear_buffer_dirty(bh);
+            bh = bh->b_this_page;
+        } while (bh != head);
+
+        /*
+         * we cannot drop the bh if the page is not uptodate
+         * or a concurrent readpage would fail to serialize with the bh
+         * and it would read from disk before we reach the platter.
+         */
+       /*如果页不是更新的，那我们不能删除bh ，
+         否则并发的readpage不能与bh一起串行化，
+         在我们达到platter之前它将读取硬盘时，TODO:*/
+        if (buffer_heads_over_limit && PageUptodate(page))
+            try_to_free_buffers(page);
+    }
+
+    BUG_ON(PageWriteback(page));
+    //设置页状态标识PG_writeback
+    set_page_writeback(page);
+    unlock_page(page);
+    if (boundary || (first_unmapped != blocks_per_page)) {
+        bio = mpage_bio_submit(WRITE, bio);
+        //边界块
+        if (boundary_block) {
+            /调用ll_rw_block函数写块对应的buffer到设备
+            write_boundary_block(boundary_bdev,
+                    boundary_block, 1 << blkbits);
+        }
+    } else {
+        *last_block_in_bio = blocks[blocks_per_page - 1];
+    }
+    goto out;
+
+
+confused:
+    if (bio)
+        bio = mpage_bio_submit(WRITE, bio);
+　//对于不连续的页面，会调用a_ops-.writepage进行操作
+    *ret = page->mapping->a_ops->writepage(page, wbc);
+    /*
+     * The caller has a ref on the inode, so *mapping is stable
+     */
+    if (*ret) {
+        if (*ret == -ENOSPC)
+            set_bit(AS_ENOSPC, &mapping->flags);
+        else
+            set_bit(AS_EIO, &mapping->flags);
+    }
+out:
+    return bio;
+}
+
+/*
+ * Called when we've recently written block `bblock', and it is known that
+ * `bblock' was for a buffer_boundary() buffer.  This means that the block at
+ * `bblock + 1' is probably a dirty indirect block.  Hunt it down and, if it's
+ * dirty, schedule it for IO.  So that indirects merge nicely with their data.
+ */
+void write_boundary_block(struct block_device *bdev,
+                        sector_t bblock, unsigned blocksize)
+{
+        struct buffer_head *bh = __find_get_block(bdev, bblock + 1, blocksize);
+        if (bh) {
+                if (buffer_dirty(bh))
+                        ll_rw_block(WRITE, 1, &bh);
+                put_bh(bh);
+        }
+}
+#+end_src
+
+* /proc/sys/vm/drop_caches的用法
+  当在linux下频繁存取文件后,物理内存会很快被用光,当程序结束后,内存不会被正常释放,而是一直作为caching
+  /proc /sys/vm/drop_caches的用法:
+  /proc/sys/vm/drop_caches (since Linux 2.6.16)
+              Writing  to  this  file  causes the kernel to drop clean caches,
+              dentries and inodes from memory, causing that memory  to  become
+              free.
+
+              To  free  pagecache,  use  echo 1 > /proc/sys/vm/drop_caches; to
+              free dentries and inodes, use echo 2 > /proc/sys/vm/drop_caches;
+              to   free   pagecache,   dentries  and  inodes,  use  echo  3  >
+              /proc/sys/vm/drop_caches.
+
+              Because this is a non-destructive operation  and  dirty  objects
+              are not freeable, the user should run sync(8) first.
+* look_create分析
+#+BEGIN_SRC C
+/*
+ * Restricted form of lookup. Doesn't follow links, single-component only,
+ * needs parent already locked. Doesn't follow mounts.
+ * SMP-safe.
+ */
+
+static struct dentry * __lookup_hash(struct qstr *name, struct dentry * base, struct nameidata *nd)
+{
+     struct dentry * dentry;
+     struct inode *inode;
+     int err;
+ 
+     inode = base->d_inode;
+     //检查是否有相关的权限
+     err = permission(inode, MAY_EXEC, nd);
+     dentry = ERR_PTR(err);
+     if (err)
+         goto out;
+ 
+     /*
+      * See if the low-level filesystem might want
+      * to use its own hash..
+      */
+      //如果自定义了hash计算
+     if (base->d_op && base->d_op->d_hash) {
+         err = base->d_op->d_hash(base, name);
+         dentry = ERR_PTR(err);
+         if (err < 0)
+              goto out;
+     }
+ 
+     //从缓存中寻找
+     dentry = cached_lookup(base, name, nd);
+     if (!dentry) {
+         //如果缓存中没有相关项。则新建之
+         struct dentry *new = d_alloc(base, name);
+         dentry = ERR_PTR(-ENOMEM);
+         if (!new)
+              goto out;
+         //到具体的文件系统中查找
+         dentry = inode->i_op->lookup(inode, new, nd);
+         if (!dentry)
+              dentry = new;
+         else
+              dput(new);
+     }
+out:
+     return dentry;
+}
+
+lookup_create()的代码如下：
+{
+     struct dentry *dentry;
+ 
+     //防止并发操作，获得信号量
+     down(&nd->dentry->d_inode->i_sem);
+     dentry = ERR_PTR(-EEXIST);
+     //如果之前的查找过程失败
+     if (nd->last_type != LAST_NORM)
+         goto fail;
+ 
+     //去掉LOOKUP_PARENT标志
+     nd->flags &= ~LOOKUP_PARENT;
+     //在缓存中寻找相应的dentry.如果没有。则新建之
+     dentry = lookup_hash(&nd->last, nd->dentry);
+     //创建或者查找失败
+     if (IS_ERR(dentry))
+         goto fail;
+     //如果不是建立一个目录而且文件名字不是以0结尾
+     //出错退出
+     if (!is_dir && nd->last.name[nd->last.len] && !dentry->d_inode)
+         goto enoent;
+     return dentry;
+enoent:
+     dput(dentry);
+     dentry = ERR_PTR(-ENOENT);
+fail:
+     return dentry;
+     }
+#+END_SRC
+* 设备块buffer
+linux2.4版本有专门的buffer管理机制用于管理设备块的buffer.
+linux2.6中dev block buffer并入page cache中。
+但是从dev block buffer 角度出发，我们可以把page cache当一个自己的下层。
+我们需要对应的buffer时，就向page cache要。
+#+BEGIN_EXAMPLE
++---------------------+
+| dev block buffer层  | 
++---------------------+ 
+         !
+         !
+         V
+ +--------------+
+ | page cache层 | 
+ +--------------+
+#+END_EXAMPLE
+主要函数：
+| grow_buffers()        | 申请一个缓存页 |
+| try_to_free_buffers() | 释放一个缓存页 |
+| __find_get_block()    |                |
+| __getblk()            |                |
+| __bread()             |                | 
+  
+#+begin_src c
+/*
+ * Create buffers for the specified block device block's page.  If
+ * that page was dirty, the buffers are set dirty also.
+ *
+ * Except that's a bug.  Attaching dirty buffers to a dirty
+ * blockdev's page can result in filesystem corruption, because
+ * some of those buffers may be aliases of filesystem data.
+ * grow_dev_page() will go BUG() if this happens.
+ */
+/* 为指定要求的设备块分配缓存页 */
+ /* block：块在块设备中的位置，逻辑块号; size：块大小 */
+static inline int
+grow_buffers(struct block_device *bdev, sector_t block, int size)
+{
+        struct page *page;
+        pgoff_t index;
+        int sizebits;
+        //计算出 sizebits 即 log2(PAGE_SIZE/size)
+        sizebits = -1;
+        do {
+                sizebits++;
+        } while ((size << sizebits) < PAGE_SIZE);
+        /* index block所在的数据页在块设备中的偏移（页号）*/
+        index = block >> sizebits;
+        /* *为什么*? */
+        block = index << sizebits;
+
+        /* Create a page with the proper size buffers.. */
+        page = grow_dev_page(bdev, block, index, size);
+        if (!page)
+                return 0;
+        unlock_page(page);
+        page_cache_release(page);
+        return 1;
+}
+
+/*
+ * Create the page-cache page that contains the requested block.
+ *
+ * This is user purely for blockdev mappings.
+ */
+/* 创建包含请求块的page-cache页。
+   只用于块设备映射。
+ */
+static struct page *
+grow_dev_page(struct block_device *bdev, sector_t block,
+                pgoff_t index, int size)
+{
+        struct inode *inode = bdev->bd_inode;
+        struct page *page;
+        struct buffer_head *bh;
+        /* 在块设备对应的页高速缓存中，查找或者对应偏移的页 */
+        page = find_or_create_page(inode->i_mapping, index, GFP_NOFS);
+        if (!page)
+                return NULL;
+        /* find_or_create_page应该锁住了page */
+        if (!PageLocked(page))
+                BUG();
+        /* 判断页是否buffer页 */
+        if (page_has_buffers(page)) {
+                bh = page_buffers(page);
+                //页中原来的块大小等于要分配的块的大小
+                if (bh->b_size == size) {
+                        //初始化缓存区首部字段/*
+                        init_page_buffers(page, bdev, block, size);
+                        return page;
+                }
+                //大小不相等，释放原来的缓冲区首部
+                if (!try_to_free_buffers(page))
+                        goto failed;
+        }
+
+        /*
+         * Allocate some buffers for this page
+         */
+        /* 给这个page申请buffer head链表 */
+        bh = alloc_page_buffers(page, size, 0);
+        if (!bh)
+                goto failed;
+
+        /*
+         * Link the page to the buffers and initialise them.  Take the
+         * lock to be atomic wrt __find_get_block(), which does not
+         * run under the page lock.
+         */
+        spin_lock(&inode->i_mapping->private_lock);
+        link_dev_buffers(page, bh);
+        init_page_buffers(page, bdev, block, size);
+        spin_unlock(&inode->i_mapping->private_lock);
+        return page;
+
+failed:
+        BUG();
+        //为页加锁，因为find_or_create_page给页加锁了。
+        unlock_page(page);
+        //减页面引用计数，find_or_create_page递增了计数。
+        page_cache_release(page);
+        return NULL;
+}
+
+
+/*
+ * Initialise the state of a blockdev page's buffers.
+ */
+static void
+init_page_buffers(struct page *page, struct block_device *bdev,
+                        sector_t block, int size)
+{
+        struct buffer_head *head = page_buffers(page);
+        struct buffer_head *bh = head;
+        int uptodate = PageUptodate(page);
+
+        do {
+                /* 缓冲块是否映射磁盘了，也就是b_dev b_blocknr值合法 */
+                if (!buffer_mapped(bh)) {
+                        init_buffer(bh, NULL, NULL);
+                        bh->b_bdev = bdev;
+                        bh->b_blocknr = block;
+                        if (uptodate)
+                                set_buffer_uptodate(bh);
+                        set_buffer_mapped(bh);
+                }
+                block++;
+                bh = bh->b_this_page;
+        } while (bh != head);
+}
+#+end_src
+由这个函数，我想到生成链表的经典做法
+有一个head指针始终指向链表的头，这应该是一种循环不变量吧。
+开始是虚无，头指针就指向虚无。
+head = NULL;
+...
+新节点加到原头点前
+node->next = head;
+新节点变成头节点
+head = node;
+...
+
+#+begin_src c
+/*
+ * Create the appropriate buffers when given a page for data area and
+ * the size of each buffer.. Use the bh->b_this_page linked list to
+ * follow the buffers created.  Return NULL if unable to create more
+ * buffers.
+ *
+ * The retry flag is used to differentiate async IO (paging, swapping)
+ * which may not fail from ordinary buffer allocations.
+ */
+struct buffer_head *alloc_page_buffers(struct page *page, unsigned long size,
+                int retry)
+{
+        struct buffer_head *bh, *head;
+        long offset;
+
+try_again:
+        head = NULL;
+        offset = PAGE_SIZE;
+        /* 依次申请缓冲区头并加到链表头 */
+        while ((offset -= size) >= 0) {
+                bh = alloc_buffer_head(GFP_NOFS);
+                if (!bh)
+                        goto no_grow;
+
+                bh->b_bdev = NULL;
+                bh->b_this_page = head;
+                bh->b_blocknr = -1;
+                head = bh;
+
+                bh->b_state = 0;
+                atomic_set(&bh->b_count, 0);
+                bh->b_size = size;
+
+                /* Link the buffer to its page */
+                set_bh_page(bh, page, offset);
+
+                bh->b_end_io = NULL;
+        }
+        return head;
+/*
+ * In case anything failed, we just free everything we got.
+ */
+no_grow:
+        if (head) {
+                do {
+                        bh = head;
+                        head = head->b_this_page;
+                        free_buffer_head(bh);
+                } while (head);
+        }
+        /* 异步和同步请求的不同待遇 */
+        /*
+         * Return failure for non-async IO requests.  Async IO requests
+         * are not allowed to fail, so we have to wait until buffer heads
+         * become available.  But we don't want tasks sleeping with
+         * partially complete buffers, so all were released above.
+         */
+        if (!retry)
+                return NULL;
+
+        /* We're _really_ low on memory. Now we just
+         * wait for old buffer heads to become free due to
+         * finishing IO.  Since this is an async request and
+         * the reserve list is empty, we're sure there are
+         * async buffer heads in use.
+         */
+        free_more_memory();
+        goto try_again;
+}
+/* 对应的grow_buffers--它的反面
+   有申请，就要用释放 
+   try_to_free_buffers上场了
+*/
+int try_to_free_buffers(struct page *page)
+{
+        struct address_space * const mapping = page->mapping;
+        struct buffer_head *buffers_to_free = NULL;
+        int ret = 0;
+
+        BUG_ON(!PageLocked(page));
+        //正在将页面写入磁盘，所以不释放
+        if (PageWriteback(page))
+                return 0;
+
+        if (mapping == NULL) {                /* can this still happen? */
+                ret = drop_buffers(page, &buffers_to_free);
+                goto out;
+        }
+
+        spin_lock(&mapping->private_lock);
+        /* drop_buffers 作用：
+           检查page的每个buffer，看是否busy;
+           从间接块缓存列表移除，TODO：why
+           page->private置0，
+           成功返回1。
+        */
+        ret = drop_buffers(page, &buffers_to_free);
+        if (ret) {
+                /* TODO:
+                /*
+                 * If the filesystem writes its buffers by hand (eg ext3)
+                 * then we can have clean buffers against a dirty page.  We
+                 * clean the page here; otherwise later reattachment of buffers
+                 * could encounter a non-uptodate page, which is unresolvable.
+                 * This only applies in the rare case where try_to_free_buffers
+                 * succeeds but the page is not freed.
+                 */
+                clear_page_dirty(page);
+        }
+        spin_unlock(&mapping->private_lock);
+out:
+        /* 释放buffer_head列表 */
+        if (buffers_to_free) {
+                struct buffer_head *bh = buffers_to_free;
+
+                do {
+                        struct buffer_head *next = bh->b_this_page;
+                        free_buffer_head(bh);
+                        bh = next;
+                } while (bh != buffers_to_free);
+        }
+        return ret;
+}
+
+/*
+ * Perform a pagecache lookup for the matching buffer.  If it's there, refresh
+ * it in the LRU and mark it as accessed.  If it is not present then return
+ * NULL
+ */
+/* block:块号 size:块大小 */
+struct buffer_head *
+__find_get_block(struct block_device *bdev, sector_t block, int size)
+{
+        /* 在LRU缓存数组中是否有缓冲区首部 */
+        struct buffer_head *bh = lookup_bh_lru(bdev, block, size);
+
+        if (bh == NULL) {
+                bh = __find_get_block_slow(bdev, block, size);
+                if (bh)
+                        bh_lru_install(bh);
+        }
+        if (bh)
+                touch_buffer(bh);
+        return bh;
+}
+#+end_src
+
+LRU （Least Recently Used）无处不在啊，它的优化效果究竟如何？
+将最近一段时间内最少被访问过的东东淘汰。
+#+begin_src c
+/*
+ * Look up the bh in this cpu's LRU.  If it's there, move it to the head.
+ */
+/*
+  从本CPU的LRU缓存中查找buffer_head 
+*/
+static inline struct buffer_head *
+lookup_bh_lru(struct block_device *bdev, sector_t block, int size)
+{
+        struct buffer_head *ret = NULL;
+        struct bh_lru *lru;
+        int i;
+
+        check_irqs_on();
+        bh_lru_lock();//SMP：关本CPU中断;UP：禁止内核抢占。
+        lru = &__get_cpu_var(bh_lrus);
+        for (i = 0; i < BH_LRU_SIZE; i++) {
+                struct buffer_head *bh = lru->bhs[i];
+
+                if (bh && bh->b_bdev == bdev &&
+                                bh->b_blocknr == block && bh->b_size == size) {
+                        /* 如果不是数组第一元素，将其移到第一。
+                        */
+                        if (i) {
+                                while (i) {
+                                        lru->bhs[i] = lru->bhs[i - 1];
+                                        i--;
+                                }
+                                lru->bhs[0] = bh;
+                        }
+                        get_bh(bh);
+                        ret = bh;
+                        break;
+                }
+        }
+        bh_lru_unlock();
+        return ret;
+}
+
+/*
+ * The LRU management algorithm is dopey-but-simple.  Sorry.
+ */
+/*
+   将buffer_head加入LRU缓存
+   evictee: 被逐出的人，也就是被清出缓存队伍的bh
+   感觉这个函数写的有点不好，没有技巧，没有必要再引起一个临时数组bhs了。
+   而且每次都memcpy一次bhs，但是BH_LRU_SIZE大小是8，所以可以忽略。simple优先
+*/
+static void bh_lru_install(struct buffer_head *bh)
+{
+	struct buffer_head *evictee = NULL;
+	struct bh_lru *lru;
+
+	check_irqs_on();
+	bh_lru_lock();
+	lru = &__get_cpu_var(bh_lrus);
+	if (lru->bhs[0] != bh) {
+		struct buffer_head *bhs[BH_LRU_SIZE];//临时数组
+		int in;
+		int out = 0;
+
+		get_bh(bh);
+                /* 先把bh写的bhs的第一个元素 */
+		bhs[out++] = bh;
+                /* 把lru->bhs其余部分复制到bhs中，最后多出一个来就evictee，倒霉孩子 */
+		for (in = 0; in < BH_LRU_SIZE; in++) {
+			struct buffer_head *bh2 = lru->bhs[in];
+
+			if (bh2 == bh) {
+				__brelse(bh2);
+			} else {
+				if (out >= BH_LRU_SIZE) {
+					BUG_ON(evictee != NULL);
+					evictee = bh2;
+				} else {
+					bhs[out++] = bh2;
+				}
+			}
+		}
+		while (out < BH_LRU_SIZE)
+			bhs[out++] = NULL;
+		memcpy(lru->bhs, bhs, sizeof(bhs));
+	}
+	bh_lru_unlock();
+
+	if (evictee)
+		__brelse(evictee);
+}
+
+/*
+ * Various filesystems appear to want __find_get_block to be non-blocking.
+ * But it's the page lock which protects the buffers.  To get around this,
+ * we get exclusion from try_to_free_buffers with the blockdev mapping's
+ * private_lock.
+ *
+ * Hack idea: for the blockdev mapping, i_bufferlist_lock contention
+ * may be quite high.  This code could TryLock the page, and if that
+ * succeeds, there is no need to take private_lock. (But if
+ * private_lock is contended then so is mapping->tree_lock).
+ */
+static struct buffer_head *
+__find_get_block_slow(struct block_device *bdev, sector_t block, int unused)
+{
+        struct inode *bd_inode = bdev->bd_inode;
+        struct address_space *bd_mapping = bd_inode->i_mapping;
+        struct buffer_head *ret = NULL;
+        pgoff_t index;
+        struct buffer_head *bh;
+        struct buffer_head *head;
+        struct page *page;
+        int all_mapped = 1;
+        //块在设备中的i_mapping中的页号
+        index = block >> (PAGE_CACHE_SHIFT - bd_inode->i_blkbits);
+        //从bd_mapping的radix树中，根据index查找页
+        page = find_get_page(bd_mapping, index);
+        if (!page)
+                goto out;
+
+        spin_lock(&bd_mapping->private_lock);
+        //页没有块缓冲
+        if (!page_has_buffers(page))
+                goto out_unlock;
+        head = page_buffers(page);
+        bh = head;
+        /*遍历page对应buffer_head列表，查找满足条件的buffer */
+        do {
+                if (bh->b_blocknr == block) {
+                        ret = bh;
+                        get_bh(bh);
+                        goto out_unlock;
+                }
+                if (!buffer_mapped(bh))
+                        all_mapped = 0;
+                bh = bh->b_this_page;
+        } while (bh != head);
+
+        /* we might be here because some of the buffers on this page are
+         * not mapped.  This is due to various races between
+         * file io on the block device and getblk.  It gets dealt with
+         * elsewhere, don't buffer_error if we had some unmapped buffers
+         */
+        if (all_mapped) {
+                printk("__find_get_block_slow() failed. "
+                        "block=%llu, b_blocknr=%llu\n",
+                        (unsigned long long)block, (unsigned long long)bh->b_blocknr);
+                printk("b_state=0x%08lx, b_size=%u\n", bh->b_state, bh->b_size);
+                printk("device blocksize: %d\n", 1 << bd_inode->i_blkbits);
+        }
+out_unlock:
+        spin_unlock(&bd_mapping->private_lock);
+        page_cache_release(page);
+out:
+        return ret;
+}
+#+END_SRC
+* 编写具体文件系统用到的接口
+#+begin_src c
+struct linux_dirent {
+	unsigned long	d_ino;
+	unsigned long	d_off; /* 下一个linux_dirent的offset */
+	unsigned short	d_reclen; /* 本linux_dirent的长度*/
+	char		d_name[1];
+        /* 下面代码中实际没有写 */
+        pad
+        char            d_type;
+};
+#+end_src
+     d_ino is an inode number.  d_off is the distance from the start of the
+     directory to the start of the next linux_dirent.  d_reclen is the size of this
+     entire linux_dirent.  d_name is a null-terminated filename.
+
+    d_type is a byte at the end of the structure that indicates the file type.  It
+    contains one of the following values (defined in <dirent.h>):
+| DT_BLK     | This is a block device.       |
+| DT_CHR     | This is a character device.   |
+| DT_DIR     | This is a directory.          |
+| DT_FIFO    | This is a named pipe (FIFO).  |
+| DT_LNK     | This is a symbolic link.      |
+| DT_REG     | This is a regular file.       |
+| DT_SOCK    | This is a UNIX domain socket. |
+| DT_UNKNOWN | The file type is unknown.     |
+#+begin_src c
+struct getdents_callback {
+	struct linux_dirent __user * current_dir;/* 本次要填写的 */
+	struct linux_dirent __user * previous;   /* 上次填写的 */
+	int count;
+	int error;
+};
+/*
+  向用户态的buf中，填写dentry内容。
+  name : 目录项名
+  namlen: 名字长度
+  offset: 目录项偏移值
+  ino:   目录项对应的inode number
+  d_type: 目录项类型，见上面描述
+*/
+static int filldir(void * __buf, const char * name, int namlen, loff_t offset,
+		   ino_t ino, unsigned int d_type)
+{
+	struct linux_dirent __user * dirent;
+	struct getdents_callback * buf = (struct getdents_callback *) __buf;
+	int reclen = ROUND_UP(NAME_OFFSET(dirent) + namlen + 2);
+
+	buf->error = -EINVAL;	/* only used if we fail.. */
+	if (reclen > buf->count)
+		return -EINVAL;
+	dirent = buf->previous;
+	if (dirent) {
+		if (__put_user(offset, &dirent->d_off))
+			goto efault;
+	}
+	dirent = buf->current_dir;
+	if (__put_user(ino, &dirent->d_ino))
+		goto efault;
+	if (__put_user(reclen, &dirent->d_reclen))
+		goto efault;
+	if (copy_to_user(dirent->d_name, name, namlen))
+		goto efault;
+	if (__put_user(0, dirent->d_name + namlen))
+		goto efault;
+	if (__put_user(d_type, (char __user *) dirent + reclen - 1))
+		goto efault;
+	buf->previous = dirent;
+        /* 将dirent指向下次读取的位置 */
+	dirent = (void __user *)dirent + reclen;
+	buf->current_dir = dirent;
+	buf->count -= reclen;
+	return 0;
+efault:
+	buf->error = -EFAULT;
+	return -EFAULT;
+}
+
+asmlinkage long sys_getdents(unsigned int fd, struct linux_dirent __user * dirent, unsigned int count)
+{
+	struct file * file;
+	struct linux_dirent __user * lastdirent;
+	struct getdents_callback buf;
+	int error;
+
+	error = -EFAULT;
+	if (!access_ok(VERIFY_WRITE, dirent, count))
+		goto out;
+
+	error = -EBADF;
+	file = fget(fd);
+	if (!file)
+		goto out;
+
+	buf.current_dir = dirent;
+	buf.previous = NULL;
+	buf.count = count;
+	buf.error = 0;
+
+	error = vfs_readdir(file, filldir, &buf);
+	if (error < 0)
+		goto out_putf;
+	error = buf.error;
+	lastdirent = buf.previous;
+	if (lastdirent) {
+                /* 这里要求 vfs_readdir更新file->f_pos指向已读dentry的最后，即下一次读denry的开始偏移。 */
+		if (put_user(file->f_pos, &lastdirent->d_off))
+			error = -EFAULT;
+		else
+			error = count - buf.count;
+	}
+
+out_putf:
+	fput(file);
+out:
+	return error;
+}
+/* vfs_readdir 调用了filp->f_op->readir */
+int vfs_readdir(struct file *file, filldir_t filler, void *buf)
+{
+	struct inode *inode = file->f_dentry->d_inode;
+	int res = -ENOTDIR;
+	if (!file->f_op || !file->f_op->readdir)
+		goto out;
+
+	res = security_file_permission(file, MAY_READ);
+	if (res)
+		goto out;
+
+	down(&inode->i_sem);
+	res = -ENOENT;
+	if (!IS_DEADDIR(inode)) {
+		res = file->f_op->readdir(file, buf, filler);
+		file_accessed(file);
+	}
+	up(&inode->i_sem);
+out:
+	return res;
+}
+/* inode 为符号连接的inode
+   symname:符号连接名
+   len:符号连接长度
+   将指定长度的symname复制到inode的page中
+*/
+int page_symlink(struct inode *inode, const char *symname, int len);
+
+/* fill in inode information in  the entry
+   此entry为内存中的。
+   在entry中填入inde的信息 
+   将dentry加入inode->i_dentry链表;
+   entry->d_inode = inode;
+*/
+void d_instantiate(struct dentry *entry, struct inode * inode);
+#+end_src
+/* 建立符号链接  */
+long sys_link(const char __user * oldname, const char __user * newname)
+
+sys_link() -> vfs_link() -> i_op->link(dir, dentry, )
+
+path_lookup简化理解：
+将路径按照从左到右，用“/”分割，
+对于每一个分量，计算其hash值，到dentry的hash表中，查找，
+如果找到，很好，速度快阿。
+如果找不到，那就需要调用i_op->lookup (从目录中读取dentry对应ino，从磁盘读取inode内容。
+并将新dentry加入缓冲链表，建立dentry与inode间的关系)。
+
+循环直到最后我们就获得了路径查找的结果。
+
+* do_generic_mapping_read一处表达式 (linux kernel 2.6.11)
+#+BEGIN_SRC C
+      /* nr is the maximum number of bytes to copy from this page */
+      nr = PAGE_CACHE_SIZE;
+      if (index >= end_index) {
+              if (index > end_index)
+                     goto out;
+              nr = ((isize - 1) & ~PAGE_CACHE_MASK) + 1;
+              if (nr <= offset) {
+                     goto out;
+              }
+      }
+      nr = nr - offset;
+#+END_SRC
+其中nr = ((isize - 1) & ~PAGE_CACHE_MASK) + 1;
+意为最后需要读的字节数。
+为什么不写成nr = (isize & ~PAGE_CACHE_MASK) ;呢？
+
+因为nr = ((isize - 1) & ~PAGE_CACHE_MASK) + 1;
+包含了最大值PAGE_CACHE_SIZE。
+而后者的最大数值是 PAGE_CACHE_SIZE - 1。
+
+* sys_unlink一处疑问
+#+BEGIN_SRC C
+ if (inode)
+   atomic_inc(&inode->i_count);//为什么要增加inode的计数
+ error = vfs_unlink(nd.dentry->d_inode, dentry);
+...
+if (inode)
+  iput(inode);	/* truncate the inode here */
+#+END_SRC
+那是因为vfs_unlink中使用dentry相关的inode结构
+* nbd.c Network block device 代码
+
+http://blogold.chinaunix.net/u1/57901/showart_1798359.html
+* find_group_orlov中orlov的含义
+  注释开头Orlov's allocator for directories.
+  
+  在http://lwn.net中文章：
+The Orlov block allocator
+[Posted November 5, 2002 by corbet]
+
+The performance of a file system is dependent on many things; one of the crucial factors is just how that filesystem lays out files on the disk. In general, it is best to keep related items together; a kernel compilation will go more quickly if the files within the kernel source tree all live close to each other on the disk. To achieve this goal, the ext2 and ext3 filesystems have long tried to lay out the contents of a directory in the same cylinder group (or, at least, in nearby groups).
+
+In the real world, however, it turns out to be better, sometimes, to spread things out. Imagine setting up a system with users' home directories in /home. If all the first-level directories within /home (i.e. the home directories for numerous users) are placed next to each other, there may be no space left for the contents of those directores. User files thus end up being placed far from the directories that contain them, and performance suffers. The ext2 filesystem has suffered from this sort of performance degradation for some time.
+
+The 2.5.46 kernel contains a new block allocator which attempts to address this problem. The new scheme, borrowed from BSD, is named the "Orlov allocator," after its creator Grigory Orlov; he has posted a brief description of the technique as it is used in the BSD kernels. The Linux implementation, as implemented by Alexander Viro, Andrew Morton, and Ted Ts'o, uses a similar technique but adds a few changes.
+
+Essentially, the Orlov algorithm tries to spread out "top-level" directories, on the assumption that they are unrelated to each other. Directories created in the root directory of a filesystem are considered top-level directories; Ted has added a special inode flag that allows the system administrator to mark other directories as being top-level directories as well. If /home lives in the root filesystem (and people do set up systems that way), a simple chattr command will make the system treat it as a top-level directory.
+
+When creating a directory which is not in a top-level directory, the Orlov algorithm tries, as before, to put it into the same cylinder group as its parent. A little more care is taken, however, to ensure that the directory's contents will also be able to fit into that cylinder group; if there are not many inodes or blocks available in the group, the directory will be placed in a different cylinder group which has more resources available. The result of all this, hopefully, is much better locality for files which are truly related to each other and likely to be accessed together.
+
+As of this writing, only one benchmark result with the new allocator has been posted. The results are promising: the time required to traverse through a Linux kernel tree (a dauntingly big thing, these days) was reduced by 30% or so. The Orlov scheme needs more rigorous benchmarking; it also needs some serious stress testing to demonstrate that performance does not degrade as the filesystem is changed over time. But the initial results are encouraging. Linux has, once again, benefitted from the ability to borrow good ideas from other free kernels.
+
+* super block中为什么把所有的inode连接的链表？把所有打开的文件连接的链表中？ :question:

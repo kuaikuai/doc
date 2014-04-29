@@ -1,0 +1,9 @@
+#+OPTIONS: "\n:t"
+#+STARTUP: showall
+#+TODO: TODO START | DONE
+
+
+* TODO
+  libexec目录权限 改为 nagios
+
+

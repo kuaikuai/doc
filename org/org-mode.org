@@ -1,0 +1,728 @@
+#+OPTIONS: "\n:t"
+http://orgmode.org/worg/org-tutorials/index.html
+#+STARTUP: hidestars
+
+* 常见使用
+*加粗* 加粗
+/倾斜/ 倾斜
+_下划线_ 下划线
+
+导出文件的标题在特定行给出
+#+TITLE: This is the title of the document
+
+目录表通常会直接插入在文档第一个标题之前
+#+OPTIONS: toc:2 (目录中只显示二级标题)
+#+OPTIONS: toc:nil (无目录)
+
+当从另外一个文档中引用一段话时通过会让它左右都缩进
+#+BEGIN_QUOTE
+Everything should be made as simple as possible,
+but not any simpler -- Albert Einstein
+#+END_QUOTE
+
+如果你想让某些文本居中
+#+BEGIN_CENTER
+Everything should be made as simple as possible, \\
+but not any simpler
+#+END_CENTER
+
+这是一个很奇葩的功能，当你使用这句语法的时候，输出html，会自动播放你指定的音乐……
+#<bgsound src="d:/自用/0/Music/1.mp3" loop=5>
+“loop”表示循环次数。
+
+当导出文档时，你可以包含其他文件中的内容。比如，想包含你的“.emacs”文件，你可以用：
+#+begin_src org
+ #+INCLUDE: "~/.emacs" src emacs-lisp
+#+end_src
+可选的第二个第三个参数是组织方式（例如，“quote”，“example”，或者“src”），
+如果是 “src”，语言用来格式化内容。组织方式是可选的，如果不给出，文本会被当作 Org 模式的正常处理。用 C-c , 访问包含的文件。
+
+当 Org 标题含有很多星号并且标题下面的文字缩进
+ * Top level headline
+ ** Second level
+ *** 3rd level
+ some text
+ *** 3rd level
+ more text
+ * Another top level headline
+如果你用的 Emacs 23.1.50.3 和 Org 6.29 的更高版本，这种视图可以用 org-indent-mode 模式动态地实现。
+也可以通过设置变量 org-startup-indented 为所有的文件打开 org-indent-mode 模式，或者用
+#+STARTUP: indent
+
+如果你希望为图片定义一个标题，或者一个标签方便内部交叉引用，可以让图片单独一行
+ #+CAPTION: This is the caption for the next figure link (or table)
+ #+LABEL: fig:SED-HR4049
+ [[./img/a.jpg]]
+
+对于需要包含数学符号和特殊方程的科学笔记，Org 模式支持嵌入 LaTeX 代码到文件中。你可以直接使用类 TeX 的宏来输入特殊符号，输入方程，或者整个 LaTeX 环境。
+#+begin_src org
+ ,Angles are written as Greek letters \alpha, \beta and \gamma. The mass if
+ ,the sun is M_sun = 1.989 x 10^30 kg. The radius of the sun is R_{sun} =
+ ,6.96 x 10^8 m. If $a^2=b$ and $b=2$, then the solution must be either
+ ,$a=+\sqrt{2}$ or $a=-\sqrt{2}$.
+ ,\begin{equation}
+ ,x=\sqrt{b}
+ ,\end{equation}
+#+end_src
+特殊设置之后，导出 HTML 时 LaTeX 代码片断会生成图片并包含进来。
+
+
+关于链接
+C-c C-l 编辑链接
+C-c C-o 打开链接
+链接的格式
+ [[link][description]] 或者 [[link]]
+常用link类型
+http://www.sina.com Web
+ file:paper/lastdoc.pdf 本地文档，用相对路径表示
+ file:/path/to/filename 本地文档，用绝对路径表示
+ news:comp.emacs 新闻组
+caole82@gmail.com 邮件地址
+
+
+关于自定义css
+#+STYLE: <link rel="emacs" type="/home/mudan/Documents/org/css" href="emacs.css" /> 自定义css
+#test{font-size:14px;} 设置字体大小
+下面贴一下我的自定义css：
+#+STYLE: <link rel="stylesheet" type="text/css" href="C:/Documents and Settings/Mu/My Documents/worg.css" />
+#+INFOJS_OPT: view:info mouse:underline up:think_world.html home:http://www.orgmode.org toc:t
+我有几个挺好的css文件，打包了一下，可以在链接中下载：http://pan.baidu.com/share/link?shareid=151940&uk=1963878638
+
+
+段落、分行和引用
+段落之间至少要有一空行。如果你想实现段内分行，可以在行后加上“\\”。
+要想在一个区域内实现分行，而其他地方使用正常格式，你可以使用下面的语法实行：
+#+BEGIN_VERSE
+ Great clouds overhead
+ Tiny black birds rise and fall
+ Snow covers Emacs
+ -- AlexSchroeder
+#+END_VERSE
+
+
+排版源码
+#+begin_src 语言
+ ...
+#+end_src 
+例如：
+#+begin_src c -t -h 7 -w 40
+int main(void)
+{
+ printf("Hello, World!\n");
+ return 0;
+}
+#+end_src
+语法详解：
+-n 显示行号
+-t 清除格式
+-h 7 设置高度为 7 行
+-w 40 设置宽度为 40 列
+
+
+关于导出
+C-c C-e l 导出 LaTeX 文件
+C-c C-e p 导出 LaTeX 文件，并处理成 PDF 文件（需要格外的LaTeX软件支持）
+C-c C-e d 导出 LaTeX 文件，处理成 PDF 文件，并打开
+C-c C-e D 导出 DocBook 文件
+C-c C-e a 导出 ASCII 文件
+C-c C-e 用来导出和发布的调度器（我通常使用这个命令，然后在里面选择导出格式）
+当导出文档时，你可以包含其他文件中的内容
+#+INCLUDE: "~/.emacs" src emacs-lisp
+
+* 标签使用
+
+C-c C-q 为当前标题输入标签，回车之后，标签会被插入，并放到第 org-tags-column 列。
+ 如果用前缀 C-u，会把当前缓冲区中的所有标签都对齐到那一列。
+C-c C-c 当光标处于标题上时，这个命令同 C-c C-q
+C-c \ 搜索指定标签名
+C-c / m 用匹配标签搜索的所有标题构造一个稀疏树
+ 带前缀参数C-u时，忽略所有还是 TODO 行的标题
+
+标签的前面和后面都应该有一个冒号，例如，“:work:”。可以指定多个标签，就像“:work:urgent:”。标签默认是粗体，并和标题具有相同的颜色。
+
+标签具有大纲树的继承结构。如果一个标题具有某个标签，它的所有子标题也会继承这个标签。例如，在列表
+#+begin_src org
+ * Meeting with the French group :work:
+ ** Summary by Frank :boss:notes:
+ *** TODO Prepare slides for him :action:
+#+end_src
+中,尽管没有明确标出,最后一个标题会有标签“:work:”，“:boss:”，“:note:”，和“:action”。
+你也可以设定一个标签让所有的标题都继承，就好像标签在包含整个文件的第零级标题中指定了一样。用下面的方法：
+#+begin_src org
+ ,#+FILETAGS: eter:Boss:Secret:
+#+end_src
+
+Org 还支持基于一个标签列表来插入标签。
+默认情况这个列表是动态构建的，包含了当前缓冲区中使用过的所有标签。你也可以通过变量 org-tag-alist 在全局设定一个标签的硬列表（hard list）。另外，对于某个特定文件你也可以用下面这几行设置一个默认列表：
+#+begin_src org
+ ,#+TAGS: @work @home @tennisclub
+ ,#+TAGS: laptop car pc sailboat
+#+end_src
+
+--------------------------------------------------------------------------------
+另外，它也实现了一个更快速，称为 /快速标签选择/ （ /fast tag selection/ ）的标签选择方法。这使得你只用按一次键就可以选择或者取消一个标签。
+为了使它能很好地工作，需要为常用的标签赋唯一的值。你可以在你的“.emacs”文件中通过设置变量 org-tag-alist 作全局设定。例如，如果你需要在不同的文件中经常要给条目添加标签“:@home:”，这时你就可以像这样设置：
+#+begin_src elisp
+ (setq org-tag-alist '(("@work" . ?w) ("@home" . ?h) ("laptop" . ?l)))
+#+end_src
+如果标签只用于当前正在处理的文件，那么你可以这样设置标签选项行：
+#+begin_src org
+ ,#+TAGS: @work(w) @home(h) @tennisclub(t) laptop(l) pc(p)
+#+end_src
+
+--------------------------------------------------------------------------------
+属性认识
+C-c C-x p 设置一个属性，会询问属性名和属性值
+C-c C-c d 从当前项中删除一个属性
+
+通过设置属性 =“:Xyz_ALL:”= ，你可以为属性 =“:Xyz:”= 设置所有合法的值。
+这个特定的属性是有 /继承性/ 的，即，如果你是在第 1 级别设置的，那么会被应用于整个树。当合法的值设定之后，设置对应的属性就很容易了，并且不容易出现打字错误。用CD唱片集为例，我们可以预定义发行商和盒中的光盘数目：
+#+begin_src org
+ ,* CD collection
+ , ROPERTIES:
+ , :NDisks_ALL: 1 2 3 4
+ , ublisher_ALL: "Deutsche Grammophon" Philips EMI
+ , :END:
+#+end_src
+
+** 时间戳
+
+C-c . 询问日期并输入正确的时间戳
+ org-time-stamp
+ 当光标处理一个时间戳之上时，是修改这个时间戳，而不是插入一个新的
+ 如果这个命令连用，就会插入一个时间段，加上前缀会附带当前时间
+C-c ! 功能同C-c . 但是插入的是一个未激活的时间戳
+S-LEFT/RIGHT 将光标处理的时间戳改变一天
+S-UP/DOWN 改变时间戳中光标下的项
+ 光标可以处在年、月、日、时或者分之上
+ 当时间戳包含一个时间段时，如 “15:30-16:30”，修改第一个时间，会自动
+ 同时修改第二个时间，以保持时间段长度不变
+ 想修改时间段长度，可以修改第二个时间。
+
+使用 Org 可以记录在一个工程中花在某些特定任务上的时间。
+C-c C-x C-i 开始当前条目的计时（clock-in）
+ 会插入一个 CLOCK 关键字和一个时间戳
+ 加上 C-u 前缀，从当前已经计时的任务中选择任务
+C-c C-x C-o 停止计时（clock-out）
+ 这会在开始计时的地方插入另一个时间戳
+ 它会直接计算使用时间并插入到时间段的后面如 “=> HH:MM”
+C-c C-x C-e 为当前的计时任务更新进度
+C-c C-x C-x 取消当前的计时
+C-c C-x C-j 跳转到包含当前正在运行的计时的任务条目
+
+时间戳是一个具有特定格式的日期（可能带有时间和时间段）说明，例如 ~<2005-10-01~ ~Tue>~ ， ~<2003-09-16~ ~Tue~ ~09:39>~ ，或者 ~<2003-09-16~ ~Tue~ ~12:00-12:30>~ 。
+时间戳可以出现在树条目的标题和正文的任何地方，同时能使条目只在特定的日期才出现在议程列表中。
+
+一个简单的时间戳只是给一个条目加上时间和日期。这跟在纸质的议程上写下约会和事件是一样的。
+#+begin_src org
+ ,* Meet Peter at the movies <2006-11-01 Wed 19:15>
+ ,* Discussion on climate change <2006-11-02 Thu 20:00-22:00>
+#+end_src
+
+一个时间戳可以包含一个时间间隔，表示事件不只在指定的时间发生，还在每隔一个特定的时间如 N 天（d）、周（w）、月（m）或者年（y）之后重复发生。下面的事件每周二在议程中显示：
+#+begin_src org
+ ,* Pick up Sam at school <2007-05-16 Wed 12:30 +1w>
+#+end_src
+
+为了能定义更复杂的时间，Org 模式支持 Emacs 日历/日记包（calendar/diary package）中的日记条目（日记样式的 sexp 条目）。例如：
+#+begin_src org
+ ,* The nerd meeting on every 2nd Thursday of the month
+ , <%%(diary-float t 4 2)>
+#+end_src
+
+两个时间戳用‘--’连接起来就定义了一个时间段：
+#+begin_src org
+ ,** Meeting in Amsterdam
+ , <2004-08-23 Mon>--<2004-08-26 Thu>
+#+end_src
+
+非激活的时间戳，跟普通时间戳一样，但是这里是方括号而不是尖括号。这种时间戳是未激活的，它不会让一个条目显示在议程中。
+#+begin_src org
+ ,* Gillian comes late for the fifth time [2006-11-01 Wed]
+#+end_src
+
+有些任务需要一再重复出现。Org 模式在截止期限、计划安排和普通时间戳中用所谓的中继器来管理这种任务。在下面的例子中：
+#+begin_src org
+ ,** TODO Pay the rent
+ , DEADLINE: <2005-10-01 Sat +1m>
+#+end_src
++1m 是一个中继器；上面的意思是任务有一个截止期限 ~<2005-10-01>~ ，并从这个日期开始每月都重复出现。
+
+*** 表格使用
+
+TAB/RET/C-c C-c 表格自动调整
+M-UP/DOWN 上/下移当前行
+C-c - 在当前行下面添加一个水平线，如果带前缀，则在上面添加一行水平线 
+C-c | 将活动区域（选中区域）转换成一个表
+ 如果第一行至少有一个 TAB 字符，就用 TAB 划分内容；如果第一行都有逗号，就分逗号划
+ 分内容；否则就用空白符来划分区域。如果当前没有活动区域就会建立一个空的 Org 表格。
+
+给表格添加标题：
+#+CAPTION: 表格的标题
+#+LABEL: tbl:table_label1
+
+#+srcname 3_1
+#+begin_src org
+,| Name | Pone | Age |
+,|-------+------+-----|
+,| Peter | 1234 | 17 |
+,| Anna | 4321 | 25 |
+#+end_src
+表格的缩进程度可以在第一行设定。以“|-”开头的一行会作为一个水平分隔行，当它下次调整排列时会将‘-’扩展至填充整行。所以想要建上面的那个表格，只需键入：
+#+srcname 3_2
+#+begin_src org
+,|Name|Phone|Age|
+,|-
+#+end_src
+然后 TAB 排列表格。还有一个更快的方法就是键入|Name|Phone|Age，再 C-c RET。
+
+*** remember 收集工具
+
+Inbox,在 GTD 的定义里面是收集材料的工具。最好的 Inbox 工具是纸和笔。而 Remember 在 Org mode 里面算是较好的 Inbox 工具。它比每次打开 org 文件来写好非常非常多。
+
+配置和基本使用remember.el在emacs23以上版本是自带的，emacs22及以下版本如果发现没有自带，请自行放狗搜。
+ (setq org-default-notes-file "~/.notes")
+
+在.emacs中作如上设置，表示你希望将remember产生的note存放在~/.notes中，要我说这可一点也不重要，重要的是下面这一行：
+ (define-key global-map [f12] 'org-remember)
+
+--------------------------------------------------------------------------------
+快键键
+C-c C-c 保存
+C-c C-k 取消
+
+--------------------------------------------------------------------------------
+模版
+一天可能乱七八糟的出现不少想法，每次都按F12来记录是好的，晚上回家一看，~/.noet里面充满了记录，一条一条分门另类地复制了不同的org文件中。我承认这是重要的工作，无可避免。可是有些想法我在记录的时候就知道它应该是todo还是普通的笔记，能不能让它们自动归位呢？
+先贴配置文件：
+
+ (setq org-remember-templates
+ '(("TODO" ?t "* TODO %?\n %x\n %a" "~/doc/org/home.org" "Tasks")
+ ("IDEA" ?i "* IDEA %?\n %i\n %a" "~/doc/org/home.org" "Idea")
+ ))
+
+它的参数是这样的，”TODO”是这个模版的名,”?t”是快捷键，”* TODO %?\n %x\n %a”是整个模版体，然后是该模版要保存的文件，保存后的项目在文件中处于哪个父节点下面(如果没有会自动新建)。
+
+这样当你按下F12（这是我的快捷键）时，会看到buffer被切分成两块，下面出现一个rememeber fuffer。以及一个输入提示，按我们之前的设定，出现两个快捷提示。
+这时按下“t”,在remember buffer中，会自动接模版体的格式显示出补好的TODO,第一行是“* TODO”，第二行是%x，%x是你触发remember时kill ring（类似于剪贴板）中的内容。最后一行是%a，一个指向你触发remember的地方的link。
+这时如果你按下”C-c C-c”保存，这一条TODO项目将会被送到”~/doc/org/home.org”文件中的”Tasks”条目下面。
+
+** 使用TODO
+C-c C-t 将当前项的状态在（unmarked）->TODO->DONE 之间循环切换
+C-c / t 在稀疏树中显示 TODO 项，同时显示 TODO 项和它们所在的层次的标题
+C-c a t 显示全局 TODO 列表，将从所有的议程文件中收集 TODO 项到一个缓冲区中
+S-M-RET 在当前项下插入一个新的 TODO 项
+
+--------------------------------------------------------------------------------
+用 TODO 关键字来定义不同的状态，用以处理项，比如：
+#+begin_src lisp
+ (setq org-todo-keywords
+ '((sequence "TODO" "FEEDBACK" "VERIFY" "|" "DONE" "DELEGATED")))
+#+end_src
+竖直线将 TODO 关键字（还需要进一步的动作）和 DONE 状态（不需要进一步的动作）分隔开。如果你不给出竖直线，最后一个状态会作为 DONE 状态。设置之后，C-c C-t 就会将状态从 TODO 转换到 FEEDBACK，再转换到 VERIFY，最后到 DONE 和 DELEGATED。
+
+--------------------------------------------------------------------------------
+有时你可能希望同时使用几个不同的 TODO 状态集合。例如，你可能想要一个基本的 TODO/DONE，以及一个修改 bug 的工作流程和一个隔开的状态来表示取消的项目（既还是 DONE，也不需要进一步的动作），你可以这样设置：
+#+begin_src elisp
+ (setq org-todo-keywords
+ '((sequence "TODO(t)" "|" "DONE(d)")
+ (sequence "REPORT(r)" "BUG(b)" "KNOWNCAUSE(k)" "|" "FIXED(f)")
+ (sequence "|" "CANCELED(c)")))
+#+end_src
+关键字应该各不相同，这样对于一个选项 Org 才知道该用哪个状态序列（集合）。例子中也给出了快速使用一个关键字的方法，就是在关键字后面括号中给出快捷字母——当用 C-c C-t时，会询问，让你输入一个字母。
+
+要定义只在一个文件中有效的 TODO 关键字，可以在文件中任意地方给出下面的文本：
+#+begin_src org
+ ,#+TODO: TODO(t) | DONE(d)
+ ,#+TODO: REPORT(r) BUG(b) KNOWNCAUSE(k) | FIXED(f)
+ ,#+TODO: | CANCELED(c)
+#+end_src
+当改变这些行中的一行后，光标停留在改变行上，用 C-c C-c 让改变生效。
+
+--------------------------------------------------------------------------------
+很多时候将一个大的任务分成几个的易于完成的小任务是明智的，你可以通过在TODO项目下新建一个大纲树，并在子树上标记子任务来实现这个功能。
+为了能对已经完成的任务有个大致的了解，你可以在标题的任何地方插入‘[/]’或者‘[%]’。当每个子任务的状态变化时，或者当你在标记上按 C-c C-时，这些标记状态也会随之更新。例如：
+#+begin_src org
+ * Organize Party [33%]
+ ** TODO Call people [1/2]
+ *** TODO Peter
+ *** DONE Sarah
+ ** TODO Buy food
+ ** DONE Talk to neighbor
+#+end_src
+
+当纯文本中的项以‘[]’开头时，就会变成一个复选框。
+复选框不会包含在全局 TODO 列表中，所以它们很适合地将一个任务划分成几个简单的步骤。下面是一个复选框的例子：
+#+begin_src org
+ ,* TODO Organize party [1/3]
+ , - [-] call people [1/2]
+ , - [ ] Peter
+ , - [X] Sarah
+ , - [X] order food
+ , - [ ] think about what music to play
+#+end_src
+复选框是分层工作的。所以如果一个复选框项目如果还有子复选框，触发子复选框将会使该复选框变化以反映出一个、多个还是没有子复选框被选中。
+
+C-c C-c 触发复选框的状态或者（加上前缀）触发复选框的的存在状态
+M-S-RET 增加一个带有复选框的项。这只在光标处于纯文本列表项中才起使用
+
+--------------------------------------------------------------------------------
+最基本的日志功能是跟踪一个特定项目的完成。这可以这样实现：
+#+begin_src elisp
+ (setq org-log-done 'time)
+#+end_src
+这时当你将一个项目从一个 TODO（未完成）状态改变为一个完成状态时，标题下面就会插入一行 “CLOSED:[timestamp]”。如果你想和时间戳一起作一个记录，用：
+#+begin_src elisp
+ (setq org-log-done 'note)
+#+end_src
+这时会提示你输入一个记录（note），并将它保存在标题为“Closing Note”项目之下。
+
+--------------------------------------------------------------------------------
+你可能想跟踪 TODO 状态的变化。可以只记录一个时间戳，也可以为变化作一个带时间戳的记录。记录会被插入到标题之后形成列表。当有很多记录之后，你可能希望将记录取出放到抽屉里。通过定制变量 org-log-into-drawer 可以实现这个功能。
+对于状态记录，Org 可以实现基于每个状态关键字的设置。实现方法是在每个后的括号中指定“！”（记录时间戳）或“@”（作一个记录）。例如：
+#+begin_src org
+ ,#+TODO: TODO(t) WAIT(w@/!) | DONE(d!) CANCELED(c@)
+#+end_src
+将会设置 TODO 关键字和快速访问字母，以及当一个项目设为 DONE 时，会记录时间戳，当状态变为 WAIT 或 CANCELED 时，会作一个记录。这个语法也适用于变量 org-todo-keywords。
+
+--------------------------------------------------------------------------------
+如果你广泛地使用 Org 模式，这样你就会有大量的 TODO 项。给它们设定优先级就很有必要。可以在 TODO 项的标题中加入一些标记（cookie）来设置它们的优先级，像这样：
+#+begin_src org
+ ,*** TODO [#A] Write letter to Sam Fortune
+#+end_src
+Org模式支持三个优先级别：’A‘、’B‘和’C‘。’A‘是最高级别，如不指定，’B‘是默认的。优先级只在议程中有用。
+
+C-c , 设置当前标题的优先级
+S-UP/Down 增加/减少当前标题的优先级
+
+--------------------------------------------------------------------------------
+用org-mode来做TODO管理，那么无法避免的是，随着时间的流逝，被DONE的事件会越来越多，那么TODO被会被夹杂在DONE之间，难以查找。同时，由于后期回顾的需要，你也不想简单地将DONE事件删除掉。这个时候，你就需要归档命令了。归档，就是把你不想天天看到的东西，放到你看不到了，或者不怎么影响你的注意力的地方去。org-mode提供了两种归档方式。
+
+内部归档
+内部归档是在本文件内部给特定子树打上 ACHIVED 标签或者移动到名为 ACHIVED 的子树中去并打上标签。这个被认为是 ACIVED 的子树，会被移动了本级子树的最末端。
+C-c C-x a 将某一个节点打上ARCHIVE标签
+C-c C-x A 将当前节点归入一个名为Archive的子树中
+ 并且这个子树是位于当前级别子树的最下方
+
+外部归档
+外部归档是指把子树移动到另一个org文件中去。文件名可以自定义。默认情况下，归档的子树会被移动到名为“当年文件名_archived”的文件中去。
+C-c C-x C-s 把当前的节点移到archived文件中去。
+
+--------------------------------------------------------------------------------
+周期性 TODO
+这我觉得是一个必不可少的功能……
+只要对任务开始日期稍加修改，Org Mode 就能够管理周期性代办事项。比如周四要开会，可以设置如下代办事项：
+ * TODO 开会
+ SCHEDULED: <2009-01-22 四>
+如果是每周四都开会，就改写成如下的样子：
+ * TODO 开会
+ SCHEDULED: <2009-01-22 四 +1w>
+1w表示每周，另外1d表示每天，1m表示每月。对于周期性的任务， C-c C-t 每次将开始日期修改为相应的下一次开始日期，并保持 TODO 状态不变。
+
+通常情况下，任务开始日期总是严格地按照预定间隔变动，但是当我们需要忽略 掉已经过期的日期时，就可以使用 ++ 或者 .+ 来修饰时间间隔，如
+ <2009-01-22 四 ++1w>
+的下一次日期一定是今天之后的第一个星期四，而
+ <2009-01-22 四 .+1w>
+的下一次日期是按今天算起的下一个星期，也就是说，不一定是星期四；如果今天是星期二，那么下一次开始日期就是星期二。
+
+** 议程文件认识
+所谓议程，简单说就是比如你今天晚上计划好明天要做到事情，并添加到TODO文件（前提是文件已经加入到议程文件列表），等到第二天你只需要打开议程界面就可是知道今天应该做什么……
+
+C-c [ 将当前文件加入到议程文件列表中
+ 如果文件已经在列表中，会被移到前面带有前缀时，文件添加/移到到后面
+C-c ] 将当前文件从议程文件列表中删除
+C-, 遍历议程文件列表，依次访问其中的每一个文件
+
+C-c a M-x org agenda 打开议程调度器
+ a 日历式的议程
+ t/T TODO 项的列表，T 可选择TODO关键字
+ m/M 匹配某个标签表达式的标题的列表，可匹配属性
+ L 给出 Org 文件中所有带时间戳条目的排序视图
+ 带有 C-u 前缀时，没有完成的 TODO 项也列在当前日期下
+ s 通过关键字和/或正则表达式选中的条目的列表
+
+Org 可以跟 Emacs 的约会提醒功能结合。想添加议程文件中的约会提醒，可以使用命令 org-agenda-to-appt。
+
+自定义搜索的主要用途是对于频繁使用的搜索进行快捷键绑定，从而快捷地创建议程缓冲区或者稀疏树（当然后者只涵盖当前缓冲区的内容）。
+自定义的命令是用变量 org-agenda-custom-commands 来配置的。你可以用 C-c a C 来定制这个变量。也可以直接在 ”.emacs“ 中用 Emacs lisp 来设置。下面的例子包含了所有合法的搜索类型：
+#+begin_src elisp
+ (setq org-agenda-custom-commands
+ '(("w" todo "WAITING")
+ ("u" tags "+boss-urgent")
+ ("v" tags-todo "+boss-urgent")))
+#+end_src
+意思即为：
+C-c a w 对于包含关键字“WAITING”的 TODO 项的全局搜索
+C-c a u 对于带有标签“:boss:”而不含标签“:urgent:”的标题的全局标签搜索
+C-c a v 同搜索 C-c a u，但搜索范围只限于同时也是 TODO 项的标题
+
+--------------------------------------------------------------------------------
+议程缓冲区中的条目链接到了它们的源 Org 或者日记文件。有一些命令可以用来显示和跳转到条目的源位置，也可以从视图缓冲区中编辑源文件。
+
+n 下一行
+p 上一行
+<space> 在另一个窗口中显示条目的源位置，带前缀使得整个条目在大纲中可见，而不只是标题
+<TAB> 在另一个窗口中条目的准确源位置
+<Enter> 转到条目的源位置并删除其它的窗口
+
+o 删除其他窗口
+d/w 切换到日/周视图
+f/b 时间前移或者后移显示，例如显示了一周的内容，切换到下/上一周
+. 转到今天
+j 询问日期并转到那天
+r/g 重新构造议程，以反映最新状态
+s 保存当前 Emacs 会话的所有 Org 缓冲区和ID的地址
+l 触发日志模式（Logbook mode）
+ 在日志模式中，当记录功能打开（变量 org-log-done）时标记为 DONE 的条
+ 目，以及在那天计时的条目，都会显示在议程中
+
+0-9 数字参数
+t 修改议程和 org 文件中条目的TODO状态
+C-k 删除当前的议程条目以及源文件中它的整个子树
+a C-c C-x C-a ，用在 org-archive-default-command 中设置的默认归档命令对当前的条目对应的整个树进行归档
+$ C-c C-x C-s ，归档当前标题对应的树
+C-c C-d 为条目设置截止期限
+I 对当前条目开始计时
+O/X 暂停最近开始的计时
+J 在另一个窗口中跳转正在进行的计时
+S-RIGHT/LEFT 将与当前行相关的时间戳改变一天
+
+
+** org-mode 常用键
+| 动作             | 命令                                    | 快捷键    | Alternative     |
+| 向上移动子树     | org-metaup / org-move-subtree-up        | M-up      | C-c C-x u       |
+| 向下移动子树     | org-metadown / org-move-subtree-down    | M-down    | C-c C-x d       |
+| 降级子树         | org-shiftmetaright / org-demote-subtree | S-M-right | C-c C-x r       |
+| 提升子树         | org-shiftmetaleft / org-promote-subtree | S-M-left  | C-c C-x l       |
+| 降级标题         | org-metaright / org-do-demote           | M-right   | C-c C-x <right> |
+| 提升标题         | org-metaleft / org-do-promote           | M-left    | C-c C-x <left>  |
+| 合上或者展开子树 | org-cycle (while on headline)           | TAB       |                 |
+| 合上或者展开任何 | org-shifttab (org-cycle)                | S-TAB     | C-u TAB         |
+** org-mode 列表(Plain list)
+每一个列表项以“-"开始
+例如
+#+begin_example
+- this is a list
+- that is a list
+#+end_example
+在列表执行C-c -,可以切换列表的标识符号
+如下
+#+begin_example
+1) this is a list
+2) that is a list
+#+end_example
+
+M-up
+M-down
+上下移动列表项的顺序
+
+更多见[[http://orgmode.org/manual/Plain-lists.html][org site]]
+
+* 时间管理
+
+ ** 创建TODO项目
+    按C-S-RET(Ctrl-Shift-回车）,屏幕上就出现了”* TODO”，直接在后面填写内容吧。想加时间？C-c C-s,选好一个时间再敲回车。
+ ** 更改TODO项目的状态
+    C-c C-t是在定义的状态中循环，而C-u C-c C-t可以指定一个状态。 
+    S-Right 和 S-Left也可以在定义的状态中循环。 
+    C-c a t可以显示所有的TODO项目，能从所有agenda file里非DONE状态的TODO项目都显示出来 
+    S-M RET可以在当前项目下插入一个新的TODO 项目（与当前项目同一级别）
+ ** 更改TODO项目的优先级
+    S-Up/Down 可以增减一个TODO项目的优先级
+
+ ** 增加TODO Item的状态
+
+默认情况下，TODO Item只有两种状态，TODO和DONE。我们可以在.emacs中配置Org，以设置更多的中间状态，例如： 用下面的方法，我们可以增加一个TODO Item的中间状态，这些状态是顺序的，通常是工作流中的不同状态。 
+
+(setq org-todo-keywords
+  '((sequence "TODO" "FEEDBACK" "VERIFY" "|" "DONE" "DELEGATED")))
+
+ 另一种可能性是，每个TODO Item可能有不同的类型，例如，公司的TODO Item，家里的TODO Item。或者，我们可能把TODO Item分配给不同的人，因此我们可以自定义TODO keywords以表示一个TODO Item的不同类型。 
+(setq org-todo-keywords '((type "Fred" "Sara" "Lucy" "|" "DONE")))
+
+ 有的时候我们可能对不同的TODO Item有不同的状态，例如，交手机费这类简单的事情只有TODO和DONE两种状态，但是对于解决一个程序的bug可能有REPORT, BUG, KNOWNCAUSE, FIXED等状态。这样我们需要定义不同的状态子集(subset)： 
+(setq org-todo-keywords
+      '((sequence "TODO" "|" "DONE")
+        (sequence "REPORT" "BUG" "KNOWNCAUSE" "|" "FIXED")
+        (sequence "|" "CANCELED"))) 
+
+ C-S-Right/Left可以从一个子集跳转到另一个子集，而S-RIGHT/LEFT会在所有状态之间遍历。 
+
+ 我们还可以用快捷键来迅速切换一个TODO Item的状态。 
+(setq org-todo-keywords
+      '((sequence "TODO(t)" "|" "DONE(d)")
+        (sequence "REPORT(r)" "BUG(b)" "KNOWNCAUSE(k)" "|" "FIXED(f)")
+        (sequence "|" "CANCELED(c)")))  
+
+ 上面说的都是全局的设置，我们也可以针对一个文件进行设置，如： 
+#+TODO: TODO FEEDBACK VERIFY | DONE CANCELED
+(这里也可以用 #+SEQ_TODO，和#+TODO效果是一样的）
+对于类型的设置：
+#+TYP_TODO: Fred Sara Lucy Mike | DONE
+对于多个子集的设置：
+#+TODO: TODO | DONE
+#+TODO: REPORT BUG KNOWNCAUSE | FIXED
+#+TODO: | CANCELED
+
+* 进度记录 
+
+ 最基本的就是记录当一个Item被标记为DONE时的时间戳了，另外，在一个Item完成后，可能会想要写点心得或者备注什么的，可以用如下配置实现： 
+#+begin_example
+(setq org-log-done 'time)
+(setq org-log-done 'note)
+#+end_example
+
+* 把项目拆分成子项目 
+
+ 很简单，高一级的TODO下所有的低级TODO就是它的子项目，在各级TODO的标题的任意位置插入[/] 或者[%]即会根据其子项目的完成情况自动更新进度。 
+
+ 如果想要当所有子项目都标记为Done的时候，父项目也被标记为Done，可以在配置中添加如下设置： 
+#+begin_example
+(defun org-summary-todo (n-done n-not-done)
+  "Swith entry to DONE when all subentries are done, to TODO otherwise."
+  (let (org-log-done org-log-states)   ; turn off logging.
+    (org-todo (if (= n-not-done 0) "DONE" "TODO"))))
+#+end_example
+ 另一种办法是，如果有大量的字项目，则可以使用check box来标记。 
+
+ 每一个item前只要加上一个[ ] 就变成了check box item, 这在TODO List Item里也是一样的。在TODO List里，C-c C-c可以切换check box item的选中与未选中的状态。 
+
+ ** TODO Test [1/3]
+ - [X] Only a test
+ - [ ] It's another test    
+ - [ ] Third test
+ 和Check Box Item相关的快捷键： C-c C-c 切换Check Box的状态 M-S-Ret 插入新的
+
+* 时间和日期 
+
+ 在TODO Item上我们通常还需要标记时间和日期，这里就包含了： 
+ 普通的时间和日期，比如该TODO ITEM的开始时间，例如下午三点开会等。 
+#+begin_example
+ <2010-09-18 Sat 15:00>
+#+end_example
+ 每天，每周，每月，每年都重复的时间和日期，比如每周去一次健身房之类的。 
+ repeater标记分为日(d)，周(w)，月(m)，年(y)四种,同时支持在时间关键字前面添加数字，代表每n个时间周期。
+ 比如+3d表示每隔三天，+3w表示每隔三周等。
+#+begin_example
+ * pick up Sam at school ＜2007-05-16 Wed 12:30 +1w＞
+#+end_example
+ 表示一段时间
+#+begin_example
+ * 开会 <2004-08-23 Mon>--<2004-08-26 Thu>
+#+end_example
+ 仅仅表示一段时间而已，不需要在其他模式中引用。（Inactive Timestamp） 
+#+begin_example
+ * 今天吃饭吃到苍蝇了 [2010-09-28 Tue]
+#+end_example
+  C-c > 打开Emacs Calendar 
+  C-c < 把Emacs Calendar光标所在的日期插入到org mode光标所在处。
+  C-c C-y 当光标放在time range上时，计算两个timestamp之间的天数。 
+  C-c ! 用来添加一个inactive 的timestamp. 
+
+  对于TODO item，我们常常需要指定什么时候开始这项工作，什么时候是截止日期，在org中分别是SCHEDULED 和DEADLINE. 
+#+begin_example
+ *** TODO write article about the Earth for the Guide
+ The editor in charge is [[bbdb:Ford Prefect]]
+  DEADLINE: ＜2004-02-29 Sun＞
+
+ *** TODO Call Trillian for a date on New Years Eve.
+  SCHEDULED: ＜2004-12-25 Sat＞
+#+end_example
+ C-c C-d 插入一个Deadline
+ C-c C-s 插入一个Schedule
+ C-c / d 建立一个包含所有deadline的TODO项目的sparse tree
+ C-c / b 建立一个包含deadline在指定日期前的TODO项目的sparse tree
+ C-c / a 建立一个包含deadline在指定日期后的TODO项目的sparse tree
+
+
+任务计时
+你需要做的就是在开始时按”C-c C-x C-i”开始计时，在需要结束计时时按”C-c C-x C-o”即可
+
+* 设置标签 
+
+ 首先当然可以手动在标题后设置标签，键入:后，M-Tab自动提供标签的补齐。 
+
+ 也可以用命令插入标签： 
+ C-c C-q 为当前标题插入标签
+ C-c C-c 当光标在某标题栏时，为该标题插入标签（此时和C-c C-q功能一样） 
+
+ 默认情况下，org会动态维护一个Tag列表，即当前输入的标签若不在列表中，则自动加入列表以供下次补齐使用。 
+
+ 另一种方式是在配置文件中配置变量org-tag-alist全局性地预设一些tag，然后在org文件中设置： 
+#+begin_example
+#+TAGS: @work @home @tennisclub
+#+TAGS: laptop car pc sailboat
+#+end_example
+ 这样，在该文件中只能使用个以上定义的7个标签。 
+
+ 如果想既使用预设的标签，又动态增加，则必须在文件中增加一个空的TAGS option. 
+#+begin_example
+#+TAGS:
+#+end_example
+ 在org中我们还可以给tag定义快捷键。对于全局的定义可以写在配置文件中： 
+#+begin_example
+(setq org-tag-alist '(("@work" . ?w) ("@home" . ?h) ("laptop" . ?l)))
+#+end_example
+
+ 这样要标记@work，@home，laptop就只需要按w, h, l键即可。如果不是全局的定义，即指针对一个文件有效，我们可以在文件中定义，其中，\n表示换行，等效于分开写在两个TAGS里。 
+#+begin_example
+#+TAGS: @work(w) @home(h) @tennisclub(t) \n laptop(l) pc(p)
+#+end_example
+
+ 假如我们要让@work, @home, @tennisclub变成互斥的，则可以定义： 
+#+begin_example
+#+TAGS: { @work(w) @home(h) @tennisclub(t) } laptop(l) pc(p)
+#+end_example
+
+ 这也可以在配置文件中定义，但需要用dummy tag :startgroup和:endgroup包围起来。 
+#+begin_example
+(setq org-tag-alist '((:startgroup . nil)
+                      ("@work . ?w) ("@home" . ?h)
+                      ("@tennisclub" . ?t)
+                      (:endgroup . nil)
+                      ("laptop" . ?l) ("pc" . ?p)))
+#+end_example
+ C-c \ 可以用来查找某个tag下的所有项目
+ C-c / m 建立符合某tag的sparse tree
+ C-c a m 从所有agenda file里建立符合某tag的全局性列表
+ C-c a M 同上，但只检查TODO item或org-tags-match-list-sublevels里指定要检查的项目。
+
+*** agent view
+(C-c a)是打开agenda view的命令，而后面的m a可以看作是参数，用于打开不同的视图。
+如前所见，(C-c a a)是一种日历式的视图。
+(C-c a m)是一种可以指定Tags显示的视图。
+当然还有很多，按(C-c a)之后，界面上会有提示。
+
+* 归档
+如果你用org-mode来做TODO管理，那么无法避免的是，随着时间的流逝，被DONE的事件会越来越多，那么TODO被会被夹杂在DONE之间，难以查找
+。同时，由于后期回顾的需要，你也不想简单地将DONE事件删除掉。这个时候，你就需要归档命令了。归档，就是把你不想天天看到的东西，放到你看不到了，
+或者不怎么影响你的注意力的地方去。org-mode提供了两种归档方式
+
+内部归档
+
+内部归档是在本文件内部给特定子树打上ACHIVED标签或者移动到名为achived的子树中去并打上标签。
+
+这个被认为是ACIVED的子树，会被移动了本级子树的最末端。
+ 例如有这么一个子树，由三个TODO项目组成。
+ * blog
+   ** TODO 匈牙利命名法
+   ** TODO org-mode 归档
+   ** TODO BillG审查
+ C-c C-x a
+ 将某一个节点打上ARCHIVE标签。
+   * blog
+   ** TODO 匈牙利命名法
+   ** TODO org-mode 归档						    :ARCHIVE:
+   ** TODO BillG审查
+
+C-c C-x A
+ 将当前节点归入一个名为Archive的子树中，并且这个子树是位于当前级别子树的最下方。
+ * blog
+ ** TODO org-mode 归档						    :ARCHIVE:
+ ** TODO BillG审查
+ ** Archive							    :ARCHIVE:
+ *** TODO 匈牙利命名法
+
+外部归档
+外部归档是指把子树移动到另一个org文件中去。文件名可以自定义。默认情况下，归档的子树会被移动到名为“当年文件名_archived”的文件中去。
+C-c C-x C-s是把当前的节点移到archived文件中去。

@@ -1,0 +1,34 @@
+#+OPTIONS: "\n:t"
+/贵在坚持/
+
+* 常用功法
+** 背部撞墙
+** 拍手功
+** 传统固肾功
+** 脚棍
+   1、滚棍时一定要用意不用力
+** 按摩腹部
+** 压脐
+** 取嚏法
+
+* 脑力恢复
+http://www.jiese.org/bbs/forumdisplay.php?fid=117    
+** 倒立
+** 按摩头部,用梳子,或者牛角
+
+* 使用google code 保存知识库和自己项目的代码
+# Project members authenticate over HTTPS to allow committing changes. 
+  svn checkout https://yourprj.googlecode.com/svn/trunk/ yourprj --username youraccount
+  When prompted, enter your generated googlecode.com password.
+
+  Google code 获取密码页打不开的解决办法：
+  在文件 C:\Windows\System32\drivers\etc\hosts 中加入 66.249.89.104 code.google.com
+  其中ip为ping www.google.com所得地址
+  我的https://kernel-code-anlysis.googlecode.coym/svn/trunk/
+  我现在的是：cd7rV8Ba4WJ2
+
+* 做个认真的人
+  已经三十多岁了，发现自己中庸的性格，让自己学东西，做事情，总缺乏一种“较真”的劲头。
+  其实事情都怕认真，认真起来。
+  有多少时间再恍惚中渡过？ 而这些时间，既没有玩，也没有工作。
+* 改旧习惯

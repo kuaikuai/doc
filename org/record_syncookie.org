@@ -1,0 +1,495 @@
+
+* syncookie bug解决方法：
+系统支持的最大syn并发数 SYN_RECV状态队列的数量
+sysctl -n net.ipv4.tcp_max_syn_backlog=40960
+
+syncookie机制关闭
+sysctl -n net.ipv4.tcp_syncookies=0
+
+
+sysctl -n net.core.somaxconn=8192 
+
+nginx server.conf中listen参数中添加  backlog=8192
+
+
+
+SYN_RECV状态数最大值 由 net.ipv4.tcp_max_syn_backlog、net.core.somaxconn 和 listen()函数中第二个参数int backlog  三个值共同决定.
+listen()中的backlog，对于nginx 来说就是其中server.conf的backlog设置。
+
+
+
+listen() backlog 与somaxconn关系
+#+begin_src c
+//file:net/socket.c
+SYSCALL_DEFINE2(listen, int, fd, int, backlog)
+{
+	struct socket *sock;
+	int err, fput_needed;
+	int somaxconn;
+ 
+	sock = sockfd_lookup_light(fd, &err, &fput_needed);
+	if (sock) {
+		somaxconn = sock_net(sock->sk)->core.sysctl_somaxconn;
+		//上限不超过somaxconn
+		if ((unsigned)backlog > somaxconn)
+			backlog = somaxconn;
+ 
+		err = security_socket_listen(sock, backlog);
+		if (!err)
+			err = sock->ops->listen(sock, backlog);
+ 
+		fput_light(sock->file, fput_needed);
+	}
+	return err;
+}
+#+end_src
+
+
+# ss -antp | grep LI
+State      Recv-Q Send-Q        Local Address:Port          Peer Address:Port
+LISTEN     0      511                       *:8000                     *:*
+LISTEN     0      50                       :::8161                    :::*
+LISTEN     0      128                      :::9090                    :::*
+LISTEN     0      511                       *:8003                     *:*
+LISTEN     0      10                        *:7011                     *:*
+LISTEN     0      128        ::ffff:127.0.0.1:59460                   :::*
+LISTEN     0      128                      :::50020                   :::*
+LISTEN     0      128                      :::10020                   :::*
+LISTEN     0      10                        *:7013                     *:*
+LISTEN     0      10              10.0.64.129:6021                     *:*
+LISTEN     0      50                       :::48999                   :::*
+LISTEN     0      50                        *:3306                     *:*
+LISTEN     0      128                       *:6379                     *:*
+LISTEN     0      50                       :::1099                    :::*
+LISTEN     0      128                      :::50060                   :::*
+LISTEN     0      128                      :::111                     :::*
+LISTEN     0      128                       *:111                      *:*
+LISTEN     0      8192                      *:8080                     *:*
+
+ Send-Q 是什么含义？
+
+** 实验
+  net.ipv4.tcp_max_syn_backlog = 8192
+  net.core.somaxconn = 8192
+
+  使用hping2 对172.16.132.234进行syn大量半链接请求，伪装ip
+  当以每秒10个请求的速度测试，使用
+  ss -ant | grep SYN-RECV | wc
+  发现数目在1860一下波动。
+
+*** 分析
+ 
+  使用ss -anto | grep SYN-RCV 
+  看到类似下面信息：
+  SYN-RECV   0      0            172.16.132.234:8080        192.168.10.244:2851   timer:(on,5.9ms,1)
+  SYN-RECV   0      0            172.16.132.234:8080        192.168.10.244:2851   timer:(on,11s,2)
+  大概可以看出syn timer的超时时间
+  6、12、24、48、96 
+
+  6+12+24+48+96 = 186s
+ 
+  186 * 10 = 1860
+
+  每秒10个syn，发现处于SYN-RCV状态的连接数1860左右
+
+  每秒100个syn， 发现处于SYN-RCV状态的链接数6145=2048*3+1
+Jul 29 16:31:03 linux-129 kernel: [8117810.098021] TCP: drop open request from 192.168.10.244/36988
+
+  发现tcp_v4_conn_request代码：
+		/* Kill the following clause, if you dislike this way. */
+		else if (!sysctl_tcp_syncookies &&
+			 (sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(sk) <
+			  (sysctl_max_syn_backlog >> 2)) &&
+
+  sysctl_tcp_syn_backlog = 8192
+  queue_len = 6145
+
+这个条件满足了。
+(sysctl_max_syn_backlog - inet_csk_reqsk_queue_len(sk) < (sysctl_max_syn_backlog >> 2))
+
+也就是sysctl_max_syn_backlog实际运行连接数是其指定的数字的3/4 + 1
+
+
+当以每秒1000个请求的速度发送，发现SYN-RECV个数为16384, 恰好为8192*2
+  发现tcp_v4_conn_request代码：
+	/* TW buckets are converted to open requests without
+	 * limitations, they conserve resources and peer is
+	 * evidently real one.
+	 */
+	if (inet_csk_reqsk_queue_is_full(sk) && !isn) {
+		if (net_ratelimit())
+			syn_flood_warning(skb);
+#ifdef CONFIG_SYN_COOKIES
+		if (sysctl_tcp_syncookies) {
+			want_cookie = 1;
+		} else
+#endif
+		goto drop;
+	}
+
+ static inline int inet_csk_reqsk_queue_is_full(const struct sock *sk)
+ {
+     return reqsk_queue_is_full(&inet_csk(sk)->icsk_accept_queue);
+ }
+
+static inline int reqsk_queue_is_full(const struct request_sock_queue *queue)
+{
+	return queue->listen_opt->qlen >> queue->listen_opt->max_qlen_log;
+}
+假设max_qlen_log为n,那么 2^n <= backlog
+
+  由于backlog = 8192
+  所以只有当qlen >= 8192*2时，reqsk_queue_is_full才为真。
+
+
+** 总结
+   假设 max_qlen_log为n
+   当关闭syncookies, req队列长度超过了2^(n+1)时，syn request被丢掉。
+   如果没有超过，那么当超过sysctl_max_syn_backlog *3/4时，丢掉。
+
+** 临时措施：
+　　降低重试次数：
+   sysctl -w net.ipv4.tcp_synack_retries=3
+   增大队列
+   sysctl -w net.core.somaxconn=262144
+   sysctl -w net.ipv4.tcp_max_syn_backlog=262144
+
+* 关于半连接队列的释疑 
+
+分类： LINUX
+
+ 关于半连接队列的释疑
+
+ 1、到底那个是半连接队列
+ /** struct listen_sock - listen state
+  *
+  * @max_qlen_log - log_2 of maximal queued SYNs/REQUESTs
+  */
+ struct listen_sock {
+     u8            max_qlen_log; /*2^max_qlen_log is the length of the accpet queue, max of max_qlen_log is 10. (2^10=1024)*/
+     /* 3 bytes hole, try to use */
+     int            qlen; /* qlen is the current length of the accpet queue*/
+     int            qlen_young;
+     int            clock_hand;
+     u32            hash_rnd;
+     u32            nr_table_entries; /*nr_table_entries is the number of the syn_table,max is 512*/
+     struct request_sock    *syn_table[0];
+ };
+ 里面有几个关键的成员变量：max_qlen_log、qlen和syn_table。注意syn_table是一个零数组。
+
+ 跟踪listen系统调用：
+ inet_listen
+ inet_csk_listen_start
+ reqsk_queue_alloc
+
+ 在reqsk_queue_alloc中：
+     const int lopt_size = sizeof(struct listen_sock) +
+                   nr_table_entries * sizeof(struct request_sock *);
+     struct listen_sock *lopt = kzalloc(lopt_size, GFP_KERNEL);
+ 我们发现这里进行了分配内存，分配了nr_table_entries个struct request_sock *。
+ 对于nr_table_entries，我们可以往回追踪：
+ err = inet_csk_listen_start(sk, TCP_SYNQ_HSIZE);
+ #define TCP_SYNQ_HSIZE        512    /* Size of SYNACK hash table */
+
+ 跟踪SYN数据包的处理，在tcp_v4_conn_request中，最后调用了inet_csk_reqsk_queue_hash_add函数：
+ void inet_csk_reqsk_queue_hash_add(struct sock *sk, struct request_sock *req,
+                    unsigned long timeout)
+ {
+     struct inet_connection_sock *icsk = inet_csk(sk);
+     struct listen_sock *lopt = icsk->icsk_accept_queue.listen_opt;
+     const u32 h = inet_synq_hash(inet_rsk(req)->rmt_addr, inet_rsk(req)->rmt_port,
+                      lopt->hash_rnd, lopt->nr_table_entries);
+
+     reqsk_queue_hash_req(&icsk->icsk_accept_queue, h, req, timeout);
+     inet_csk_reqsk_queue_added(sk, timeout);
+ }
+
+ reqsk_queue_hash_req将新建的request_sock添加到reqsk_queue中：
+ static inline void reqsk_queue_hash_req(struct request_sock_queue *queue,
+                     u32 hash, struct request_sock *req,
+                     unsigned long timeout)
+ {
+     struct listen_sock *lopt = queue->listen_opt;
+
+     req->expires = jiffies + timeout;
+     req->retrans = 0;
+     req->sk = NULL;
+    req->dl_next = lopt->syn_table[hash];
+
+     write_lock(&queue->syn_wait_lock);
+    lopt->syn_table[hash] = req;
+     write_unlock(&queue->syn_wait_lock);
+ }
+
+ inet_csk_reqsk_queue_added增加连接请求队列的计数，必要是设置计数器：
+ static inline void inet_csk_reqsk_queue_added(struct sock *sk,
+                           const unsigned long timeout)
+ {
+     if (reqsk_queue_added(&inet_csk(sk)->icsk_accept_queue) == 0)
+         inet_csk_reset_keepalive_timer(sk, timeout);
+ }
+ static inline int reqsk_queue_added(struct request_sock_queue *queue)
+ {
+     struct listen_sock *lopt = queue->listen_opt;
+     const int prev_qlen = lopt->qlen;
+
+     lopt->qlen_young++;
+    lopt->qlen++;
+     return prev_qlen;
+ }
+
+ 其他的几个数据结构：
+ struct inet_connection_sock {
+     /* inet_sock has to be the first member! */
+     struct inet_sock      icsk_inet;
+    struct request_sock_queue icsk_accept_queue;
+     struct inet_bind_bucket      *icsk_bind_hash;
+     unsigned long          icsk_timeout;
+      struct timer_list      icsk_retransmit_timer;
+      struct timer_list      icsk_delack_timer;
+     __u32              icsk_rto;
+     __u32              icsk_pmtu_cookie;
+     const struct tcp_congestion_ops *icsk_ca_ops;
+     const struct inet_connection_sock_af_ops *icsk_af_ops;
+     unsigned int          (*icsk_sync_mss)(struct sock *sk, u32 pmtu);
+     __u8              icsk_ca_state;
+     __u8              icsk_retransmits;
+     __u8              icsk_pending;
+     __u8              icsk_backoff;
+     __u8              icsk_syn_retries;
+     __u8              icsk_probes_out;
+     __u16              icsk_ext_hdr_len;
+     struct {
+         __u8          pending;     /* ACK is pending               */
+         __u8          quick;     /* Scheduled number of quick acks       */
+         __u8          pingpong;     /* The session is interactive           */
+         __u8          blocked;     /* Delayed ACK was blocked by socket lock */
+         __u32          ato;         /* Predicted tick of soft clock       */
+         unsigned long      timeout;     /* Currently scheduled timeout           */
+         __u32          lrcvtime;     /* timestamp of last received data packet */
+         __u16          last_seg_size; /* Size of last incoming segment       */
+         __u16          rcv_mss;     /* MSS used for delayed ACK decisions       */ 
+     } icsk_ack;
+     struct {
+         int          enabled;
+
+         /* Range of MTUs to search */
+         int          search_high;
+         int          search_low;
+
+         /* Information on the current probe. */
+         int          probe_size;
+     } icsk_mtup;
+     u32              icsk_ca_priv[16];
+ #define ICSK_CA_PRIV_SIZE    (16 * sizeof(u32))
+ };
+
+ struct request_sock_queue {
+ /*Points to the request_sock accept queue, when after 3 handshake will add the request_sock from syn_table to here*/
+     struct request_sock    *rskq_accept_head;
+     struct request_sock    *rskq_accept_tail;
+     rwlock_t        syn_wait_lock;
+     u8            rskq_defer_accept;
+     /* 3 bytes hole, try to pack */
+    struct listen_sock    *listen_opt;
+ };
+
+ 因此，半连接队列在这里可以认为是icsk_accept_queue.listen_opt->syn_table，叫做连接请求队列。
+
+其实这里只需要注意一点就是，在接收到SYN包的时候，就已经创建了request_sock结构，存储在半连接队列中；当接收到ACK数据包后，将其从半连接队列转移到accept_queue中。如果我们为了修改内核而抵御SYN Flood攻击的话，我们完全可以在接收到ACK后，再创建request_sock结构，并直接链接到accept_queue里面。
+这里半连接队列为icsk_accept_queue.listen_opt->syn_table；accept_queue为icsk_accept_queue.rskq_accept_head。
+
+其实，可见半连接队列与accept_queue存储的都是request_sock，但是不同的是，半连接队列存储的是未完成三次握手时候的request_sock；而accept_queue则是完成三次握手的request_sock，此时的request中包含着已经建立的用于跟新的连接请求进行通信的sock结构(通常称为child sock)。
+
+ 2、半连接队列的长度
+ 跟踪inet_csk_reqsk_queue_is_full，发现会比较queue->listen_opt->qlen >> queue->listen_opt->max_qlen_log，看来关键在于max_qlen_log。
+ 发现reqsk_queue_alloc中：
+     for (lopt->max_qlen_log = 6; /*64*/
+          (1 << lopt->max_qlen_log) < sysctl_max_syn_backlog;
+          lopt->max_qlen_log++);
+
+ 我们在/proc/sys/net/ipv4/tcp_max_syn_backlog中会可以设置max_syn_backlog，这个就是我们可以设置的半连接队列的长度。
+ 默认是1024，那么max_qlen_log就是10了；加入我们设置成64，那么max_qlen_log就是6了，我们设置成128，就是7了；其他的依次类推。
+
+ 3、连接请求的数据流向
+ 在前面的分析中，SYN数据包的处理中，接收到SYN数据包，将会建立一个reqest_sock结构，添加到syn_table哈希表相应的表中。
+ 接收到ACK数据包后，跟踪tcp_v4_do_rcv，发现会调用tcp_v4_hnd_req。
+ 在tcp_v4_hnd_req中：
+ /* Check the request_sock is in the syn_table or not.
+ If the request_sock have been in the syn_table, then call tcp_check_req*/
+ /*If ACK in 3 handsharks, will find a request_sock in syn_table, then call tcp_check_req().*/
+     struct request_sock *req = inet_csk_search_req(sk, &prev, th->source,
+                                iph->saddr, iph->daddr);
+ /*Normal: Call    syn_recv_sock function(tcp_v4_syn_recv_sock)*/
+     if (req)
+         return tcp_check_req(sk, skb, req, prev);
+
+ 在tcp_check_req中：
+         /*ipv4_specific.syn_recv_sock = tcp_v4_syn_recv_sock*/
+         child = inet_csk(sk)->icsk_af_ops->syn_recv_sock(sk, skb,
+                                  req, NULL);
+         if (child == NULL)
+             goto listen_overflow;
+
+ /*Move the request_sock from the syn_table to accept_queue
+ Notes: syn_table isn't A hlist_header structure.*/
+         inet_csk_reqsk_queue_unlink(sk, req, prev);
+         inet_csk_reqsk_queue_removed(sk, req);
+
+         inet_csk_reqsk_queue_add(sk, req, child);
+         return child;
+
+ tcp_v4_syn_recv_sock会根据request_sock新建一个sock结构，并且进行一定的初始化，返回新建的sock结构。
+ 将request_sock从syn_table中移到accept_queue中。
+
+ static inline void inet_csk_reqsk_queue_add(struct sock *sk,
+                         struct request_sock *req,
+                         struct sock *child)
+ {
+     reqsk_queue_add(&inet_csk(sk)->icsk_accept_queue, req, sk, child);
+ }
+ static inline void reqsk_queue_add(struct request_sock_queue *queue,
+                    struct request_sock *req,
+                    struct sock *parent,
+                    struct sock *child)
+ {
+     req->sk = child;
+ /*Add the number of backlog, that not completed 3 handsharks but have connected the server.*/*/
+    sk_acceptq_added(parent);
+
+     if (queue->rskq_accept_head == NULL)
+         queue->rskq_accept_head = req;
+     else
+         queue->rskq_accept_tail->dl_next = req;
+
+     queue->rskq_accept_tail = req;
+     req->dl_next = NULL;
+ }
+
+ 4、accept系统调用的处理
+
+ 三次握手之后，request_sock已经在rskq_accept队列中了，等待accept系统调用取走。
+ static inline void sk_acceptq_removed(struct sock *sk)
+ {
+     sk->sk_ack_backlog--;
+ }
+
+ static inline void sk_acceptq_added(struct sock *sk)
+ {
+    sk->sk_ack_backlog++;
+ }
+ 这个时候，我们关注一个struct sock中的两个变量：
+     unsigned short        sk_ack_backlog; /*sk_ack_backlog is the socket number that not completed 3 handsharks but have connected the server.*/
+     unsigned short        sk_max_ack_backlog; /*sk_max_ack_backlog is the Max sk_ack_backlog, is assigned in the listen()*/
+ 其中，sk_ack_backlog是已经完成了三次握手，但是还没有被accept系统调用处理的连接请求数量；sk_max_ack_backlog就是我们经常熟悉的listen的参数。
+
+ 跟踪accept系统调用：
+ inet_csk_accept：
+     newsk = reqsk_queue_get_child(&icsk->icsk_accept_queue, sk);
+
+ static inline struct sock *reqsk_queue_get_child(struct request_sock_queue *queue,
+                          struct sock *parent)
+ {
+     struct request_sock *req = reqsk_queue_remove(queue);
+     struct sock *child = req->sk;
+
+     BUG_TRAP(child != NULL);
+
+    sk_acceptq_removed(parent);
+     __reqsk_free(req);
+     return child;
+ }
+
+ 注意这里free掉了在三次握手中建立的request_sock结构。
+
+ 5、防止溢出的两个链表检查
+ 在tcp_v4_conn_request中，对SYN包的处理过程中：
+
+     if (inet_csk_reqsk_queue_is_full(sk) && !isn) {
+ #ifdef CONFIG_SYN_COOKIES
+         if (sysctl_tcp_syncookies) {
+             want_cookie = 1;
+         } else
+ #endif
+         goto drop;
+     }
+
+     /* Accept backlog is full. If we have already queued enough
+      * of warm entries in syn queue, drop request. It is better than
+      * clogging syn queue with openreqs with exponentially increasing
+      * timeout.
+      */
+ /*If Accept Queue is full, Drop the packet*/
+     if (sk_acceptq_is_full(sk) && inet_csk_reqsk_queue_young(sk) > 1)
+         goto drop;
+
+ 这里面有两个队列的检查：request_sock队列和accept队列。
+ request_sock队列：
+ static inline int inet_csk_reqsk_queue_is_full(const struct sock *sk)
+ {
+     return reqsk_queue_is_full(&inet_csk(sk)->icsk_accept_queue);
+ }
+ static inline int reqsk_queue_is_full(const struct request_sock_queue *queue)
+ {
+     return queue->listen_opt->qlen >> queue->listen_opt->max_qlen_log;
+ }
+
+ accept队列：
+ static inline int sk_acceptq_is_full(struct sock *sk)
+ {
+     return sk->sk_ack_backlog > sk->sk_max_ack_backlog;
+ }
+
+ 其中关系到4个变量，其中两个是sock的成员变量，两个是request_sock_queue中listen_opt的变量。
+
+ max_qlen_log的初始化：
+ 在reqsk_queue_alloc中：
+     for (lopt->max_qlen_log = 6; /*64*/
+          (1 << lopt->max_qlen_log) < sysctl_max_syn_backlog;
+          lopt->max_qlen_log++);
+
+ sk_max_ack_backlog的初始化：
+ 在inet_listen中：
+         sk->sk_max_ack_backlog = backlog;
+ 注：sk_max_ack_backlog就是我们经常熟悉的listen的参数。
+
+ qlen的增加：
+tcp_v4_conn_request
+ inet_csk_reqsk_queue_hash_add
+ inet_csk_reqsk_queue_added
+ reqsk_queue_added
+
+ 注：跟踪SYN数据包的处理，在tcp_v4_conn_request中，最后调用了inet_csk_reqsk_queue_hash_add函数：
+     inet_csk_reqsk_queue_added(sk, timeout);
+ inet_csk_reqsk_queue_added增加连接请求队列的计数，必要时候设置计数器。
+ reqsk_queue_added：
+    lopt->qlen++;
+
+qlen的减少：
+ tcp_v4_hnd_req
+ tcp_check_req
+ inet_csk_reqsk_queue_removed
+ reqsk_queue_removed
+
+ 注：
+ 在inet_csk_listen_stop中：
+     /* Following specs, it would be better either to send FIN
+      * (and enter FIN-WAIT-1, it is normal close)
+      * or to send active reset (abort).
+      * Certainly, it is pretty dangerous while synflood, but it is
+      * bad justification for our negligence 8)
+      * To be honest, we are not able to make either
+      * of the variants now.            --ANK
+      */
+     reqsk_queue_destroy(&icsk->icsk_accept_queue);
+
+sk_ack_backlog的增加：
+ tcp_check_req
+inet_csk_reqsk_queue_add
+ reqsk_queue_add
+ sk_acceptq_added
+
+sk_ack_backlog的减少：
+ inet_csk_accept
+ reqsk_queue_get_child
+ sk_acceptq_removed

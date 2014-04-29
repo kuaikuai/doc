@@ -1,0 +1,116 @@
+
+数据服务器： DS
+元数据服务器： MS
+
+* 学习
+ 一个文件的数据究竟放在哪些DS上 由MS记录。
+ 客户端打开文件时，从MS获取了文件系统磁盘inode，而磁盘inode中有文件内容的布局信息。
+ 通过布局信息，可以计算出文件的内容都存放在那些DS中。
+
+* 把文件对象和元数据文件散列的多级目录的作用是什么？
+  为了减少查找元数据的时间，同时可以提高并发性。
+* 为什么客户端使用虚拟设备时，虚拟设备只有一个open操作？           :question:
+
+* dentry_block
+  最后保留一段，记录下一个同链的dentry_block的地址
+
+
+* MDSC_Create不需要从服务端更新dir_meta吗？
+* 流程：
+__lionfsM_service_thread --＞ __lionfsM_create --＞ __lionfsM_create_file
+
+LIONFS_Create --> MDSC_Create
+
+* 关键函数：
+** __lionfsM_add_dentry 
+  在目录中添加一个目录项
+
+目录项的结构
+struct _lionfs_dentry{
+	lionfs_ino_t ino;		/*ino of this entry*/
+	lionfs_off_t off;		/*offset to the next dentry*/
+	lionfs_u32_t reclen;		/*length of this entry*/
+	lionfs_u32_t namelen;		/*length of the name*/
+	lionfs_u8_t  name[1];		/*name of this entry*/
+};
+
+通过index文件加快搜索目录文件。
+index文件是可扩展hash结构的。
+
+* 客户端缓冲元数据与元数据服务器之间的一致性问题
+LIONFS_dentry_revalidate
+向MPS发送请求更新元数据
+static struct dentry_operations lionfs_dentry_operations = {
+    .d_revalidate = LIONFS_dentry_revalidate,
+    .d_delete = LIONFS_dentry_delete,
+};
+
+* rename 操作
+__lionfsM_rename
+可能涉及到两个元数据服务器
+有LIONFS_MSG_FWD类型的信息，
+你以前没有注意过.
+* 疑问：
+1、__OSDS_freepages
+把下面的代码注释了，这样就不释放内存页了，
+那么哪里释放的呢？
+	//	mapping->a_ops->commit_write(NULL, page, ak_offset, ak_offset+ak_len);
+	/****
+	*   move the release task to __OSDS_allocpages
+		unlock_page(page);
+		page_cache_release(page);
+	*/
+
+
+2、
+struct __conn_queue {
+#ifdef __KERNEL__
+	rwlock_t  queue_lock;
+#else
+	pthread_mutex_t queue_lock;
+#endif
+	struct  list_head  queue;
+	amp_connection_t   **conns;  /*for selecting*/
+	amp_u32_t          total_num; /*how long of the conns array*/
+	amp_s32_t          active_conn_num; /*how many eff conns in the conns*/
+};
+typedef struct __conn_queue conn_queue_t;
+
+conn_queue_t 结构既然有一个queue,把新链接加入queue就行了，
+为什么还要同时维护一个conns数组？
+
+为什么__amp_select_conn中
+把遍历cmp_conns->acc_remote_conns[id].queue的代码
+用#if 0 注释掉了，而使用遍历conns数组？
+
+
+* 使用：
+
+osd server的配置文件
+/etc/lionfs_osd.conf
+内容如下：
+[ID]
+1
+[NIC]
+[MountPath]
+/kiddata (磁盘加载路径）
+
+mos配置文件
+/cluster/lionfs/conf/mds.conf
+内容如下：
+[MOS]
+3 127.0.0.1
+[MPS]
+1 127.0.0.1
+
+mos还需要osd的配置文件
+/cluster/lionfs/conf/ods.conf
+内容如下：
+# id 网卡个数
+1 1 127.0.0.1
+
+client需要
+/cluster/lionfs/conf/mds.conf
+/cluster/lionfs/conf/ods.conf
+
+mount -t lionfs /dev/IP...    -o client-id   /dir
