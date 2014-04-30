@@ -1,0 +1,47 @@
+#+OPTIONS: "\n:t"
+
+* 源码分析
+** codec.c
+   用于对key进行编码和解码
+
+*** dc_decode
+    key 解码
+*** dc_encode
+    key 编码 字符串“123abc”编码为二进制的123、0xabc两个数，
+    同时在dict中增加一个Fmt Fmt.nargs=2, Fmt.fmt=%d%l
+
+** htree.c
+#+begin_src c
+static const long long g_index[] = {0, 1, 17, 273, 4369, 69905, 1118481, 17895697, 286331153, 4581298449L};
+struct t_hash_tree {
+    int depth;
+    int pos;
+    int height;
+    Node *root;
+    Codec *dc;
+    pthread_mutex_t lock;
+    char buf[512];
+};
+#define INDEX(it) (0x0f & (keyhash >> ((7 - node->depth - tree->depth) * 4)))
+#+end_src
+通过ht_new()函数，我们知道root指向一片连续的sizeof(Node)*g_index[tree.height] 大小的 内存
+g_index：
+16^0, 16^0 + 16^1, 16^0 + 16^1 + 16^2, ... , 16^0 + ... + 16^k
+可以知道tree实际上是每个节点最多有16子节点。
+
+获取node在其父节点中的位置
+#+begin_src c
+static inline uint32_t get_pos(HTree *tree, Node *node)
+{
+    return (node - tree->root) - g_index[(int)node->depth];
+}
+#+end_src
+
+获取node的子节点
+#+begin_src c
+static inline Node *get_child(HTree *tree, Node *node, int b)
+{
+    int i = g_index[node->depth + 1] + (get_pos(tree, node) << 4) + b;
+    return tree->root + i;
+}
+#+end_src

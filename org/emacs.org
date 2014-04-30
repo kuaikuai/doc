@@ -104,47 +104,24 @@ C-x r i 可以恢复这个文字.
   提交 C-x v v
 * 设置emacs字体
 
-通过options菜单选择字体，满意后
-M-x ielm RET 
-执行 (frame-parameter nil 'font) RET
-获取配置的字符串例如"-outline-Courier New-normal-r-normal-normal-16-120-96-96-c-*-iso8859-1"
+  通过options菜单选择字体，满意后
+  M-x ielm RET 
+  执行 (frame-parameter nil 'font) RET
+  获取配置的字符串例如"-outline-Courier New-normal-r-normal-normal-16-120-96-96-c-*-iso8859-1"
 
-把如下形式的代码贴入.emacs，即可。
+  把如下形式的代码贴入.emacs，即可。
 
 #+begin_src lisp
 (set-default-font "-outline-Courier New-normal-r-normal-normal-16-120-96-96-c-*-iso8859-1")
 (add-to-list 'default-frame-alist '(font . "-outline-Courier New-normal-r-normal-normal-16-120-96-96-c-*-iso8859-1"))  
 #+end_src
 
-* etags使用
-#+begin_example
-在emacs下使用etags阅读Linux内核源码的方法：
-
-＃cd /home/usrname/kernel/linux-2.4.33
-＃find . -name "*.[chCHS]" | etags -
-Just wait a few minute,生成的TAGS文件有17M左右大小
-进入emacs，M-x visit-tag-table，选择刚生成的TAGS文件，即可开始emacs导游的Linux内核源码之旅
-
-如果要emacs自动读取某个TAGS文件，可以在~/.emacs文件中加入一行,设置tags-file-name变量
-(setq tags-file-name "path/TAGS")
-
-如果要一次查找多个TAGS文件，可以设置tags-table-list变量
-(setq tags-table-list '("path1/TAGS" "path2/TAGS" "path3/TAGS"))
-另外，对于较大又不是经常使用的TAGS，尽量放到该list的后面，避免不必要的打开
-
-常用的热键：
-M-. 查找光标所指向的函数的定义
-C-M-. 输入函数名，查找其定义
-M-, 回退
-C-u M-. 查找标签的下一个定义  
-
-etags 
-#+end_example
 * 交换Ctrl和Alt
 1.在linux下:
 在~目录下建立名为“.Xmodmap”的文件，
 （x一定要大写）
 内容如下：
+#+begin_example
 remove mod1 = Alt_L
 remove control = Control_L
 add control = Alt_L
@@ -154,13 +131,15 @@ remove mod1 = Alt_R
 remove control = Control_R
 add control = Alt_R
 add mod1 = Control_R
+#+end_example
 2.在windows下:
 使用KeyTweak之类的软件进行设置.
 
-* 不用shift输入程序符号
-最近常写perl，发现输入$等特别累。于是就产生这个想法。
-使用命令：xmodmap -pke 
-显示出：
+* 不用shift输入perl $
+  最近常写perl，发现输入$等特别累。于是就产生这个想法。
+  使用命令：xmodmap -pke 
+  显示出：
+#+begin_example
 ....
 keycode  10 = 1 exclam 1 exclam
 keycode  11 = 2 at 2 at
@@ -173,6 +152,7 @@ keycode  17 = 8 asterisk 8 asterisk
 keycode  18 = 9 parenleft 9 parenleft
 keycode  19 = 0 parenright 0 parenright
 ....略
+#+end_example
 找到我们关心的数字键。
 例如数字键“1"
 运行命令：
@@ -186,8 +166,8 @@ xmodmap -e "keycode  10 = exclam 1 exclam 1"
 
 * 把自己经常重复的编辑动作写成elisp函数
   今天在网上看到几个函数，例如格式化整个buffer等，
-
   我经常全选整个缓存区，然后在ctrl-alt-\，很麻烦
+
 * org-mode 插入时间戳（记日记）
   C-c !
   用于记日记
@@ -221,22 +201,29 @@ xmodmap -e "keycode  10 = exclam 1 exclam 1"
 (set-buffer-file-coding-system 'unix 't) 关键的一句啊！
 #+end_example
 * delete line back
-C-0 C-k
+  C-0 C-k
 * 管理项目
    在项目内，快速打开指定文件，使用find-tag，我绑定到M-.
 * etags
-find . -name "*.[chCH]" -print | etags -
-上述命令可以在当前目录查找所有的.h和.cpp文件并把它们的摘要提取出来做成TAGS文件，具体的etags的用法可以看一下etags的 manual。
-创建好tag表后，告知emacs。
-M-x visit-tags-table
-在.emacs中加入这样的语句：
-(setq tags-file-name "~/sim973/src/TAGS")
-这样emacs就会自动读取这个tags文件的内容。
-几个重要的命令。
-    M-. 查找一个tag，比如函数定义类型定义等。
-    C-u M-. 查找下一个tag的位置
-    M-* 回到上一次运行M-.前的光标位置。
-    M-TAB 自动补齐函数名。 
+  find . -name "*.[ch]" -o -name "*.cpp" - print | etags - 
+  find . -name "*.[chCH]" -print | etags -
+  上述命令可以在当前目录查找所有的.h和.cpp文件并把它们的摘要提取出来做成TAGS文件，具体的etags的用法可以看一下etags的 manual。
+  创建好tag表后，告知emacs。
+  M-x visit-tags-table
+
+  如果要emacs自动读取某个TAGS文件，可以在~/.emacs文件中加入一行,设置tags-file-name变量
+  (setq tags-file-name "path/TAGS")
+
+  如果要一次查找多个TAGS文件，可以设置tags-table-list变量
+  (setq tags-table-list '("path1/TAGS" "path2/TAGS" "path3/TAGS"))
+  另外，对于较大又不是经常使用的TAGS，尽量放到该list的后面，避免不必要的打开
+
+  常用的热键：
+  M-. 查找一个tag，比如函数定义类型定义等。
+  C-u M-. 查找下一个tag的位置
+  M-*/M-, 回到上一次运行M-.前的光标位置。
+  M-TAB 自动补齐函数名。 
+
 * 常用基本功能
 
 ** 移动光标
@@ -613,9 +600,9 @@ M-<down>	使 item 下移一层
    使用tramp
    配置文件
    (require 'tramp)
+   (setq tramp-default-method "ssh")
    然后使用 /usr@machine:/path/to.file 的语法来访问远程文件。
-   tramp与ido-mode冲突，
-   使用前先关闭ido-mode
+   tramp与ido-mode冲突时，使用前先关闭ido-mode
 * c/c++几个操作
 M-a        移动到当前语句的开始
 M-e        移动到当前语句的末尾
@@ -644,14 +631,14 @@ C-c C-\       将区域中的每一行结尾都加入一个'\'字符
 * 对齐 align-regexp
    C-M-\，对齐一般都能满足需要
    有时候需要按一行中的某些字符对齐，比如一些变态的语言或者编程规范规定赋值语句需要按”=”对齐，那怎么办?
-比如如下代码:
+   比如如下代码:
 #+BEGIN_SRC c
 int var = 2;
 int variable_is_kinda_long = 3;
 int var_is_less_long = 4;
 #+END_SRC
 
- 需要按 = 对齐，选中执行M-x align-regexp, 然后 regexp 填 =，结果如下:
+   需要按 = 对齐，选中执行M-x align-regexp, 然后 regexp 填 =，结果如下:
 #+BEGIN_SRC c
 int var                    = 2;
 int variable_is_kinda_long = 3;
@@ -659,15 +646,15 @@ int var_is_less_long       = 4;
 #+END_SRC
 
 * occur
-输出 buffer 中符合正则表达式的所有行，在查找替换时，或者需要重构代码时，事先用 occur 来验证下构造的正则表达式的效果，可以避免一时自信或者冲动毁了先前的工作.
+  输出 buffer 中符合正则表达式的所有行，在查找替换时，或者需要重构代码时，事先用 occur 来验证下构造的正则表达式的效果，可以避免一时自信或者冲动毁了先前的工作.
 * multi-occur-in-matching-buffers
 可以对所有打开的 buffer 进行 regex search。
 * follow-mode
-现在流行的是宽屏，宽度不是问题，因此 Emacs C-x 3 用的很多，但很多长的文档，要翻好多页，小拇指真疼。 
-竖分屏后执行 follow-mode 后，所有 buffer 显示同一文件的不同部分，可视范围翻倍，甚至数倍，这要看你的屏幕有多宽了。
+  现在流行的是宽屏，宽度不是问题，因此 Emacs C-x 3 用的很多，但很多长的文档，要翻好多页，小拇指真疼。 
+  竖分屏后执行 follow-mode 后，所有 buffer 显示同一文件的不同部分，可视范围翻倍，甚至数倍，这要看你的屏幕有多宽了。
 
 * 搜索
- M-x rgrep
+  M-x rgrep
   在emacs使用find 与 grep，
   岂一个快字了得！
   快速遍历查找！
@@ -695,3 +682,8 @@ int var_is_less_long       = 4;
     (call-process "cmd" nil t nil "/c" "dir")
 
 
+* 自动检测文件编码，防止乱码
+  ;; auto detect unicode
+#+begin_src lisp
+  (require 'unicad)
+#+end_src

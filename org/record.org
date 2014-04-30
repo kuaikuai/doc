@@ -3139,3 +3139,5 @@ Once rdesktop is successfully connected to the VM via remote desktop, you will s
 2014/04/24 12:22:53 [crit] 1120#0: *17024380925 connect() to 192.168.2.150:8088 failed (99: Cannot assign requested address) while connecting to upstream, client: 123.14.145.99, server: , request: "POST /aaa/app_signon HTTP/1.1", upstream: "http://192.168.2.150:8088/aaaopenapi?action=aaa&cmd=app_signon", host: "api.hismarttv.com:8080"
 
 需要调整net.ipv4.ip_local_port_range参数
+* recv() hang 程序
+  socket没有设置recv timeout
