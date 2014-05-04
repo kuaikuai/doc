@@ -1,5 +1,78 @@
 #+OPTIONS: "\n:t"
 
+* 作者视频
+  http://www.infoq.com/cn/presentations/lhq-beansdb-design-implementation
+* 他人心得
+BeansDB是豆瓣的刘洪清大哥写的一个分布式存储系统。关于它的详细介绍可以参看
+http://www.douban.com/note/122507891/ 
+同时InfoQ中还有刘洪清大哥的演讲视频及资料：http://www.infoq.com/cn/presentations/lhq-beansdb-design-implementation
+
+
+BeansDB是一个简化了的Dynamo系统，适合存储多个小文件。它的结构个人认为可以分成下面的部分：一致性协议，同步算法，客户端代理，底层存储。
+
+
+BeansDB实现的是弱一致——豆瓣的用户上传照片后一般不会做改动，弱一致就够了，所以不看它的一致性协议；同样的原因，不看它的sync流程（没时间看。。。），不看Proxy部分（只有100多行吧，对异常处理应该不是太完善），个人感觉应该是类似于ClientManager之类的东西，在弱一致性下实现的应该对最终一致的实现没有多大的启发。这样，到头来对BeansDB的研读就退化成为对底层存储——仍旧是KV数据存储的研究。
+
+BeansDB的存储使用了BitCask算法。关于BitCask的详细介绍可以参看这里： http://blog.nosqlfan.com/html/955.html 
+
+
+BitCask可以分为三部分：存储在内存中的索引，持久化的数据——包括多个已经被持久化不会改变的数据文件和一个当前将内存中数据内容flush的文件，然后，根据原论文的推荐，还需要一个状态文件——用于实现内存索引的序列化，使得重启时可以使用反序列化的功能迅速构建原索引。
+
+BitCask与GDBM的数据存储方式最大的不同就是它采用日志型日志，这样对数据的删除可以看做是对数据的插入——诸如GDBM中对文件空白处的处理可以留给以后一起处理，或者不做处理。这种lazy的思想采用以空间换时间的策略，从而可以避免随机写带来的性能上的损耗。
+
+
+BitCask中内存索引在BeansDB中被实现为一个HashTree。使用HashTree有以下的几点好处：
+1.HashTree实现简单，查找高效，而且BeansDB加入了对HashNode的merge和split的伸缩策略，是查找更快速。
+2.HashTree的状态节点类似于二次哈希对dir的扩充，一个数据节点的分裂不会影响其它数据节点的查找
+3.HashTree采用分节点存储使得整个索引存储形成一种分层结构，这有助于在sync时快速定位到不同的数据节点，同时也避免了对无关节点的sync，节约了时间，值得借鉴。
+
+BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者模型，也是需要学习的。
+
+对BitCask的实现分别被存放在htree.c——用来实现内存索引HashTree，record.c——用来实现对datafile和hintfile的操作，bitcask.c——用来定义BitCask的基本操作。
+
+
+下面详细讲述一下BitCask的工作流程，其中用到的组件有：多个older datafile，及其对应的hintfile，还有一个active datafile，以及存储其中键值的cur_tree，最后还有一个tree，用来存储所有的键值，包括older datafile和cur_tree中的所有键值。
+1.首先需要打开BitCask。
+    1.1扫描目录下的所有older datafile（打开时不存在active datafile）
+        1.1.1如果它有对应的hintfile，那么扫描这个hintfile中的键值，加入到tree中
+        1.2.1否则扫描datafile生成一棵HTree，根据这棵HTree生成hintfile文件，并把HTree中的键值存入tree中
+    1.2datafile是按照序号递增的方式命名的，这样扫描结束后，我们就会记录下总共有多少个datafile，并将最后一个datafile设置成为active datafile。新建一个HTree——curr_tree，作为active datafile的内存索引。
+2.首先应该介绍查找的流程，直接从tree中查找，如果这个value存在的话，我们可以得到这个value所在的文件名和它在文件中的偏移。这时需要根据这两个信息分情况查找，具体步骤在bitcask.c的bc_get函数中。
+3.然后是插入，删除和更新操作。这三种操作都被看做是插入操作，放到active datafile中。但是由于我们使用了version，所以需要先在tree中查找这个key对应的version，然后根据特定的version比较原则来判断下一步到底如何处理。详细的比较情形可以参见源码剖析对bitcask.c的剖析。
+4.在3中的删除和更新操作都有可能造成older datafile中一些value值过期无用。为了节省文件空间，我们需要进行定期的GC，将原来文件中无效的数据清除掉。这通过比较tree和hintfile的HTree来决定。如果hintfile中的键值跟tree中的键值不同，那么认定value值被更改——或者被删除，或者被重新安排到了其它文件的其它地方。如果满足一定的条件，则根据tree中对value的记录重新建立datafile文件以及与之对应的hintfile文件。
+5.使用完后对BitCask进行close操作，一般需要GC。
+* nginx
+#+begin_example
+    location ~ ^/(img|icon|[sbmlote]pic|rda)/ {
+        default_type   image/jpeg;
+       
+        expires 1y;
+        add_header Last-Modified "Wed, 21 Jan 2004 19:51:30 GMT";
+        if ($http_if_modified_since) {
+           return 304;
+        }
+
+        if ($request_uri ~ /download/ ){
+            add_header Content-Disposition "attachment;";
+        }
+
+        set $memcached_key $uri;
+        if ($uri ~ /img(/.*) ){
+            set $memcached_key $1;
+        }
+
+        memcached_pass beansdb;
+        memcached_next_upstream error timeout invalid_response;
+        memcached_connect_timeout 300ms;
+        memcached_read_timeout 3s;
+        memcached_send_timeout 1s;
+    }
+#+end_example
+* get
+1. hs_get先对key做hash，决定value是在哪个bitcask。然后调用bitcask模块的bc_get
+2. bc_get先调用htree模块的ht_get，找到对应的Item。
+3. Item中有版本信息ver，位置信息pos。
+  pos是bucket的id和偏移量拼成的一个uint32，于是得到了bucket和offset然后就可以读出数据了。
 * 源码分析
 ** codec.c
    用于对key进行编码和解码
@@ -10,18 +83,1394 @@
     key 编码 字符串“123abc”编码为二进制的123、0xabc两个数，
     同时在dict中增加一个Fmt Fmt.nargs=2, Fmt.fmt=%d%l
 
-** htree.c
+** bitcask.c
 #+begin_src c
-static const long long g_index[] = {0, 1, 17, 273, 4369, 69905, 1118481, 17895697, 286331153, 4581298449L};
-struct t_hash_tree {
-    int depth;
-    int pos;
-    int height;
-    Node *root;
-    Codec *dc;
-    pthread_mutex_t lock;
-    char buf[512];
+    #include "bitcask.h"  
+    #include "htree.h"  
+    #include "record.h"  
+      
+    #define MAX_BUCKET_COUNT 256  
+      
+    const uint32_t MAX_RECORD_SIZE = 50 * 1024 * 1024; // 50M  
+    const uint32_t MAX_BUCKET_SIZE = (uint32_t)1024 * 1024 * 1024 * 2; // 2G  
+    const uint32_t WRITE_BUFFER_SIZE = 1024 * 1024 * 4; // 4M  
+      
+    const char DATA_FILE[] = "%s/%03d.data";  
+    const char HINT_FILE[] = "%s/%03d.hint.qlz";  
+    const char NEW_DATA_FILE[] = "%s/%03d.data.new";  
+    const char NEW_HINT_FILE[] = "%s/%03d.hint.new.qlz";  
+      
+    struct bitcask_t {  
+        char*  path;  
+        int    depth;  
+        HTree* tree; //这个tree记录了所有的data数据信息(也就是curr个tree的信息)，比cur_tree要大得多  
+        int    curr; //当前的桶的序号，这之前的桶都已经写入datafile了  
+        HTree* curr_tree; //只有一个curr_tree，就是当前active的datafile的bucket的数据  
+        //write_buffer相当于active file的一个缓冲区。当write_buffer满了以后就flush  
+        char   *write_buffer; //write_buffer  
+        int    wbuf_size; //write_buffer的大小  
+        int    wbuf_start_pos; //write_buffer的大小小于文件的大小，所以start_pos是记录的write_buffer在文件中的位移  
+        //也就是文件的末尾  
+        int    wbuf_curr_pos; //有效的数据的大小  
+        /* 
+        结合item的pos，可以得到操作： 
+        如果有item的pos，那么pos = item->pos & 0xffffff00是这个record相对于文件的位移 
+        而start_pos是write_buffer相对于文件的位移， 
+        bc->write_buffer + pos - bc->wbuf_start_pos就得到了这个record在write_buffer 
+        (如果有的话，即这是最后一个bucket)的位置 
+        */  
+        pthread_mutex_t flush_lock;  
+        pthread_mutex_t buffer_lock;  
+        pthread_mutex_t write_lock;  
+    };  
+      
+    //一个bc里最多有MAX_BUCKET_COUNT个文件，每个文件叫做这个bc的bucket  
+    //打开一个bitcask  
+    //1.申请内存并初始化。  
+    //2.遍历目录下的所有files——根据hintfile——如果没有就是用datafile——来建立一个整体的bc->tree  
+    //3.更新bc的curr域，表示当前有多少个data文件  
+    //before - 遍历的时间限制，只遍历before以后的hintfile，或者datafile中tsstamp在before之后的record  
+    Bitcask* bc_open(const char *path, int depth, time_t before)  
+    {  
+        if (path == NULL || depth > 4) return NULL;  
+        if (0 != access(path, F_OK) && 0 != mkdir(path, 0750)){  
+            fprintf(stderr, "mkdir %s failed\n", path);  
+            return NULL;  
+        }  
+        Bitcask* bc = (Bitcask*)malloc(sizeof(Bitcask));  
+        memset(bc, 0, sizeof(Bitcask));      
+        bc->path = strdup(path);  
+        bc->depth = depth;  
+        bc->tree = ht_new(depth);  
+        bc->curr_tree = ht_new(depth);  
+        bc->wbuf_size = 1024 * 4;  
+        bc->write_buffer = malloc(bc->wbuf_size);  
+        pthread_mutex_init(&bc->buffer_lock, NULL);  
+        pthread_mutex_init(&bc->write_lock, NULL);  
+        pthread_mutex_init(&bc->flush_lock, NULL);  
+      
+        char datapath[255], hintpath[255];  
+        int i=0;  
+        for (i=0; i<MAX_BUCKET_COUNT; i++) {  
+            //看看第i个桶是不是空的  
+            sprintf(datapath, DATA_FILE, path, i);  
+            FILE* f = fopen(datapath, "rb");  
+            if (NULL == f) break;  
+            fclose(f);  
+      
+            sprintf(hintpath, HINT_FILE, path, i);  
+            struct stat st;  
+            if (before == 0){  
+                //如果有对应的hintfile，则更新这个hintfile对应的树节点  
+                //这是启动时，利用hintfile进行树创建的步骤  
+                if (0 == lstat(hintpath, &st)){  
+                    scanHintFile(bc->tree, i, hintpath, NULL);  
+                }else{  
+                    //否则创建新的hintfile  
+                    scanDataFile(bc->tree, i, datapath, hintpath);                  
+                }  
+            }else{  
+                if (0 == lstat(hintpath, &st) &&   
+                    (st.st_mtime < before || 0 == lstat(datapath, &st) && st.st_mtime < before)){  
+                        scanHintFile(bc->tree, i, hintpath, NULL);   
+                }else{  
+                    scanDataFileBefore(bc->tree, i, datapath, before);  
+                }  
+            }  
+        }  
+        bc->curr = i;  
+        //    ht_optimize(bc->tree);  
+      
+        return bc;  
+    }  
+      
+    /* 
+    * bc_close() is not thread safe, should stop other threads before call it. 
+    * */  
+    //1.flush，将write_buffer写入到datafile中，  
+    //2.bc->curr_tree生成对应的hintfile  
+    //3.销毁bc->tree  
+    //4.销毁其它变量  
+    void bc_close(Bitcask *bc)  
+    {  
+        int i=0;  
+        pthread_mutex_lock(&bc->write_lock);  
+          
+        //1  
+        bc_flush(bc, 0);  
+      
+        //2  
+        if (NULL != bc->curr_tree) {  
+            //构建当前bucket的hint文件  
+            char buf[255];  
+            sprintf(buf, HINT_FILE, bc->path, bc->curr);  
+            build_hint(bc->curr_tree, buf);  
+            bc->curr_tree = NULL;  
+        }  
+        bc->curr = 0;  
+        //3  
+        ht_destroy(bc->tree);  
+        //4  
+        free(bc->path);  
+        free(bc->write_buffer);  
+        free(bc);  
+    }  
+      
+    //利用it的信息（pos）更新args对应的树  
+    void update_items(Item *it, void *args)  
+    {  
+        HTree *tree = (HTree*) args;  
+        Item *p = ht_get(tree, it->name);  
+        if (!p) {  
+            fprintf(stderr, "Bug, item missed after optimized\n");  
+            return;  
+        }  
+      
+        //如果(it->pos & 0xff) != (p->pos & 0xff)  
+        //那么说明至少有两个datafile中有这个key对应的data，这时要以bc->tree中的bucket为基准  
+        //也就是说，我们只更新bucket正确的DataRecord对应的Item  
+        if (it->pos != p->pos && (it->pos & 0xff) == (p->pos & 0xff) ) {  
+            ht_add(tree, p->name, it->pos, p->hash, p->ver);  
+        }  
+        free(p);  
+    }  
+      
+    //在经过一段时间的运行后，新的bc->tree会新增或者删除一些节点，原来的datafile中的记录有可能就  
+    //就应该被删除了。为了节省文件空间，需要将那些空的比较多的datafile中的有效的DataRecord保留下来，而  
+    //而将该删的DataRecord删掉。  
+    //1.依次遍历这个bc的每个bucket，也就是每个datafile  
+    //2.调用record.c中的optimizeDataFile，这个函数会比较hintfile中的tree跟bc->tree的不同  
+    //  并记录下来删除的record的数目，以决定是否值得optimize  
+    //3.如果需要optimize，那么从datafile中读取DataRecord，并在bc->tree中查找看是否有必要保留  
+    //4.经过optimize，datafile中DataRecord的位置可能发生了变化，这些变化被存储在相应的hashtree中  
+    //  也就是本函数的cur_tree中，我们需要遍历cur_tree，反过来更新bc->tree  
+    //5.然后根据cur_tree生成对应的hintfile  
+    void bc_optimize(Bitcask *bc, int limit)  
+    {  
+        int i;  
+          
+        //1  
+        for (i=0; i < bc->curr; i++) {  
+            char data[255], hint[255];  
+            sprintf(data, DATA_FILE, bc->path, i);  
+            sprintf(hint, HINT_FILE, bc->path, i);  
+      
+            //2,3  
+            HTree *cur_tree = optimizeDataFile(bc->tree, i, data, hint, limit);  
+            if (NULL == cur_tree) continue;  
+      
+            pthread_mutex_lock(&bc->write_lock);  
+            //4  
+            ht_visit(cur_tree, update_items, bc->tree);  
+            pthread_mutex_unlock(&bc->write_lock);  
+      
+            //5  
+            build_hint(cur_tree, hint);  
+        }  
+    }  
+      
+    //从bc中对应的datafile中查找key对应的DataRecord  
+    //注意bc中能存放一个value的结构是：  
+    //a.已经被持久化的datafile   
+    //b.active的datafile(被flush了)  
+    //c.bc的write_buffer(还没有被flush)  
+    //所以得到bc_get的步骤为：  
+    //1.从bc->tree中查找这个key对应的Item，  
+    //2.得到dr所在的datafile编号及位置  
+    //3.判断dr在a,b,c哪个里面  
+    //  3.1.在c里面则直接从write_buffer中取，注意dr位置的计算  
+    //  3.2.在a和b中的处理方法一样，都是直接从文件中读取record  
+    //4.根据是否得到dr，来反向更新bc->tree  
+    DataRecord* bc_get(Bitcask *bc, const char* key)  
+    {  
+        //1  
+        Item *item = ht_get(bc->tree, key);  
+        if (NULL == item) return NULL;  
+        //ver小于0，说明该item是无效的  
+        if (item->ver < 0){  
+            free(item);  
+            return NULL;  
+        }  
+      
+        //2  
+        //后8位是文件编号  
+        int bucket = item->pos & 0xff;  
+        //前24位是在文件中的位置  
+        uint32_t pos = item->pos & 0xffffff00;  
+        if (bucket > bc->curr) {  
+            fprintf(stderr, "BUG: invalid bucket %d > %d\n", bucket, bc->curr);  
+            ht_remove(bc->tree, key);  
+            free(item);  
+            return NULL;  
+        }  
+      
+        DataRecord* r = NULL;  
+        //如果r在当前bucket中  
+        //这个bucket还没有写入文件中  
+        if (bucket == bc->curr) {  
+            pthread_mutex_lock(&bc->buffer_lock);  
+            //3.1  
+            if (bucket == bc->curr && pos >= bc->wbuf_start_pos){  
+                //从write_buffer中找  
+                //dr在write_buffer中的起始位置为p  
+                int p = pos - bc->wbuf_start_pos;  
+                r = decode_record(bc->write_buffer + p, bc->wbuf_curr_pos - p);  
+            }  
+            pthread_mutex_unlock(&bc->buffer_lock);  
+      
+            if (r != NULL){//从write_buffer中找到了  
+                free(item);  
+                return r;  
+            }  
+        }  
+      
+        //3.2  
+        //如果r不在最后一个bucket中，或者在最后一个bucket中但是被flush了。  
+        //打开存储这个bucket的文件  
+        char data[255];  
+        sprintf(data, DATA_FILE, bc->path, bucket);  
+        FILE *f = fopen(data, "rb");  
+        if (NULL == f){  
+            goto GET_END;  
+        }  
+      
+        if (0 != fseek(f, pos, SEEK_SET)){  
+            fprintf(stderr, "IOError: seek file %d to %d failed\n", bucket, pos);  
+            goto GET_END;  
+        }  
+      
+        r = read_record(f, true);  
+        if (NULL == r){  
+            fprintf(stderr, "Bug: get %s failed in %s %d %d\n", key, bc->path, bucket, pos);          
+        }else{  
+            // check key  
+            if (strcmp(key, r->key) != 0){  
+                fprintf(stderr, "Bug: record %s is not expected %s\n", r->key, key);  
+                free_record(r);  
+                r = NULL;  
+            }   
+        }  
+    GET_END:  
+        //4  
+        if (NULL == r)  
+            ht_remove(bc->tree, key);  
+        if (f != NULL) fclose(f);  
+        free(item);  
+        return r;  
+    }  
+      
+    struct build_thread_args {  
+        HTree *tree;  
+        char *path;  
+    };  
+      
+    //创建hint文件的线程入口函数  
+    void* build_thread(void *param)  
+    {  
+        struct build_thread_args *args = (struct build_thread_args*) param;  
+        build_hint(args->tree, args->path);  
+        free(args->path);  
+        free(param);  
+        return NULL;  
+    }  
+      
+    //清空write_buffer，将其内容写入active datafile中。  
+    //因为datafile的大小是有限制的，所以有可能会持久化当前的datafile而新建一个active  
+    //1.打开当前的active datafile，并检测文件大小跟当前的cur_pos是否相同  
+    //2.向文件中写入  
+    //3.如果write_buffer没有全部写入，则将后面的内容前移  
+    //4.更新write_buffer的pos，如果有必要，扩充write_buffer  
+    //5.如果当前datafile已经足够大，那么持久化本datafile，新建一个datafile及对应的htree  
+    //  5.1.首先要把write_buffer中的内容全部写入  
+    //  5.2.在新线程中持久化本datafile，建立对应的hintfile  
+    //  5.3.新建一个datafile(curr+1)，对应地，新建一个htree  
+    void bc_flush(Bitcask *bc, int limit)  
+    {  
+        if (bc->curr >= MAX_BUCKET_COUNT) {  
+            fprintf(stderr, "reach max bucket count\n");  
+            exit(1);  
+        }  
+      
+        pthread_mutex_lock(&bc->flush_lock);  
+        //写入本bucket的datafile中  
+        //符合条件  
+        if (bc->wbuf_curr_pos > limit * 1024) {  
+            //1  
+            char buf[255];  
+            sprintf(buf, DATA_FILE, bc->path, bc->curr);  
+            FILE *f = fopen(buf, "ab");  
+            if (f == NULL) {  
+                fprintf(stderr, "open file %s for flushing failed.\n", buf);  
+                exit(1);  
+            }  
+            // check file size  
+            int last_pos = ftell(f);  
+            if (last_pos != bc->wbuf_start_pos) {  
+                fprintf(stderr, "last pos not match: %d != %d\n", last_pos, bc->wbuf_start_pos);  
+                exit(1);  
+            }  
+      
+            //2  
+            int n = fwrite(bc->write_buffer, 1, bc->wbuf_curr_pos, f);  
+      
+            pthread_mutex_lock(&bc->buffer_lock);  
+            //3  
+            if (n < bc->wbuf_curr_pos) {//没有写完  
+                memmove(bc->write_buffer, bc->write_buffer + n, bc->wbuf_curr_pos - n);  
+            }  
+      
+            //4  
+            //更新两个pos的值  
+            bc->wbuf_start_pos += n;  
+            bc->wbuf_curr_pos -= n;  
+            if (bc->wbuf_curr_pos == 0 && bc->wbuf_size < WRITE_BUFFER_SIZE) {  
+                //如果有必要，扩充write_buffer  
+                bc->wbuf_size *= 2;  
+                free(bc->write_buffer);  
+                bc->write_buffer = malloc(bc->wbuf_size);  
+            }  
+      
+            //5  
+            //如果write_buffer可以用来存储数据的空间大于一个bucket的size，新建一个bucket1  
+            //这个新建的bucket1是用一个新线程来跑的  
+            if (bc->wbuf_start_pos + bc->wbuf_size > MAX_BUCKET_SIZE) {  
+                //5.1  
+                if (bc->wbuf_curr_pos > 0) {  
+                    if (fwrite(bc->write_buffer, 1, bc->wbuf_curr_pos, f) < bc->wbuf_curr_pos){  
+                        fprintf(stderr, "write to %s failed\n", buf);  
+                        exit(1);  
+                    }  
+                }  
+                //5.2  
+                char datapath[255];  
+                sprintf(datapath, HINT_FILE, bc->path, bc->curr);  
+                struct build_thread_args *args = (struct build_thread_args*)malloc(  
+                    sizeof(struct build_thread_args));  
+                //将当前bucekt的数据写入到一个hintfile中  
+                args->tree = bc->curr_tree;  
+                args->path = strdup(datapath);  
+                pthread_t build_ptid;  
+                pthread_create(&build_ptid, NULL, build_thread, args);  
+                //5.3  
+                // next bucket  
+                bc->curr ++;  
+                bc->curr_tree = ht_new(bc->depth);  
+                bc->wbuf_start_pos = 0;  
+                bc->wbuf_curr_pos = 0;  
+            }  
+            pthread_mutex_unlock(&bc->buffer_lock);  
+      
+            fclose(f);  
+        }  
+        pthread_mutex_unlock(&bc->flush_lock);  
+    }  
+      
+    //set是beansdb的核心操作，也是实现sync的方式。  
+    //set有四种类型：替换，插入，删除，同步。  
+    //version的更新应该遵循这样的规则：  
+    //  a.每次更新时，需要将version+1  
+    //  b.每次删除时，如果此前version为正，则version为version+1的绝对值  
+    //这样做是为了得到sync的方法：  
+    //比如节点1跟节点2同时add了一个key，然后又都delete了它，这时key的version为-2  
+    //此后节点1失效，节点2更新了这个key，key的version变为3，当节点1与节点2sync时，  
+    //节点1给出的version为-2，节点2给出的为3，节点1得知自己落后，从而进行追赶。  
+    //1.得到本bc(节点)中该key对应的ver，设为oldv  
+    //2.根据version和oldv的大小比较来判断到底是哪种类型，给ver赋值。  
+    //3.更新两个htree和datafile文件  
+    //  3.1.value相同，那么只需更新htree中的version  
+    //  3.2.否则无论是删除，插入还是更新，都要新建一个DataRecord，加入当前的datafile中。  
+    //          如果是更新或者删除的话，原来datafile中的数据会在Optimize的时候被删除。  
+    bool bc_set(Bitcask *bc, const char* key, char* value, int vlen, int flag, int version)  
+    {  
+        if (version < 0 && vlen > 0 || vlen > MAX_RECORD_SIZE){  
+            fprintf(stderr, "invalid set cmd \n");  
+            return false;  
+        }  
+      
+        bool suc = false; //是否成功的标识  
+        pthread_mutex_lock(&bc->write_lock);  
+      
+        int oldv = 0, ver = version;  
+        Item *it = ht_get(bc->tree, key);  
+        if (it != NULL) {  
+            oldv = it->ver;  
+        }  
+      
+        //2  
+        if (version == 0 && oldv > 0){ // replace  
+            //更新，版本号+1  
+            ver = oldv + 1;  
+        } else if (version == 0 && oldv <= 0){ // add  
+            //从被删除状态转为存在状态，ver应该为-oldv+1  
+            //这个ver=1应该是不对的。  
+            ver = 1;  
+        } else if (version < 0 && oldv <= 0) { // delete, not exist  
+            goto SET_FAIL; //如果存在，不应该返回FAIL呀  
+        } else if (version == -1) { // delete  
+            ver = - abs(oldv) - 1;  
+        } else if (abs(version) <= abs(oldv)) { // sync  
+            //例如： version       oldver      op  
+            //           5          8             这个不是最新的  
+            //          -5          8             这已经不是它想要删除的那个item了  
+            goto SET_FAIL;  
+        } else { // sync  
+            //例如： version       oldver      op  
+            //           8           5           更新  
+            //           8           -5          插入  
+            //          -8           5           删除  
+            ver = version;  
+        }  
+      
+        uint16_t hash = gen_hash(value, vlen);  
+        //这个item要被删除了  
+        if (ver < 0) hash = 0;  
+      
+        //tree中存在这个it，那么更新  
+        if (NULL != it && hash == it->hash) {  
+            DataRecord *r = bc_get(bc, key);  
+            //  
+            if (r != NULL && r->flag == flag && vlen  == r->vsz  
+                && memcmp(value, r->value, vlen) == 0) {  
+                    //  
+                    if (version != 0){  
+                        ht_add(bc->tree, key, it->pos, it->hash, ver);  
+                        if (it->pos & 0xff == bc->curr){  
+                            if (bc->curr_tree == NULL) {  
+                                fprintf(stderr, "BUG: curr_tree should not be NULL\n");  
+                            }else{  
+                                ht_add(bc->curr_tree, key, it->pos, it->hash, ver);  
+                            }  
+                        }  
+                    }  
+                    suc = true;  
+                    free_record(r);  
+                    goto SET_FAIL;  
+            }  
+        }  
+      
+        //tree中不存在这个it，或者it的value跟set的value不同。  
+        //即使是删除了，也要加入到datafile中  
+        int klen = strlen(key);  
+        DataRecord *r = malloc(sizeof(DataRecord) + klen);  
+        r->ksz = klen;  
+        memcpy(r->key, key, klen);  
+        r->vsz = vlen;  
+        r->value = value;  
+        r->free_value = false;  
+        r->flag = flag;  
+        r->version = ver;  
+        r->tstamp = time(NULL);  
+      
+        int rlen;  
+        char *rbuf = encode_record(r, &rlen);  
+        if (rbuf == NULL || (rlen & 0xff) != 0){  
+            fprintf(stderr, "encode_record() failed with %d\n", rlen);  
+            if (rbuf != NULL) free(rbuf);  
+            goto SET_FAIL;   
+        }  
+      
+        pthread_mutex_lock(&bc->buffer_lock);  
+        //如果这个write_buffer已经装不下这个record了，清空  
+        if (bc->wbuf_curr_pos + rlen > bc->wbuf_size) {  
+            pthread_mutex_unlock(&bc->buffer_lock);  
+            bc_flush(bc, 0);  
+            pthread_mutex_lock(&bc->buffer_lock);  
+        }  
+        // record maybe larger than buffer  
+        //如果是更新的话，那么这个DataRecord的bucket就可能改变了。  
+        while (bc->wbuf_curr_pos + rlen > bc->wbuf_size) {  
+            bc->wbuf_size *= 2;  
+            bc->write_buffer = realloc(bc->write_buffer, bc->wbuf_size);  
+        }  
+        memcpy(bc->write_buffer + bc->wbuf_curr_pos, rbuf, rlen);  
+      
+        int pos = (bc->wbuf_start_pos + bc->wbuf_curr_pos) | bc->curr;  
+        bc->wbuf_curr_pos += rlen;  
+        pthread_mutex_unlock(&bc->buffer_lock);  
+      
+        //更新tree  
+        ht_add(bc->tree, key, pos, hash, ver);  
+        ht_add(bc->curr_tree, key, pos, hash, ver);  
+        suc = true;  
+        free(rbuf);  
+        free_record(r);  
+      
+    SET_FAIL:  
+        pthread_mutex_unlock(&bc->write_lock);  
+        if (it != NULL) free(it);  
+        return suc;  
+    }  
+      
+    bool bc_delete(Bitcask *bc, const char* key)  
+    {  
+        return bc_set(bc, key, "", 0, 0, -1);  
+    }  
+      
+    uint16_t bc_get_hash(Bitcask *bc, const char * pos, int *count)  
+    {  
+        return ht_get_hash(bc->tree, pos, count);  
+    }  
+      
+    char* bc_list(Bitcask *bc, const char* pos, const char* prefix)  
+    {  
+        return ht_list(bc->tree, pos, prefix);  
+    }  
+      
+    uint32_t   bc_count(Bitcask *bc, uint32_t* curr)  
+    {  
+        uint32_t total = 0;  
+        ht_get_hash(bc->tree, "@", &total);  
+        if (NULL != curr && NULL != bc->curr_tree) {  
+            ht_get_hash(bc->curr_tree, "@", curr);  
+        }  
+        return total;  
+    }
+#+end_src
+** record.c
+#+begin_src c
+//DataRecord与item的不同是，item只保存键值，而record保存键值和value值，但是内存里只存PADDING的大小  
+typedef struct data_record {  
+    char *value;  
+    union {  
+        bool free_value;    // free value or not，改为need_free比较好  
+        uint32_t crc;  
+    };  
+    int32_t tstamp; //时间戳  
+    int32_t flag; //record.c开头的那几个const int标志的组合。  
+    int32_t version;   
+    uint32_t ksz; //key大小  
+    uint32_t vsz; //v大小  
+    char key[0];   
+} DataRecord; 
+
+const int PADDING = 256; //PADDING是为了留出低8位，来记录bucket的下标  
+const int32_t COMPRESS_FLAG = 0x00010000;  
+const int32_t CLIENT_COMPRESS_FLAG = 0x00000010;  
+const float COMPRESS_RATIO_LIMIT = 0.7;//最小的压缩比例  
+const int TRY_COMPRESS_SIZE = 1024 * 10;  
+  
+uint32_t gen_hash(char *buf, int len)  
+{  
+    uint32_t hash = len * 97;  
+    if (len <= 1024){  
+        hash += fnv1a(buf, len); //整个  
+    }else{  
+        hash += fnv1a(buf, 512); //前512个  
+        hash *= 97;  
+        hash += fnv1a(buf + len - 512, 512); //后512个  
+    }  
+    return hash;  
+}  
+  
+typedef struct hint_record {  
+    uint32_t ksize:8;  
+    uint32_t pos:24;  
+    int32_t version;  
+    uint16_t hash;  
+    char name[2]; // allign  
+} HintRecord;  
+  
+const int NAME_IN_RECORD = 2;  
+  
+//|               |                 |  
+//----------------------------------  
+//buf     已写     cur     可写        size  
+//param中存放了多个（HintRecord+key），而HintRecord又是根据Item得到的。  
+struct param {  
+    int size;  
+    int curr;  
+    char* buf;  
+};  
+  
+  
+//将it存入param中  
+void collect_items(Item* it, void* param)  
+{  
+    //-NAME_IN_RECORD是为了减少HintRecord中name的那两个比特  
+    //+1是为了后面空出一个位置放'\0'  
+    int length = sizeof(HintRecord) + strlen(it->name) + 1 - NAME_IN_RECORD;  
+    struct param *p = (struct param *)param;  
+    //不够存，扩大param  
+    if (p->size - p->curr < length) {  
+        p->size *= 2;  
+        p->buf = (char*)realloc(p->buf, p->size);  
+    }  
+  
+    //相当于replacement new  
+    HintRecord *r = (HintRecord*)(p->buf + p->curr);  
+    r->ksize = strlen(it->name);  
+    //it->pos的低8位表示file_id，高24位表示在file中的pos  
+    r->pos = it->pos >> 8;  
+    r->version = it->ver;  
+    r->hash = it->hash;  
+    memcpy(r->name, it->name, r->ksize + 1);  
+  
+    p->curr += length;  
+}  
+  
+//将buf中的内容写入到一个临时文件中，最后用这个文件代替path的文件。  
+void write_file(char *buf, int size, const char* path)  
+{  
+    char tmp[255];  
+    sprintf(tmp, "%s.tmp", path);  
+    FILE *hf = fopen(tmp, "wb");  
+    if (NULL==hf){  
+        fprintf(stderr, "open %s failed\n", tmp);  
+        return;  
+    }  
+    //写入size个字符，每个字符的大小为1  
+    int n = fwrite(buf, 1, size, hf);   
+    fclose(hf);  
+  
+    if (n == size) {  
+        //删除path所指文件  
+        unlink(path);  
+        //改变这个已经写入的文件的名字为path  
+        rename(tmp, path);  
+    }else{  
+        fprintf(stderr, "write to %s failed \n", tmp);  
+    }  
+}  
+  
+//将tree中的数据放入到hint文件中，这个tree（其实是bitcast中的cur_tree）会被销毁  
+//1.从tree中收集Item存入一个buf中，然后将treee销毁  
+//2.压缩buf  
+//3.将buf写入到一个hintfile中  
+void build_hint(HTree* tree, const char* hintpath)  
+{  
+    struct param p;  
+    p.size = 1024 * 1024;  
+    p.curr = 0;  
+    p.buf = malloc(p.size);  
+  
+    //1  
+    //将tree里的item都搜集到p中  
+    //ver<0的也收集了  
+    ht_visit(tree, collect_items, &p);  
+    ht_destroy(tree);      
+  
+    // 2  
+    //如果后缀是.qlz说明数据要经过压缩  
+    if (strcmp(hintpath + strlen(hintpath) - 4, ".qlz") == 0) {  
+        char* wbuf = malloc(QLZ_SCRATCH_COMPRESS);  
+        char* dst = malloc(p.size + 400);  
+        //将p中的数据压缩成dst_size个字节存到dst中  
+        int dst_size = qlz_compress(p.buf, dst, p.curr, wbuf);  
+        free(p.buf);  
+        p.curr = dst_size;  
+        p.buf = dst;  
+        free(wbuf);  
+    }  
+  
+    //3  
+    write_file(p.buf, p.curr, hintpath);  
+    free(p.buf);  
+}  
+  
+//扫描hintfile，将其中的HintRecord放入到tree中。  
+//tree -- 实际是BitCask的tree  
+//bucket -- 是这个hintfile在BitCask中的编号  
+//path -- hintfile文件的目录  
+//new_path -- 把hintfile文件中的内容存入这个文件中  
+//1.打开hintfile并使用mmap得到里面的全部内容  
+//2.解压缩  
+//3.依次读取每个HintRecord放入到tree中。  
+void scanHintFile(HTree* tree, int bucket, const char* path, const char* new_path)  
+{  
+    char *addr;  
+    int fd;  
+    struct stat sb;  
+    size_t length;  
+  
+    fd = open(path, O_RDONLY);  
+    if (fd == -1) {  
+        fprintf(stderr, "open %s failed\n", path);  
+        return;       
+    }  
+  
+    if (fstat(fd, &sb) == -1 || sb.st_size == 0){  
+        close(fd);  
+        return ;  
+    }  
+  
+    //1  
+    addr = (char*) mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  
+    if (addr == MAP_FAILED){  
+        fprintf(stderr, "mmap failed %s\n", path);  
+        close(fd);  
+        return;  
+    }  
+  
+    //2  
+    char *start = addr, *end = addr + sb.st_size;  
+    if (strcmp(path + strlen(path) - 4, ".qlz") == 0) {  
+        char wbuf[QLZ_SCRATCH_DECOMPRESS];  
+        int size = qlz_size_decompressed(addr);  
+        start = malloc(size);  
+        int vsize = qlz_decompress(addr, start, wbuf);  
+        if (vsize < size) {  
+            fprintf(stderr, "decompress %s failed: %d < %d, remove it\n", path, vsize, size);  
+            unlink(path);  
+            exit(1);  
+        }  
+        end = start + vsize;  
+    }  
+  
+    //为什么不把这一步放到前面，直接将addr对应的内容拷贝到new_path中？  
+    if (new_path != NULL) {  
+        if (strcmp(new_path + strlen(new_path) - 4, ".qlz") == 0) {  
+            char* wbuf = malloc(QLZ_SCRATCH_COMPRESS);  
+            char* dst = malloc(sb.st_size + 400);  
+            int dst_size = qlz_compress(start, dst, end - start, wbuf);  
+            write_file(dst, dst_size, new_path);  
+            free(dst);  
+            free(wbuf);  
+        } else {  
+            write_file(start, end - start, new_path);  
+        }  
+    }  
+  
+    //3  
+    char *p = start;  
+    while (p < end) {  
+        HintRecord *r = (HintRecord*) p;  
+        p += sizeof(HintRecord) - NAME_IN_RECORD + r->ksize + 1;  
+        if (p > end){  
+            fprintf(stderr, "scan %s: unexpected end, need %ld byte\n", path, p - end);  
+            break;  
+        }  
+        uint32_t pos = (r->pos << 8) | (bucket & 0xff);  
+        if (strlen(r->name) == r->ksize) {  
+            ht_add(tree, r->name, pos, r->hash, r->version);  
+        }else{  
+            fprintf(stderr, "scan %s: key length not match %d\n", path, r->ksize);  
+        }  
+    }  
+  
+    munmap(addr, sb.st_size);  
+    if (start != addr ) free(start);  
+    close(fd);  
+}  
+  
+//返回r中的value值  
+char* record_value(DataRecord *r)  
+{  
+    char *res = r->value;  
+    if (res == r->key + r->ksz + 1) {  
+        // value was alloced in record  
+        res = malloc(r->vsz);  
+        memcpy(res, r->value, r->vsz);  
+    }  
+    return res;  
+}  
+  
+void free_record(DataRecord *r)  
+{  
+    if (r == NULL) return;  
+    if (r->value != NULL && r->free_value) free(r->value);  
+    free(r);  
+}  
+  
+void compress_record(DataRecord *r)  
+{  
+    int ksz = r->ksz, vsz = r->vsz;   
+    int n = sizeof(DataRecord) - sizeof(char*) + ksz + vsz;  
+    //比一个PADDING还大，而且没有被压缩过  
+    if (n > PADDING && (r->flag & (COMPRESS_FLAG|CLIENT_COMPRESS_FLAG)) == 0) {  
+        char *wbuf = malloc(QLZ_SCRATCH_COMPRESS);  
+        char *v = malloc(vsz + 400);  
+        if (wbuf == NULL || v == NULL) return ;  
+        //先尝试压缩一部分，如果没压缩完，就重新压缩  
+        //取较小的  
+        int try_size = vsz > TRY_COMPRESS_SIZE ? TRY_COMPRESS_SIZE : vsz;   
+        int vsize = qlz_compress(r->value, v, try_size, wbuf);  
+        //没有压缩完，并且尝试压缩的压缩比例达到了0.7，重新压缩  
+        if (try_size < vsz && vsize < try_size * COMPRESS_RATIO_LIMIT){  
+            try_size = vsz;  
+            vsize = qlz_compress(r->value, v, try_size, wbuf);  
+        }  
+        free(wbuf);  
+  
+        //如果压缩失败，返回  
+        if (vsize > try_size * COMPRESS_RATIO_LIMIT || try_size < vsz) {  
+            free(v);  
+            return;  
+        }  
+  
+        //压缩成功，更新r  
+        if (r->free_value) {  
+            free(r->value);  
+        }  
+        r->value = v;  
+        r->free_value = true; //r的value需要free  
+        r->vsz = vsize;  
+        r->flag |= COMPRESS_FLAG;  
+    }  
+}  
+  
+DataRecord* decompress_record(DataRecord *r)  
+{  
+    if (r->flag & COMPRESS_FLAG) {  
+        char scratch[QLZ_SCRATCH_DECOMPRESS];  
+        //先验证原数据有没有被破坏  
+        int csize = qlz_size_compressed(r->value);  
+        if (csize != r->vsz) {  
+            fprintf(stderr, "broken compressed data: %d != %d, flag=%x\n", csize, r->vsz, r->flag);  
+            goto DECOMP_END;  
+        }  
+  
+        //解压  
+        //解压本应得到的大小  
+        int size = qlz_size_decompressed(r->value);  
+        char *v = malloc(size);  
+        //内存申请不成功也  
+        if (v == NULL) {  
+            fprintf(stderr, "malloc(%d)\n", size);  
+            goto DECOMP_END;  
+        }  
+        int ret = qlz_decompress(r->value, v, scratch);  
+        //解压得到的数据少，发生错误  
+        if (ret < size) {  
+            fprintf(stderr, "decompress %s failed: %d < %d\n", r->key, ret, size);  
+            goto DECOMP_END;  
+        }  
+        //更新r  
+        if (r->free_value) {  
+            free(r->value);  
+        }  
+        r->value = v;  
+        r->free_value = true;  
+        r->vsz = size;  
+        r->flag &= ~COMPRESS_FLAG;  
+    }  
+    return r;  
+  
+    //r是错误的，释放  
+DECOMP_END:  
+    free_record(r);   
+    return NULL;  
+}  
+  
+  
+DataRecord* decode_record(char* buf, int size)  
+{  
+    DataRecord *r = (DataRecord *) (buf - sizeof(char*));  
+    int ksz = r->ksz, vsz = r->vsz;  
+    if (ksz < 0 || ksz > 200 || vsz < 0 || vsz > 100 * 1024 * 1024){  
+        fprintf(stderr, "invalid ksz=: %d, vsz=%d\n", ksz, vsz);  
+        return NULL;  
+    }  
+    int need = sizeof(DataRecord) - sizeof(char*) + ksz + vsz;  
+    if (size < need) {  
+        fprintf(stderr, "not enough data in buffer: %d < %d\n", size, need);  
+        return NULL;  
+    }  
+    // CRC check ?  
+  
+    DataRecord *r2 = (DataRecord *) malloc(need + 1 + sizeof(char*));  
+    memcpy(r2, r, sizeof(DataRecord) + ksz);  
+    r2->key[ksz] = 0; // c str      
+    r2->free_value = false;  
+    r2->value = r2->key + ksz + 1;  
+    memcpy(r2->value, r->key + ksz, vsz);  
+  
+    return decompress_record(r2);  
+}  
+  
+//从f中读取一个DataRecord  
+//1.分步骤读取。  
+//  1.1.首先从文件中读一个PADDING出来，这是一个DataRecord所占的最小的文件空间。  
+//  1.2.计算读取的内容中是否包含完整的value  
+//2.crc校验  
+//3.解压缩  
+DataRecord* read_record(FILE *f, bool decomp)  
+{  
+    //1  
+    //申请的空间比DataRecord的size大没有关系。  
+    DataRecord *r = (DataRecord*) malloc(PADDING + sizeof(char*));  
+    r->value = NULL;  
+  
+    //1.1  
+    if (fread(&r->crc, 1, PADDING, f) != PADDING) {//或者到达f的末尾，或者f为空。  
+        fprintf(stderr, "read record faied\n");           
+        goto READ_END;  
+    }  
+  
+    int ksz = r->ksz, vsz = r->vsz;  
+    if (ksz < 0 || ksz > 200 || vsz < 0 || vsz > 100 * 1024 * 1024){  
+        fprintf(stderr, "invalid ksz=: %d, vsz=%d\n", ksz, vsz);  
+        goto READ_END;  
+    }  
+  
+    uint32_t crc_old = r->crc;  
+    //1.2  
+    //计算PADDING的数据中除了DataRecord和它的key以外，还有多少数据。  
+    //sizeof(char*)是DataRecord最后的key[0]  
+    int read_size = PADDING - (sizeof(DataRecord) - sizeof(char*)) - ksz;  
+    if (vsz < read_size) {//value只存在于刚才读取的PADDING里  
+        r->value = r->key + ksz + 1; //key的最后一个字节是结束符'\0'，所以加1  
+        r->free_value = false;  
+        //后移一个字节，腾出空间给key的0  
+        memmove(r->value, r->key + ksz, vsz);  
+        //注意如果包含完整的value，那么读取的这个PADDING里也没有其它DataRecord的内容了。  
+        //因为是按照PADDING对齐的。  
+    }else{//刚才的PADDING没有读完，在f中还有残留  
+        r->value = malloc(vsz);  
+        r->free_value = true;  
+        //先把可以读的读到  
+        memcpy(r->value, r->key + ksz, read_size);  
+        int need = vsz - read_size;  
+        int ret = 0;  
+        //然后再从文件中读  
+        if (need > 0 && need != (ret=fread(r->value + read_size, 1, need, f))) {  
+            r->key[ksz] = 0; // c str      
+            fprintf(stderr, "read record %s faied: %d < %d @%ld\n", r->key, ret, need, ftell(f));   
+            goto READ_END;  
+        }  
+    }  
+    r->key[ksz] = 0; // c str  
+  
+    //2  
+    uint32_t crc = crc32(0, (char*)(&r->tstamp),   
+        sizeof(DataRecord) - sizeof(char*) - sizeof(uint32_t) + ksz);  
+    crc = crc32(crc, r->value, vsz);  
+    if (crc != crc_old){  
+        fprintf(stderr, "%s @%ld crc32 check failed %d != %d\n", r->key, ftell(f), crc, r->crc);  
+        goto READ_END;  
+    }  
+  
+    //3  
+    if (decomp) {  
+        r = decompress_record(r);  
+    }  
+    return r;  
+  
+READ_END:  
+    free_record(r);  
+    return NULL;   
+}  
+  
+//encode与compress的不同是，encode是整个的记录，这包括crc，而compress只是K、V  
+char* encode_record(DataRecord *r, int *size)  
+{  
+    compress_record(r);  
+  
+    int m, n;  
+    int ksz = r->ksz, vsz = r->vsz;  
+    int hs = sizeof(char*); // over header  
+    m = n = sizeof(DataRecord) - hs + ksz + vsz;  
+    //凑成PADDING的整数倍，这样，m的低八位就全为0了  
+    if (n % PADDING != 0) {  
+        m += PADDING - (n % PADDING);  
+    }  
+  
+    char *buf = malloc(m);  
+  
+    DataRecord *data = (DataRecord*)(buf - hs);  
+    memcpy(&data->crc, &r->crc, sizeof(DataRecord)-hs);  
+    memcpy(data->key, r->key, ksz);  
+    memcpy(data->key + ksz, r->value, vsz);  
+    data->crc = crc32(0, (char*)&data->tstamp, n - sizeof(uint32_t));  
+  
+    *size = m;      
+    return buf;  
+}  
+  
+//向文件f中写记录r,f已经定位  
+int write_record(FILE *f, DataRecord *r)   
+{  
+    int size;  
+    char *data = encode_record(r, &size);  
+    if (fwrite(data, 1, size, f) < size){  
+        fprintf(stderr, "write %d byte failed\n", size);  
+        free(data);  
+        return -1;  
+    }  
+    free(data);  
+    return 0;  
+}  
+  
+//遍历DataFile中的DataRecord加入到tree中。  
+//注意这个函数的调用情境，是在bc_open时，发现对应hintfile不存在后才调用的。  
+//bc_open是datafile决定tree(因为tree一开始是不存在的)，  
+//而optimize是tree决定datafile(因为tree中的数据是最新的)  
+//1.准备工作：打开datafile，新建一个htree来记录hint  
+//2.依次读取DataRecord，加入到tree中。  
+//3.新建hintfile文件。  
+void scanDataFile(HTree* tree, int bucket, const char* path, const char* hintpath)  
+{  
+    if (bucket < 0 || bucket > 255) return;  
+  
+    //1  
+    FILE *df = fopen(path, "rb");  
+    if (NULL==df){  
+        fprintf(stderr, "open %s failed\n", path);  
+        return;  
+    }  
+    fprintf(stderr, "scan datafile %s \n", path);  
+  
+    //datafile对应的tree  
+    HTree *cur_tree = ht_new(0);  
+    fseek(df, 0, SEEK_END);  
+    uint32_t total = ftell(df);  
+    fseek(df, 0, SEEK_SET);  
+    uint32_t pos = 0;  
+    //2  
+    while (pos < total) {  
+        DataRecord *r = read_record(df, true);  
+        if (r != NULL) {  
+            uint16_t hash = gen_hash(r->value, r->vsz);  
+            //datafile决定tree  
+            //pos是Item->pos的前24位，bucket是后8位  
+            if (r->version > 0){  
+                ht_add(tree, r->key, pos | bucket, hash, r->version);              
+            }else{  
+                ht_remove(tree, r->key);  
+            }  
+            ht_add(cur_tree, r->key, pos | bucket, hash, r->version);  
+            free_record(r);  
+        }  
+  
+        //datafile文件是以PADDING个字节对齐的  
+        pos = ftell(df);  
+        if (pos % PADDING != 0){  
+            int left = PADDING - (pos % PADDING);  
+            fseek(df, left, SEEK_CUR);  
+            pos += left;  
+        }  
+    }  
+    fclose(df);  
+    //3  
+    build_hint(cur_tree, hintpath);  
+}  
+  
+//只考察befor之前的record  
+void scanDataFileBefore(HTree* tree, int bucket, const char* path, time_t before)  
+{  
+    if (bucket < 0 || bucket > 255) return;  
+  
+    FILE *df = fopen(path, "rb");  
+    if (NULL == df){  
+        fprintf(stderr, "open %s failed\n", path);  
+        return;  
+    }  
+    fprintf(stderr, "scan datafile %s before %ld\n", path, before);  
+  
+    fseek(df, 0, SEEK_END);  
+    uint32_t total = ftell(df);  
+    fseek(df, 0, SEEK_SET);  
+    uint32_t pos = 0;  
+    while (pos < total) {  
+        DataRecord *r = read_record(df, true);  
+        if (r != NULL) {  
+            //这个记录是在时间戳之后才有的  
+            if (r->tstamp >= before ){  
+                break;  
+            }  
+            if (r->version > 0){  
+                uint16_t hash = gen_hash(r->value, r->vsz);  
+                ht_add(tree, r->key, pos | bucket, hash, r->version);              
+            }else{  
+                ht_remove(tree, r->key);  
+            }  
+            free_record(r);  
+        }  
+  
+        pos = ftell(df);  
+        if (pos % PADDING != 0){  
+            int left = PADDING - (pos % PADDING);  
+            fseek(df, left, SEEK_CUR);  
+            pos += left;  
+        }  
+    }  
+  
+    fclose(df);  
+}  
+  
+//计算删除掉的记录  
+//从path对应的hint文件中，逐一扫描HintRecord，如果发现HintRecord跟tree中的key对应的  
+//Item不符，或者tree中不存在，或者tree中的ver小于0，那么deleted++  
+//total记录hint文件中总的HintRecord的数目  
+//1.打开path(hint)处的文件,读取内容并解压，存入到一个buf中  
+//2.从buf中依次得到HintRecord  
+//3.比较这些record在tree中是否被删除了(ver<0或者tree中不存在)或者被移动到了其它的文件  
+static int count_deleted_record(HTree* tree, int bucket, const char* path, int *total)  
+{  
+    char *addr;  
+    int fd;  
+    struct stat sb;  
+    size_t length;  
+  
+    *total = 0;  
+  
+    //1  
+    fd = open(path, O_RDONLY);  
+    if (fd == -1) {  
+        fprintf(stderr, "open %s failed\n", path);  
+        return 0;   
+    }  
+  
+    if (fstat(fd, &sb) == -1 || sb.st_size == 0){  
+        close(fd);  
+        return 0;  
+    }  
+  
+    addr = (char*) mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);  
+    if (addr == MAP_FAILED){  
+        fprintf(stderr, "mmap failed %s\n", path);  
+        close(fd);  
+        return 0;  
+    }  
+  
+    //解压  
+    char *start = addr, *end = addr + sb.st_size;  
+    if (strcmp(path + strlen(path) - 4, ".qlz") == 0) {  
+        char wbuf[QLZ_SCRATCH_DECOMPRESS];  
+        int size = qlz_size_decompressed(addr);  
+        start = malloc(size);  
+        int vsize = qlz_decompress(addr, start, wbuf);  
+        if (vsize < size) {  
+            fprintf(stderr, "decompress %s failed: %d < %d, remove it\n", path, vsize, size);  
+            unlink(path);  
+            return 0;  
+        }  
+        end = start + vsize;  
+    }  
+  
+    char *p = start;  
+    int deleted = 0;  
+    while (p < end) {  
+        HintRecord *r = (HintRecord*) p;  
+        p += sizeof(HintRecord) - NAME_IN_RECORD + r->ksize + 1;  
+        if (p > end){  
+            fprintf(stderr, "scan %s: unexpected end, need %ld byte\n", path, p - end);  
+            break;  
+        }  
+        (*total) ++;  
+        Item *it = ht_get(tree, r->name);  
+        //关于it->pos != ((r->pos << 8) | bucket)：  
+        //如果一个record被删除了，然后相同的key又被插入，这样两个datafile中就会有  
+        //相同的key对应的data，但是bc->tree中是只有一个的，可以据此消除重复  
+        if (it == NULL || it->pos != ((r->pos << 8) | bucket) || it->ver <= 0) {  
+            deleted ++;  
+        }  
+        if (it) free(it);  
+    }  
+  
+    munmap(addr, sb.st_size);  
+    if (start != addr) free(start);  
+    close(fd);  
+  
+    return deleted;  
+}  
+  
+//优化，通过hintpath的统计记录，来决定是否优化data文件  
+//将有效record对应的item保存至一棵新建的树中，也就是用来进行hint的tree  
+//1.估算是否值得优化,如果是，打开一个临时文件进行写入  
+//2.扫面datafile中的每个DataRecord，看看它  
+//  a.在tree中不存在  
+//  b.改变了位置——或者不在这个文件中，或者在文件中的其它位置  
+//  c.ver < 0  
+//  如果以上条件都不满足，才能写进新的文件中  
+//3.修改临时文件名，完成优化。  
+HTree* optimizeDataFile(HTree* tree, int bucket, const char* path, const char* hintpath, int limit)   
+{  
+    //1  
+    int all = 0;  
+    //hintpath的文件中保存的是老数据。需要跟tree里的新数据比较。  
+    int deleted = count_deleted_record(tree, bucket, hintpath, &all);  
+    //只有删除的record占到总record的十分之一，才进行优化  
+    if (deleted <= all * 0.1 && deleted <= limit) {  
+        fprintf(stderr, "only %d records deleted in %d, skip %s\n", deleted, all, path);  
+        return NULL;  
+    }  
+  
+    FILE *df = fopen(path, "rb");  
+    if (NULL==df){  
+        fprintf(stderr, "open %s failed\n", path);  
+        return NULL;  
+    }  
+    char tmp[255];  
+    sprintf(tmp, "%s.tmp", path);  
+    FILE *new_df = fopen(tmp, "wb");  
+    if (NULL==new_df){  
+        fprintf(stderr, "open %s failed\n", tmp);  
+        fclose(df);  
+        return NULL;  
+    }  
+  
+    //1  
+    HTree *cur_tree = ht_new(0);  
+    fseek(df, 0, SEEK_END);  
+    uint32_t total = ftell(df);  
+    fseek(df, 0, SEEK_SET);  
+    uint32_t pos = 0;  
+    deleted = 0;  
+    while (pos < total) {  
+        DataRecord *r = read_record(df, false);  
+        if (r != NULL) {  
+            Item *it = ht_get(tree, r->key);  
+            //这个item是在这个datafile中的  
+            //与scanDataFIle相对应，这里是tree决定datafile  
+            if (it && it->pos  == (pos | bucket) && it->ver > 0) {  
+                r->version = it->ver;  
+                uint32_t new_pos = ftell(new_df);  
+                uint16_t hash = it->hash;  
+                //数据在datafile中的pos改变了。  
+                ht_add(cur_tree, r->key, new_pos | bucket, hash, it->ver);  
+                if (write_record(new_df, r) != 0) {  
+                    ht_destroy(cur_tree);  
+                    fclose(df);  
+                    fclose(new_df);  
+                    return NULL;  
+                }  
+            }else{  
+                deleted ++;  
+            }  
+            if (it) free(it);  
+            free_record(r);  
+        }  
+  
+        //对齐  
+        pos = ftell(df);  
+        if (pos % PADDING != 0){  
+            int left = PADDING - (pos % PADDING);  
+            fseek(df, left, SEEK_CUR);  
+            pos += left;  
+        }  
+    }  
+    uint32_t deleted_bytes = ftell(df) - ftell(new_df);  
+    fclose(df);  
+    fclose(new_df);  
+  
+    //3  
+    unlink(hintpath);  
+    unlink(path);  
+    rename(tmp, path);  
+    fprintf(stderr, "optimize %s complete, %d records deleted, %d bytes came back\n",   
+        path, deleted, deleted_bytes);  
+    return cur_tree;  
+}  
+  
+//对datafile中的record进行遍历。  
+void visit_record(const char* path, RecordVisitor visitor, void *arg1, void *arg2, bool decomp)  
+{  
+    FILE *df = fopen(path, "rb");  
+    if (NULL==df){  
+        fprintf(stderr, "open %s failed\n", path);  
+        return;  
+    }  
+    fprintf(stderr, "scan datafile %s \n", path);  
+  
+    fseek(df, 0, SEEK_END);  
+    uint32_t total = ftell(df);  
+    fseek(df, 0, SEEK_SET);  
+    uint32_t pos = 0;  
+    while (pos < total) {  
+        DataRecord *r = read_record(df, decomp);  
+        if (r != NULL) {  
+            bool cont = visitor(r, arg1, arg2);  
+            if (cont) break;  
+        }  
+  
+        pos = ftell(df);  
+        if (pos % PADDING != 0){  
+            int left = PADDING - (pos % PADDING);  
+            fseek(df, left, SEEK_CUR);  
+            pos += left;  
+        }  
+    }  
+    fclose(df);  
+}  
+#+end_src
+** htree.c
+
+*** 数据结构
+#+begin_src c
+typedef struct t_item Item;
+struct t_item {
+        //int bucket = item->pos & 0xff; //表示是第几个文件
+        //uint32_t pos = item->pos & 0xffffff00; //表示在文件中的位置
+        uint32_t pos;
+      
+        //大于0该数据有效，小于0表明无效。
+        //ver不会等于0，因此如果set的参数为0时，表示是更新
+        //ver不会等于-1，因此set的参数为-1时，表示是删除。
+        //ver的更新方法见bitcast.c中的bc_set函数
+        //
+        int32_t  ver;
+      
+        uint16_t hash; //在bitcask.c的bc_set函数中被赋值  
+        uint8_t  length; //这个item的长度。通过这个长度找到下一个item  
+        char     name[1];
 };
+//key的最大长度  
+const int MAX_KEY_LENGTH = 200;  
+//Bucket里存放节点。  
+//一个非数据节点分成16个bucket（就是子树），每个bucket是另一个节点  
+//这个跟bitcask的bucket是不同的  
+const int BUCKET_SIZE = 16;  
+//非数据节点中的count超过此限制要分裂  
+const int SPLIT_LIMIT = 32;   
+//树的最大深度  
+const int MAX_DEPTH = 8;   
+//g_index[i] = (g_index[i-1] << 4) + g_index[i-1];  
+//g_index[i]表示的是第i层前共有多少个节点  
+//HTree最多有410338673个节点  
+static const int g_index[] = {0, 1, 17, 289, 4913, 83521, 1419857, 24137569, 410338673};  
+  
+#define max(a,b) ((a)>(b)?(a):(b))  
+
+//it是第几个孩子节点,0x0f说明最多有16个孩子节点
+//这个宏使用keyhash索引节点。
+#define INDEX(it) (0x0f & (keyhash >> ((7 - node->depth - tree->depth) * 4)))  
+//length包含了item的size，由于结构的最后一个是变长数组，所以多减了一个字符，需要加上。  
+#define KEYLENGTH(it) ((it)->length-sizeof(Item)+ITEM_PADDING)  
+//如果it不是一个有效的节点，该宏返回0  
+#define HASH(it) ((it)->hash * ((it)->ver>0))  
+static const long long g_index[] = {0, 1, 17, 273, 4369, 69905, 1118481, 17895697, 286331153, 4581298449L};
+
+//每个节点有16个孩子，可以通过INDEX宏得到该孩子的位置  
+//如果这个node里并没有数据，那么这个node只占64比特，参见clear函数  
+//否则，这个node存储数据Data，Data里有多个item，通过item的长度找到下一个item的地址  
+//树的数据节点不一定是在同一层的  
+typedef struct t_data Data;  
+struct t_data {  
+    int size; //总大小  
+    int used; //已用大小  
+    int count;//item的个数  
+    Item head[0];  
+};  
+  
+typedef struct t_node Node;  
+struct t_node {  
+    uint16_t is_node:1; //=1，说明这个node里没有存放数据，否则就是存放了数据的  
+    uint16_t valid:1; //说明这个节点是有效的，即它与它的所有子节点都没有被改动过  
+    uint16_t depth:4; //该节点的深度  
+    uint16_t compressed:1; //是否被压缩了  
+    uint16_t flag:9;   
+    uint16_t hash; //哈希值，如果这个节点是非数据节点，这个值是所有子节点的哈希值之和  
+    //如果是数据节点，这个值是所有ver大于0的item的哈希值的和  
+    uint32_t count; //所有子节点里ver>0的item的个数  
+    Data *data;  
+};  
+  
+//node的count和data的count是不一样的。  
+//data的count表示有多少个item,node的count表示有多少个item的ver是>0的。  
+//htree是一块连续的内存，相当于使用数组存放一个N叉树。  
+struct t_hash_tree {  
+    int depth; //  
+    int height; //depth = hight-1  
+    Node *root;  
+    int pool_size; //节点的数目  
+    pthread_mutex_t lock;  
+    char buf[512];  
+  
+    bool compress; //是否压缩  
+    char wbuf[QLZ_SCRATCH_COMPRESS];  
+    char cbuf[1024 * 10];  
+};  
+
 #define INDEX(it) (0x0f & (keyhash >> ((7 - node->depth - tree->depth) * 4)))
 #+end_src
 通过ht_new()函数，我们知道root指向一片连续的sizeof(Node)*g_index[tree.height] 大小的 内存
@@ -29,7 +1478,8 @@ g_index：
 16^0, 16^0 + 16^1, 16^0 + 16^1 + 16^2, ... , 16^0 + ... + 16^k
 可以知道tree实际上是每个节点最多有16子节点。
 
-获取node在其父节点中的位置
+*** get_pos
+    获取node在其父节中的位置
 #+begin_src c
 static inline uint32_t get_pos(HTree *tree, Node *node)
 {
@@ -37,11 +1487,423 @@ static inline uint32_t get_pos(HTree *tree, Node *node)
 }
 #+end_src
 
-获取node的子节点
+*** get_child
+    获取node的子节点
 #+begin_src c
 static inline Node *get_child(HTree *tree, Node *node, int b)
 {
-    int i = g_index[node->depth + 1] + (get_pos(tree, node) << 4) + b;
+    int i = g_index[node->depth + 1]     // node的孩子节点这一层之前总共有多少个节点 
+            + (get_pos(tree, node) << 4) // node的第1个孩子节点的位置
+            + b;
     return tree->root + i;
+}
+#+end_src
+
+#+begin_src c
+static inline uint32_t key_hash(HTree *tree, Item* it)
+{
+    char buf[255];
+    // 由于有对key的编码，所以要先解码，才能取哈希值 
+    int n = dc_decode(tree->dc, buf, it->key, KEYLENGTH(it));
+    return fnv1a(buf, n);
+}
+#+end_src
+
+*** enlarge_pool
+树增高一层
+#+begin_src c
+static void enlarge_pool(HTree *tree)
+{
+    int i;
+    int old_size = g_index[tree->height];
+    int new_size = g_index[tree->height + 1];
+    
+    tree->root = (Node*)realloc(tree->root, sizeof(Node) * new_size);
+    memset(tree->root + old_size, 0, sizeof(Node) * (new_size - old_size));
+    for (i=old_size; i<new_size; i++){
+        tree->root[i].depth = tree->height;
+    }
+
+    tree->height ++;
+}
+#+end_src
+
+*** key_hash 
+注意key_hash产生的hash跟Item中的hash是不一样的  
+这里的hash是为了便于在htree中查找。  
+#+begin_src c
+inline uint32_t key_hash(Item* it)  
+{  
+    char buf[255];  
+    //由于有对key的编码，所以要先解码，才能取哈希值  
+    int n = dc_decode(buf, it->name, KEYLENGTH(it));  
+    //哈希函数  
+    return fnv1a(buf, n);  
+}  
+#+end_src
+*** add_item
+增加item
+将it插入到树中node节点开始的位置  
+1.找到这个node下面的数据节点  
+2.数据节点中存放的是Item组成的数组，根据Item的length域遍历这个数据节点的信息  
+3.接下来就相当于数组的插入了，更新数据节点的count域和hash域  
+3.1.如果找到了相同的key，那么更新这个Item  
+3.2.否则将it放入到数组的末尾，更新Data的used域  
+4.如果是插入，则有可能造成count的扩大，需要对数据节点进行分裂。  
+4.1.数据节点在树的最底层，那么允许一个数据节点存储的Item的个数为LIMIT*4， 这是为了防止enlarge_pool造成过多内存的使用  
+4.2.数据节点在树的中间部分，也就是说数据节点下面还有节点，那么为了使查找更有效率，需要尽量减少数据节点中Item的个数，超过LIMIT就要分裂  
+
+#+begin_src c
+static void add_item(HTree *tree, Node *node, Item *it, uint32_t keyhash, bool enlarge)
+{
+    //1.
+    //由于对数据节点进行了变更，所以要把所走过的路径中的所有节点的valid设为0  
+    //这样update_node时就可以根据valid值决定是否要更新此节点及它的子节点
+    while (node->is_node) {
+        node->valid = 0;
+        node = get_child(tree, node, INDEX(it));
+    }
+
+    Data *data = get_data(node);
+    Item *p = data->head;
+    int i;
+    for (i=0; i<data->count; i++){
+        if (it->length == p->length && 
+                memcmp(it->key, p->key, KEYLENGTH(it)) == 0){
+            node->hash += (HASH(it) - HASH(p)) * keyhash;
+            node->count += it->ver > 0;
+            node->count -= p->ver > 0;
+            memcpy(p, it, sizeof(Item));
+            return;
+        }
+        p = (Item*)((char*)p + p->length);
+    }
+
+    if (data->size < data->used + it->length){
+        int size = max(data->used + it->length, data->size + 64);
+        int pos = (char*)p-(char*)data;
+        Data *new_data = (Data*) malloc(size);
+        memcpy(new_data, data, data->used);
+        data = new_data;
+        set_data(node, data);
+        data->size = size;
+        p = (Item *)((char*)data + pos);
+    }
+    
+    memcpy(p, it, it->length);
+    data->count ++;
+    data->used += it->length;
+    node->count += it->ver > 0;
+    node->hash += keyhash * HASH(it);
+    
+    if (node->count > SPLIT_LIMIT){
+        //这个node是树的最底层
+        if (node->depth == tree->height - 1){
+            //如果这个数的在树的最底层，就要*4，防止频繁地enlarge造成空间太大 
+            if (enlarge && node->count > SPLIT_LIMIT * 4){
+                int pos = node - tree->root;
+                //树的高度加深
+                enlarge_pool(tree);
+                node = tree->root + pos; // reload
+                split_node(tree, node);
+            }
+        }else{
+            split_node(tree, node);
+        }
+    }
+}
+#+end_src
+
+*** split_node
+将node中的数据分发到它的下一层孩子节点中  
+完成后，这个节点就变成了一个普通的节点，里面没有数据；它的16个孩子成为新的数据节点  
+1.得到node的孩子节点，并reset  
+2.根据哈希值将数据放入对应的孩子节点  
+3.更新node对应的域  
+#+begin_src c
+static void split_node(HTree *tree, Node *node)
+{
+    //1  
+    //得到这个节点的第一个孩子 
+    Node *child = get_child(tree, node, 0);
+    int i;
+    //把所有的孩子节点都清空
+    for (i=0; i<BUCKET_SIZE; i++){
+        clear(tree, child+i);
+    }
+    
+    Data *data = get_data(node);
+    Item *it = data->head;
+    //把这个数据节点的所有item放入它的孩子节点中
+    for (i=0; i<data->count; i++) {
+        int32_t keyhash = key_hash(tree, it);
+        add_item(tree, child + INDEX(it), it, keyhash, false);
+        it = (Item*)((char*)it + it->length);
+    }
+   
+    set_data(node, NULL);
+    //这个节点变为普通节点
+    node->is_node = 1;
+    //这个节点更改了，update_node的时候就要更新这个节点的哈希值  
+    node->valid = 0;
+}
+#+end_src
+
+*** remove_item
+//移除一个Item  
+//1.找到数据节点
+//2.在Data中查找对应的Item
+//3.删除之，并更新数据节点对应的域 
+#+begin_src c
+static void remove_item(HTree *tree, Node *node, Item *it, uint32_t keyhash)
+{
+    //1  
+    //由于对数据节点进行了变更，所以要把所走过的路径中的所有节点的valid设为0  
+    //这样update_node时就可以根据valid值决定是否要更新此节点及它的子节点  
+    while (node->is_node) {
+        node->valid = 0;
+        node = get_child(tree, node, INDEX(it));
+    }
+    //2
+    Data *data = get_data(node);
+    if (data->count == 0) return ;
+    Item *p = data->head;
+    int i;
+    for (i=0; i<data->count; i++){
+        if (it->length == p->length && 
+                memcmp(it->key, p->key, KEYLENGTH(it)) == 0){
+            //3
+            data->count --;
+            data->used -= p->length;
+            node->count -= p->ver > 0;
+            node->hash -= keyhash * HASH(p);
+            //将it删除，后面的移动过来
+            memmove(p, (char*)p + p->length, 
+                    data->size - ((char*)p - (char*)data) - p->length);
+            set_data(node, data);
+            return;
+        }
+        //否则检查下一个item
+        p = (Item*)((char*)p + p->length);
+    }
+}
+#+end_src
+
+*** merge_node
+将数据节点node的孩子节点中的数据放入到node中，ver<0的节点则被抛弃  
+这样node成为数据节点，它的孩子节点成为普通节点,减少数据的分散性  
+1.reset node节点  
+2.遍历每个孩子节点的Data，将其中ver>0的Item放入到node中  
+3.reset 这个孩子节点
+#+begin_src c
+static void merge_node(HTree *tree, Node *node)
+{
+    //1
+    clear(tree, node);
+    //2
+    Node* child = get_child(tree, node, 0);
+    int i, j;
+    //将node所有孩子节点的item都集中到自己身上  
+    //同时删除了ver小于0的item 
+    for (i=0; i<BUCKET_SIZE; i++){
+        Data *data = get_data(child+i); 
+        Item *it = data->head;
+        // TODO: count计算不对，(child+i)->count是有效Item的大小  
+        // TODO: 这里应该是int count = data->count因为要遍历的是所有的item  
+        int count = (child+i)->count;
+        for (j=0; j < count; j++){
+            if (it->ver > 0) {
+                add_item(tree, node, it, key_hash(tree, it), false);
+            } // drop deleted items, ver < 0
+            it = (Item*)((char*)it + it->length);
+        }
+        //3
+        clear(tree, child + i);
+    }
+}
+#+end_src
+
+*** update_node
+递归更新HTree中每个Node的hash和count域，将更新完成的Node的valid域设置为1 
+#+begin_src c
+static void update_node(HTree *tree, Node *node)
+{
+    //这个节点及它的所有子节点都没有被改动过  
+    //就没有必要更新这个节点的哈希值
+    if (node->valid) return ;
+    
+    int i;
+    node->hash = 0;
+    //只更新普通节点的哈希，数据节点的哈希在add_item的时候已经计算过了，它永远是valid的 
+    if (node->is_node){
+        Node *child = get_child(tree, node, 0);
+        node->count = 0;
+        //递归遍历所有的子节点，得到它们的有效item的数目
+        for (i=0; i<BUCKET_SIZE; i++){
+            update_node(tree, child+i);
+            node->count += child[i].count;
+        }
+        //遍历孩子节点，更新node的哈希值
+        for (i=0; i<BUCKET_SIZE; i++){
+            if (node->count > SPLIT_LIMIT * 4){
+                node->hash *= 97;               
+            }
+            node->hash += child[i].hash;
+        }
+    }
+    node->valid = 1;
+    
+    // merge nodes
+    if (node->count <= SPLIT_LIMIT) {
+        merge_node(tree, node);
+    }
+}
+#+end_src
+*** get_item_hash
+通过哈希得到item
+#+begin_src c
+static Item* get_item_hash(HTree* tree, Node* node, Item* it, uint32_t keyhash)
+{
+    while (node->is_node) {
+        node = get_child(tree, node, INDEX(it));
+    }
+    
+    Data *data = get_data(node);
+    Item *p = data->head, *r = NULL;
+    int i;
+    for (i=0; i<data->count; i++){
+        if (it->length == p->length && 
+                memcmp(it->key, p->key, KEYLENGTH(it)) == 0){
+            r = p;
+            break;
+        }
+        p = (Item*)((char*)p + p->length);
+    }
+    return r;
+}
+#+end_src
+
+*** get_node_hash
+dir所表示的节点的哈希值之和
+dir[i]表示的是从node开始的第i层的节点的子节点的位置
+dir的len最多只有tree->hight
+将node的ver>0的item个数存储在count中
+#+begin_src c
+static uint16_t get_node_hash(HTree* tree, Node* node, const char* dir, 
+    int *count)
+{
+    if (node->is_node && strlen(dir) > 0){
+        char i = hex2int(dir[0]);
+        if (i >= 0) {
+            return get_node_hash(tree, get_child(tree, node, i), dir+1, count);
+        }else{
+            if(count) *count = 0;
+            return 0;
+        }
+    }
+    //更新dir对应的node的哈希，并返回
+    update_node(tree, node);
+    if (count) *count = node->count;
+    return node->hash;
+}
+#+end_src
+
+*** list_dir
+找到key的前缀是prefix的item 
+#+begin_src c
+static char* list_dir(HTree *tree, Node* node, const char* dir, const char* prefix)
+{
+    int dlen = strlen(dir); 
+    //直到它的最后一个孩子节点（dlen == 0），或者这个孩子节点已经是叶子节点了 !is_node
+    while (node->is_node && dlen > 0){
+        int b = hex2int(dir[0]);
+        if (b >=0 && b < 16) {
+            node = get_child(tree, node, b);
+            dir ++;
+            dlen --;
+        }else{
+            return NULL;
+        }
+    }
+    
+    int bsize = 4096;
+    char *buf = (char*) malloc(bsize);
+    memset(buf, 0, bsize);
+    int n = 0, i, j;
+    //如果dir的最后一个节点不是数据节点
+    if (node->is_node) {
+        update_node(tree, node);
+
+        Node *child = get_child(tree, node, 0);
+        //把它的所有子节点都打印出来
+        if (node->count > 100000 || prefix==NULL && node->count > SPLIT_LIMIT * 4) {
+            for (i=0; i<BUCKET_SIZE; i++) {
+                Node *t = child + i;
+                n += snprintf(buf + n, bsize - n, "%x/ %u %u\n", 
+                            i, t->hash, t->count);
+            }
+        }else{
+            //找到这个孩子节点的孩子节点.dir = ""说明直接找到它的孩子节点
+            for (i=0; i<BUCKET_SIZE; i++) {
+                char *r = list_dir(tree, child + i, "", prefix);
+                int rl = strlen(r) + 1;
+                if (bsize - n < rl) {
+                    bsize += rl;
+                    buf = (char*)realloc(buf, bsize);
+                }
+                n += sprintf(buf + n, "%s", r);
+                free(r);
+            }
+        }
+    }else{//如果dir的最后一个节点是数据节点
+        Data *data = get_data(node); 
+        Item *it = data->head;
+        char pbuf[20], key[255];
+        int prefix_len = 0;
+        if (prefix != NULL) prefix_len = strlen(prefix);
+        for (i=0; i<data->count; i++, it = (Item*)((char*)it + it->length)){
+            if (dlen > 0){
+                sprintf(pbuf, "%08x", key_hash(tree, it));
+                if (memcmp(pbuf + tree->depth + node->depth, dir, dlen) != 0){
+                    continue;
+                }
+            }
+            int l = dc_decode(tree->dc, key, it->key, KEYLENGTH(it));
+            if (prefix == NULL || l >= prefix_len && strncmp(key, prefix, prefix_len) == 0) {
+                n += snprintf(buf+n, bsize-n-1, "%s %u %d\n", key, it->hash, it->ver);
+                if (bsize - n < 200) {
+                    bsize *= 2;
+                    buf = (char*)realloc(buf, bsize);
+                }
+            }
+        }
+    }
+    return buf;
+}
+#+end_src
+*** visit_node
+遍历HTree
+#+begin_src c
+static void visit_node(HTree *tree, Node* node, fun_visitor visitor, void* param)
+{
+    int i;
+    //如果不是叶子节点，则向下寻找叶子节点
+    if (node->is_node){
+        Node *child = get_child(tree, node, 0);
+        for (i=0; i<BUCKET_SIZE; i++){
+            visit_node(tree, child+i, visitor, param);
+        }
+    }else{//是叶子节点，可以遍历里面的数据
+        Data *data = get_data(node);
+        Item *p = data->head;
+        Item *it = (Item*)tree->buf;
+        for (i=0; i<data->count; i++){
+            memcpy(it, p, sizeof(Item));
+            dc_decode(tree->dc, it->key, p->key, KEYLENGTH(p));
+            it->length = sizeof(Item) + strlen(it->key) - ITEM_PADDING;
+            visitor(it, param);
+            p = (Item*)((char*)p + p->length);
+        }
+    }    
 }
 #+end_src
