@@ -4,6 +4,7 @@
   http://www.gtdstudy.com
   http://mindhacks.cn/
   http://www.geekonomics10000.com/
+弯曲评论
   http://www.tektalk.org
  外刊IT评论  http://www.aqee.net/ 有一些好的技术心得
  Robert Sedgewick http://www.cs.princeton.edu/~rs/
@@ -18,3 +19,4 @@
  刘爱贵的专栏 存储 http://blog.csdn.net/liuben
  http://www.nowamagic.net/librarys/veda/cate/Program
  酷壳
+ http://coolshell.cn/

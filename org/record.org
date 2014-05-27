@@ -1821,6 +1821,7 @@ linux-19:~/test/initrd #
   后来我提意，将网卡设置成混杂模式，然后在测试，路由就是通的。
   最后发现网桥的接口就是需要在混杂模式。可能之前有人改过配置。
 * valgrind
+** 内存泄漏检查
 #+begin_src c
 #include <stdlib.h>
 
@@ -1833,6 +1834,27 @@ int main()
 #+end_src
 运行valgrind ./test
 结果就发现了：p[10] = 1 处越界访问。
+
+
+
+基于glib的程序，由于内存分配与回收机制的问题，valgrind会做出错误的统计。Glib提供了针对valgrind友好的内存分配手段，使用方式如下：
+
+G_SLICE=always-malloc G_DEBUG=gc-friendly valgrind --tool=memcheck --leak-check=full --leak-resolution=high --num-callers=20--suppressions=<filename> --gen-suppressions=all --log-file=vgdump gdbus_test
+
+参数说明：
+
+G_SLICE=always-malloc与G_DEBUG=gc-friendly，通知glib使用valgrind友好的内存分配手段
+
+--tool=memcheck --leak-check=full --leak-resolution=high --num-callers=20，valgrind参数
+
+--suppressions，根据filename的内容，压制不必要的内存泄露提示，如，g_type_init里会分配一些运行期内不会释放的空间，并不能认为是内存泄露，压制的语法可以参考附件。
+
+--log-file，可以将log打入文件中，用于后续分析
+
+gdbus_test，要测试的程序。
+
+** memory profile
+   --tool=massif
 
 ** 使用valgrind调试fastcgi程序
 
@@ -2827,188 +2849,6 @@ b) 使用密码加密一段握手消息，发送给浏览器。
 5.浏览器解密并计算握手消息的HASH，如果与服务端发来的HASH一致，此时握手过程结束，之后所有的通信数据将由之前浏览器生成的随机密码并利用对称加密算法进行加密。
 * python matplotlib画图
 * gearman
-Client API
-
-client初始化&析构
-
-gearman_client_st *gearman_client_create(gearman_client_st *client)
-
-void gearman_client_free(gearman_client_st *client)
-
-gearman_return_t gearman_client_add_server(gearman_client_st *client, const char *host, in_port_t port);
-
-gearman_return_t gearman_client_add_servers(gearman_client_st *client, const char *servers); (一次添加多个gearman job-server)
-
-
-同步操作
-
-void * gearman_client_do(gearman_client_st *client, const char *function_name, const char *unique, const void *workload, size_t workload_size, size_t *result_size, gearman_return_t *ret_ptr);
-
-其中：
-
-i. unique: 的作用是client添加job给worker的时候的一个唯一标识，可选，默认是NULL
-
-ii. workload & workload_size指代执行任务的详细参数及其大小
-
-iii. result_size [out]，指代返回数据的大小
-
-iv. ret_ptr [out], 指代gearman的返回status，以下是官方对于返回status的一些说明：
-
-In the case of GEARMAN_WORK_DATA, GEARMAN_WORK_WARNING, or GEARMAN_WORK_STATUS, the caller should take any actions to handle the event and then call this function again. This may happen multiple times until a GEARMAN_WORK_ERROR, GEARMAN_WORK_FAIL, or GEARMAN_SUCCESS (work complete) is returned. For GEARMAN_WORK_DATA or GEARMAN_WORK_WARNING, the result_size will be set to the intermediate data chunk being returned and an allocated data buffer will be returned. For GEARMAN_WORK_STATUS, the caller can use gearman_client_do_status() to get the current tasks status.
-
-总而言之，只有GEARMAN_WORK_ERROR/GEARMAN_WORK_FAIL/GEARMAN_SUCCESS才是三个最终的返回结果，其他的只是临时中间结果，需要进一步调用接受结果的函数(感觉中间结果只有在异步调用过程中才会出现)
-
-v. 输出是返回数据的起始地址，一旦用户用完之后，必须free，否则会出现内存泄露。
-
-void gearman_set_timeout(gearman_universal_st *gearman, int timeout);
-
-设置gearman_client_do多长时调用无返回则超时时间
-
-
-异步callback操作
-
-Gearman通过使用gearman_client_add_task()来望gearman_client_st中添加task，通过gearman_client_set_created_fn() / gearman_client_set_complete_fn()
-等来注册callback function，通过gearman_client_run_tasks()来运行gearman_client_st中的task。
-
-
-异步background操作
-
-系统在background运行job，client定期获得job运行结果，如果成功则返回，反之则继续等待。
-
-gearman_return_t gearman_client_do_background(gearman_client_st *client, 
-            const char *function_name, const char *unique, const void *workload, size_t workload_size, char *job_handle);
-
-i. job_handle [out]: 一个job的标识符
-
-ii. 输出：返回状态
-
- gearman_return_t gearman_client_job_status(gearman_client_st *client, 
-                                            gearman_job_handle_t job_handle,
-                                            bool *is_known, 
-                                            bool * is_running, 
-                                            uint32_t *numerator,
-                                            uint32_t *denominator);
- 用户获得在background执行的job的状态
-
-i. is_known [out]: Optional parameter to store the known status in
-
-ii. is_running [out]: Optional parameter to store the running status in
-
-iii. numerator [out]: Optional parameter to store the numerator in
-
-iv. denominator [out]: Optional parameter to store the denominator in
-
-PS: 好像background操作不怎么好使，不知道如何通过获得background的运行结果，这个是我一直困惑的
-
-
-gearman_client_st的一些属性
-
-gearman_client_st一共有以下3种运行属性：
-
-i. GEARMAN_CLIENT_NON_BLOCKING: client运行在non-blocking mode
-
-ii. GEARMAN_CLIENT_FREE_TASKS: 在task执行完成之后，自动的释放task
-
-iii. GEARMAN_CLIENT_UNBUFFERED_RESULT: Allow the client to read data in chunks rather than have the library buffer the entire data result and pass that back。
-
-可以通过函数gearman_client_add_options() / gearman_client_remove_options() / gearman_client_has_option() 等进行属性添加/删除/判断等
-
-
-Worker API
-
-/**
- * Initialize a worker structure. Always check the return value even if passing
- * in a pre-allocated structure. Some other initialization may have failed. It
- * is not required to memset() a structure before providing it.
- *
- * @param[in] worker Caller allocated structure, or NULL to allocate one.
- * @return On success, a pointer to the (possibly allocated) structure. On
- *  failure this will be NULL.
- */
-GEARMAN_API
-gearman_worker_st *gearman_worker_create(gearman_worker_st *worker);
-
-
-/**
- * Free resources used by a worker structure.
- *
- * @param[in] worker Structure previously initialized with
- *  gearman_worker_create() or gearman_worker_clone().
- */
-GEARMAN_API
-void gearman_worker_free(gearman_worker_st *worker);
-
-
-/**
- * Add a job server to a worker. This goes into a list of servers that can be
- * used to run tasks. No socket I/O happens here, it is just added to a list.
- *
- * @param[in] worker Structure previously initialized with
- *  gearman_worker_create() or gearman_worker_clone().
- * @param[in] host Hostname or IP address (IPv4 or IPv6) of the server to add.
- * @param[in] port Port of the server to add.
- * @return Standard gearman return value.
- */
-GEARMAN_API
-gearman_return_t gearman_worker_add_server(gearman_worker_st *worker,
-                                           const char *host, in_port_t port);
-
-
-/**
- * Add a list of job servers to a worker. The format for the server list is:
- * SERVER[:PORT][,SERVER[:PORT]]...
- * Some examples are:
- * 10.0.0.1,10.0.0.2,10.0.0.3
- * localhost LIBGEARMAN_BITFIELD234,jobserver2.domain.com:7003,10.0.0.3
- *
- * @param[in] worker Structure previously initialized with
- *  gearman_worker_create() or gearman_worker_clone().
- * @param[in] servers Server list described above.
- * @return Standard gearman return value.
- */
-GEARMAN_API
-gearman_return_t gearman_worker_add_servers(gearman_worker_st *worker,
-                                            const char *servers);
-                                            
-/**
- * Register and add callback function for worker. To remove functions that have
- * been added, call gearman_worker_unregister() or
- * gearman_worker_unregister_all().
- *
- * @param[in] worker Structure previously initialized with
- *  gearman_worker_create() or gearman_worker_clone().
- * @param[in] function_name Function name to register.
- * @param[in] timeout Optional timeout (in seconds) that specifies the maximum
- *  time a job should. This is enforced on the job server. A value of 0 means
- *  an infinite time.
- * @param[in] function Function to run when there is a job ready.
- * @param[in] context Argument to pass into the callback function.
- * @return Standard gearman return value.
- */
-GEARMAN_API
-gearman_return_t gearman_worker_add_function(gearman_worker_st *worker,
-                                             const char *function_name,
-                                             uint32_t timeout,
-                                             gearman_worker_fn *function,
-                                             void *context);
-
-
-/**
- * Wait for a job and call the appropriate callback function when it gets one.
- *
- * @param[in] worker Structure previously initialized with
- *  gearman_worker_create() or gearman_worker_clone().
- * @return Standard gearman return value.
- */
-GEARMAN_API
-gearman_return_t gearman_worker_work(gearman_worker_st *worker);
-
-
-/**
- * See gearman_universal_set_timeout() for details.
- */
-GEARMAN_API
-void gearman_worker_set_timeout(gearman_worker_st *worker, int timeout);
 * Linux下程序无core文件定位程序崩溃的方法
 
 Linux平台下运行程序，程序出错core掉，设置了ulimit -c会产生core文件，根据生成的core文件和程序很容易定位程序哪里出了问题。如果在生产环境，可能会存在以下几种情况不能生成core文件
@@ -3141,3 +2981,105 @@ Once rdesktop is successfully connected to the VM via remote desktop, you will s
 需要调整net.ipv4.ip_local_port_range参数
 * recv() hang 程序
   socket没有设置recv timeout
+* tcp_timestamp引发的问题
+    近来线上陆续出现了一些connect失败的问题，经过分析试验，最终确认和proc参数tcp_tw_recycle/tcp_timestamps相关；
+1. 现象
+    第一个现象：模块A通过NAT网关访问服务S成功，而模块B通过NAT网关访问服务S经常性出现connect失败，抓包发现：服务S端已经收到了syn包，但没有回复synack；另外，模块A关闭了tcp timestamp，而模块B开启了tcp timestamp；
+    第二个现象：不同主机上的模块C（开启timestamp），通过NAT网关（1个出口ip）访问同一服务S，主机C1 connect成功，而主机C2 connect失败；
+
+2. 分析
+    根据现象上述问题明显和tcp timestmap有关；查看linux 2.6.32内核源码，发现tcp_tw_recycle/tcp_timestamps都开启的条件下，60s内同一源ip主机的socket connect请求中的timestamp必须是递增的。
+    源码函数：tcp_v4_conn_request(),该函数是tcp层三次握手syn包的处理函数（服务端）；
+    源码片段：
+       if (tmp_opt.saw_tstamp &&
+            tcp_death_row.sysctl_tw_recycle &&
+            (dst = inet_csk_route_req(sk, req)) != NULL &&
+            (peer = rt_get_peer((struct rtable *)dst)) != NULL &&
+            peer->v4daddr == saddr) {
+            if (get_seconds() < peer->tcp_ts_stamp + TCP_PAWS_MSL &&
+                (s32)(peer->tcp_ts - req->ts_recent) >
+                            TCP_PAWS_WINDOW) {
+                NET_INC_STATS_BH(sock_net(sk), LINUX_MIB_PAWSPASSIVEREJECTED);
+                goto drop_and_release;
+            }
+        }
+        tmp_opt.saw_tstamp：该socket支持tcp_timestamp
+        sysctl_tw_recycle：本机系统开启tcp_tw_recycle选项
+        TCP_PAWS_MSL：60s，该条件判断表示该源ip的上次tcp通讯发生在60s内
+        TCP_PAWS_WINDOW：1，该条件判断表示该源ip的上次tcp通讯的timestamp 大于 本次tcp
+
+    分析：主机client1和client2通过NAT网关（1个ip地址）访问serverN，由于timestamp时间为系统启动到当前的时间，因此，client1和client2的timestamp不相同；根据上述syn包处理源码，在tcp_tw_recycle和tcp_timestamps同时开启的条件下，timestamp大的主机访问serverN成功，而timestmap小的主机访问失败；
+
+    参数：/proc/sys/net/ipv4/tcp_timestamps - 控制timestamp选项开启/关闭
+          /proc/sys/net/ipv4/tcp_tw_recycle - 减少timewait socket释放的超时时间
+
+    如果客户端是NAT出来的，并且我们server端有打开tcp_tw_recycle ,并且time stamp也没有关闭，那么假设第一个连接进来，然后关闭，此时这个句柄处于time wait状态，然后很快(小于60秒)又一个客户端(相同的源地址，如果打开了xfrm还要相同的端口号)发一个syn包，此时linux内核就会认为这个数据包异常的，因此就会丢掉这个包,并发送rst。
+
+而现在大部分的客户端都是NAT出来的，因此建议tw_recycle还是关闭,或者说server段关闭掉time stamp(/proc/sys/net/ipv4/tcp_timestamps).
+
+3. 解决方法
+    echo 0 > /proc/sys/net/ipv4/tcp_tw_recycle;
+    tcp_tw_recycle默认是关闭的，有不少服务器，为了提高性能，开启了该选项；
+    为了解决上述问题，个人建议关闭tcp_tw_recycle选项，而不是timestamp；因为 在tcp timestamp关闭的条件下，开启tcp_tw_recycle是不起作用的；而tcp timestamp可以独立开启并起作用。
+    源码函数：  tcp_time_wait()
+    源码片段：
+        if (tcp_death_row.sysctl_tw_recycle && tp->rx_opt.ts_recent_stamp)
+            recycle_ok = icsk->icsk_af_ops->remember_stamp(sk);
+        ......
+       
+        if (timeo < rto)
+            timeo = rto;
+
+        if (recycle_ok) {
+            tw->tw_timeout = rto;
+        } else {
+            tw->tw_timeout = TCP_TIMEWAIT_LEN;
+            if (state == TCP_TIME_WAIT)
+                timeo = TCP_TIMEWAIT_LEN;
+        }
+
+        inet_twsk_schedule(tw, &tcp_death_row, timeo,
+                   TCP_TIMEWAIT_LEN);
+
+    timestamp和tw_recycle同时开启的条件下，timewait状态socket释放的超时时间和rto相关；否则，超时时间为TCP_TIMEWAIT_LEN，即60s；
+
+    内核说明文档 对该参数的介绍如下：
+    tcp_tw_recycle - BOOLEAN
+    Enable fast recycling TIME-WAIT sockets. Default value is 0.
+    It should not be changed without advice/request of technical
+    experts.
+* c++ tr1 functional
+#+begin_src c++
+#include <iostream>
+#include <string>
+#include <tr1/functional>
+
+using namespace std;
+struct A {
+    A(const std::string& n) : name_(n) {}
+    void printit(const std::string& s) 
+    {
+        std::cout << name_ << " says " << s << std::endl;
+    }
+private:
+    const std::string name_;
+};
+
+int main()
+{
+    A a("Joe");
+    std::tr1::function<void(const std::string&)> f = std::tr1::bind(&A::printit, &a, std::tr1::placeholders::_1);
+    f("Hi");
+    std::tr1::function<void(struct A*)> g = std::tr1::bind(&A::printit, std::tr1::placeholders::_1, "hello");
+    g(&a);
+}
+#+end_src
+* C/C++ 减少问题办法
+  使用工具
+** pc-lint进行代码静态检查 
+** valgrind进行代码内存检查 [[valgrind]]
+* 检查内存泄漏
+  1. valgrind 见 [[valgrind]]
+
+  2. malloc_stats()
+

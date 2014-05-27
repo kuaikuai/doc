@@ -1,4 +1,60 @@
 #+OPTIONS: "\n:t"
+* 实验
+通过学习sync.py中同步数据文件，通过黑盒的方式了解beansdb
+telnet localhost 7900
+
+** 列出每个bucket以及对应hash值、item个数
+#+begin_example
+get @
+VALUE @ 0 141
+0/ 0 0
+1/ 52214 2
+2/ 0 0
+3/ 10325 1
+4/ 33046 1
+5/ 0 0
+6/ 0 0
+7/ 8970 1
+8/ 0 0
+9/ 9150 1
+a/ 0 0
+b/ 34881 1
+c/ 21218 1
+d/ 0 0
+e/ 4658 1
+f/ 0 0
+
+END
+#+end_example
+
+** 列出指定的bucket下文件列表
+#+begin_example
+get @1
+VALUE @1 0 90
+C4dc053f731f4a5bac6577bd029b464e.png 44221 1
+Mc6aa98a3d8241a7a5f1fb1348857ef2.jpg 48413 1
+
+END
+get @3
+VALUE @3 0 45
+If6dd8da919c4f7bb75fa7f39402c308.png 44221 1
+
+END
+#+end_example
+
+** 获取指定文件的描述信息
+
+#+begin_example
+get ?If6dd8da919c4f7bb75fa7f39402c308.png
+VALUE ?If6dd8da919c4f7bb75fa7f39402c308.png 0 26
+1 44221 0 83127 1401211526
+END
+#+end_example
+
+1       44221  0     83127      1401211526
+version hash  flag  value_size  timestamp
+
+在这里value_size就是图片内容的大小
 
 * 作者视频
   http://www.infoq.com/cn/presentations/lhq-beansdb-design-implementation

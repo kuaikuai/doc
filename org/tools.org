@@ -769,3 +769,114 @@ define service{
   命令产生结果，放到临时文件。
   启动专门的流程，查看这些临时文件。
   reap_check_results()
+* Use PC-lint in linux
+
+
+PC-Lint is my favorite non-FLOSS tool. Not only does it find bugs and portability issues early in the development cycle: by using it regularly and listening to its words developers can significantly improve their C/C++ programming skills.
+
+This post details how to run PC-Lint (which is normally intended for DOS/Windows environments) in Linux, saving developers from having to buy FlexeLint, the much more expensive Unix/Linux version.
+
+WHAT IS PC-LINT?
+
+PC-Lint, a commercial successor of the venerable ‘lint’ from the seventh edition of Unix, is of invaluable worth to any C/C++ developer: it finds classic programming mistakes where they can be fixed at the least cost — right at the coder’s desk.
+
+Usually, I prefer free, open-source software over commercial software, even if it sports less features and is harder to use. However, I make a clear exception for PC-Lint: there simply is no open-source alternative that is in the same class.
+
+On the FLOSS-side there is only ‘splint’, but it catches just a fraction of the potential bugs in comparison to PC-Lint; even worse: there is no support for C++ at all. That’s a pitty because especially C++ is full of pitfalls. This fact is the reason why dozens of authors (including Scott Meyers and Herb Sutter) were able to write so many bestsellers on “C++ best practices”. PC-Lint comes with checks for almost all of their tips and a lot more, like checks for MISRA compliance.
+
+There is, however, a lot of competition on the commercial side. Products like Polyspace, ParaSoft, Klockwork, and Coverty support detailed static analysis and in most cases even offer more: they generate various metrics (e. g. cyclomatic complexity), graphically show dependencies among modules and subsystems and either come with their own GUI for browsing issues or are seamlessly integrated with popular IDEs.
+
+Even though these extras are attractive and useful, there is a downside: the aforementioned commercial alternatives are usually big and expensive. For large, established companies, this doesn’t pose a problem; often, they are even willing to establish whole SQA departments around such tools — departments that dedicate their whole time to monitoring the code and the people who produce it.
+
+Small companies, startups, or individual developers are not able to invest that much, and that’s exactly where PC-Lint shines: it is an inexpensive, light-weight, bare-metal tool. It doesn’t do any high-level and/architectural analysis — it focuses on one thing which it does very well: code checking. PC-Lint doesn’t need any expensive infrastructure, not even a license server. Much like a compiler, the user interface is the command-line: it is controlled via command-line arguments and the output goes to STDOUT and STDERR.
+
+The price for PC-Lint is somewhere between 390 and 350 USD, depending on how many licenses you order. PC-Lint is the version for DOS/Windows; however, there is a source code edition (obfuscated source code, of course) called FlexeLint which can be used on every system for which a C compiler is available (e. g. Linux, Unix). The only drop of bitterness is that FlexeLint is almost three times as expensive as PC-Lint, which is way too much for individuals and open-source developers. Wouldn’t it be nice if it was possible to run the cheaper PC-Lint in Linux as well?
+
+IN WINE IS TRUTH
+
+And that’s certainly possible. The most important ingredient is ‘Wine’, the Windows emulator for Linux. On a Debian/Ubuntu system you can easily install it via
+
+    $ sudo apt-get install wine
+
+Once you have Wine in place, you install PC-Lint just like you would in Windows — the setup program that comes with PC-Lint works — thanks to Wine — without problems. As an alternative, you simply copy an existing Windows installation to your Linux system. This works because PC-Lint is “stateless” — it doesn’t make use of the Windows registry or configuration files.
+
+Next, you can convince yourself that everything was installed correctly by invoking lint-nt.exe, the PC-Lint front-end:
+
+    $ ~/opt/pclint/lint-nt.exe --help
+    PC-lint for C/C++ (NT) Vers. 9.00h, Copyright Gimpel Software 1985-2011
+
+THE FINE PRINT
+
+Nevertheless, a couple of things require attention. If you want to integrate the free-of-charge patches and bugfixes that Gimpel releases on their website (you should!), you may not use the ‘patch.exe’ tool but instead choose ‘lpatch.exe’.
+
+There are two problems regarding the screen output produced by lint-nt.exe. First, being a native Windows program, PC-Lint separates lines by the use of a carriage-return plus line-feed (\r\n) sequence, instead of just a single line-feed. Second, if path names appear in the output directories they are separated by backslashes (\) instead of forward slahes (/):
+
+    .\src\ClassicMetricsReporter.h  40  Note 1918: empty prototype
+            for member declaration, assumed '(void)'
+
+Both “Windows heritage” issues make it hard to post-process the output via filters, editors, or IDEs. I like to feed the output to Vim as a quickfix list, which allows me to jump directly to files and lines containing a Lint warning. Hence, I use this little trick:
+
+    $ ~/opt/pclint/lint-nt.exe myfile.cpp | tr '\\\r' '/ '
+
+The ‘tr’ filter replaces all backslashes with forward slashes and gets rid of the carriage return at the same time. Even though this approach works, it is a bit cumbersome to type in all these extra characters every time you run PC-Lint. Putting this in a PC-Lint wrapper script would certainly be a good idea.
+
+A LITTLE MORE COMFORT, PLEASE
+
+Basically, that’s all you need to be able to use PC-Lint in Linux. But when you try to lint a simple example you are confronted with yet another problem:
+
+    1  #include <iostream>
+    2  class Base {
+    3  public:
+    4      Base(int i) : m_i(i), m_pi(new int[i]) { }
+    5      ~Base() { }
+    6      int get() { return m_i; }
+    7  private:
+    8      int m_i;
+    9      int* m_pi;
+    10  };
+
+    $ ~/opt/pclint/lint-nt.exe base.cpp
+
+    base.cpp  1  Error 322: Unable to open include file 'iostream'
+
+Of course! PC-Lint doesn’t know where to find the standard library header files; actually, PC-Lint doesn’t know anything about your compiler or toolchain that you are using — how could it?
+
+You could pass all the include paths on the command-line by using PC-Lint’s -I option but this would be tedious and prone to error: if your toolchain happens to be gcc/g++ (and this is not unlikely since you are working with Linux) you would have to pass no less than seven directories, which might change, depending on the version you are using:
+
+    /usr/include/c++/4.4
+    /usr/include/c++/4.4/x86_64-linux-gnu
+    /usr/include/c++/4.4/backward
+    /usr/local/include
+    /usr/lib/gcc/x86_64-linux-gnu/4.4.5/include
+    /usr/lib/gcc/x86_64-linux-gnu/4.4.5/include-fixed
+    /usr/include
+
+To make matters worse, toolchains usually set various preprocesser defines, ‘__linux__’ and ‘__unix’ for instance. As an example, gcc 4.5.2 implicitly defines 141 symbols; passing them to PC-Lint would not only be tedious but also error-prone.
+
+It is much smarter to extract such toolchain-specific settings in a wrapper script which feeds them to lint-nt.exe without the user even noticing it. That’s exactly the job of the ‘gcclint’ script which finally gives you what you want:
+
+    $ gcclint hello-world.cpp
+
+    base.cpp  5 Info 1732: new in constructor for class 'Base' which
+        has no assignment operator
+    base.cpp  5 Info 1733: new in constructor for class 'Base' which
+        has no copy constructor
+    base.cpp  5 Info 737: Loss of sign in promotion from int to
+        unsigned long
+    base.cpp  6 Warning 1540: Pointer member 'Base::m_pi' (line 11)
+        neither freed nor zeroed by destructor
+    base.cpp  8 Info 1762: Member function 'Base::get(void)' could be
+        made const
+    base.cpp 12 Info 1712: default constructor not defined for class
+        'Base'
+    ...
+
+In order to make the output easy on the eye of Linux developers, gcclint also applies the ‘tr’ hack described above.
+
+If you are among the performance-wary who fear that extracting the gcc settings with every PC-Lint run on every fly burns CPU cycles, don’t worry! gcclint does this step only once and caches the settings in your home directory.
+
+That said, all you need to do is get gcclint. gcclint is part of ALOA, a tool that analyzes the output of a PC-Lint run and derives histograms/statistics and available free-of-charge at https://sourceforge.net/projects/aloa-lint/. Once you have it, set an environment variable that points to your PC-Lint installation directory:
+
+    export PCLINT_PATH="~/opt/pclint"
+
+Happy Linting!
