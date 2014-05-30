@@ -3083,3 +3083,5 @@ int main()
 
   2. malloc_stats()
 
+* ext3 文件恢复
+  ext3undelete

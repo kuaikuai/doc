@@ -51,10 +51,108 @@ VALUE ?If6dd8da919c4f7bb75fa7f39402c308.png 0 26
 END
 #+end_example
 
-1       44221  0     83127      1401211526
-version hash  flag  value_size  timestamp
+26为“1 44221 0 83127 1401211526”的长度
+
+|       1 | 44221 |    0 |      83127 | 1401211526 |
+| version |  hash | flag | value_size |  timestamp |
 
 在这里value_size就是图片内容的大小
+
+调用栈：
+#+begin_example
+#0  hs_get
+#1  item_get
+#2  process_get_command
+#3  process_command
+#4  try_read_command
+#+end_example
+
+** 查看hint文件内容
+hint文件格式见 bitcast论文
+
+beansdb的hint文件使用QuickLZ算法进行了压缩。
+#+begin_src c
+#include "hint.h"
+/* gcc -o look hint.c diskmgr.c quicklz.c hint_look.c htree.c codec.c */
+void look_hint(const char* path)
+{
+    HintFile* hint = open_hint(path, NULL);
+    if (hint == NULL) return;
+
+    char *p = hint->buf, *end = hint->buf + hint->size;
+    while (p < end) {
+        HintRecord *r = (HintRecord*) p;
+        p += sizeof(HintRecord) - NAME_IN_RECORD + r->ksize + 1;
+        if (p > end){
+            fprintf(stderr, "scan %s: unexpected end, need %ld byte\n", path, p - end);
+            break;
+        }
+        uint32_t pos = (r->pos << 8);
+        printf("key ksize pos hash version\n");
+        printf("%s  %d  %d  %d  %d\n",
+               r->key, r->ksize, pos, r->hash, r->version);
+    }
+   
+    close_hint(hint);
+}
+
+int main(int argc, char *argv[])
+{
+    if(argc < 2) {
+        printf("usage: look_hint path\n");
+        return 0;
+    }
+    look_hint(argv[1]);
+}
+
+#+end_src
+./look_hint /usr/local/fountain/bin/testdb/1/000.hint.qlz 
+key                                 ksize pos hash version
+C4dc053f731f4a5bac6577bd029b464e.png  36  0    44221  1
+key ksize pos hash version
+Mc6aa98a3d8241a7a5f1fb1348857ef2.jpg  36  83200  48413  1
+
+** 查看data数据文件内容
+
+data 文件格式
+| crc | timestamp   | key_size | value_size | key | value |
+| crc | timestamp   | key_size | value_size | key | value |
+| crc | timestamp   | key_size | value_size | key | value |
+...
+
+有个许多entry组成，每个entry的结构如下：
+| crc | timestamp   | key_size | value_size | key | value |
+
+
+data数据文件也使用了QuickLZ算法进行了压缩
+#+begin_src c
+#include "record.h"
+/* gcc -o look_record record.c record_look.c htree.c codec.c hint.c quicklz.c diskmgr.c */
+void look_record(char *filename, int offset)
+{
+    int fd = open(filename, O_RDONLY);
+    if (-1 == fd){
+        return;
+    }    
+    DataRecord* dr = fast_read_record(fd, offset, true);
+    printf("crc tstamp flag version ksz vsz key\n");
+    printf("%u %d %d %d %u %u %s\n",
+           dr->crc, dr->tstamp, dr->flag, dr->version, dr->ksz, dr->vsz, dr->key);
+}
+
+int main(int argc, char* argv[])
+{
+    if(argc < 3) {
+        printf("usage: look_record filename offset\n");
+        return;
+    }
+    look_record(argv[1], atoi(argv[2]));
+}
+#+end_src
+./look_record /usr/local/fountain/bin/testdb/1/000.data 83200
+crc tstamp flag version ksz vsz key
+2218528001 1401211526 0 1 36 5998 Mc6aa98a3d8241a7a5f1fb1348857ef2.jpg
+
 
 * 作者视频
   http://www.infoq.com/cn/presentations/lhq-beansdb-design-implementation
@@ -140,6 +238,7 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
     同时在dict中增加一个Fmt Fmt.nargs=2, Fmt.fmt=%d%l
 
 ** bitcask.c
+*** 数据结构
 #+begin_src c
     #include "bitcask.h"  
     #include "htree.h"  
@@ -179,7 +278,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         pthread_mutex_t buffer_lock;  
         pthread_mutex_t write_lock;  
     };  
-      
+#+end_src
+
+*** bc_open
+#+begin_src c      
     //一个bc里最多有MAX_BUCKET_COUNT个文件，每个文件叫做这个bc的bucket  
     //打开一个bitcask  
     //1.申请内存并初始化。  
@@ -239,7 +341,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
       
         return bc;  
     }  
-      
+#+end_src
+
+*** bc_close
+#+begin_src c       
     /* 
     * bc_close() is not thread safe, should stop other threads before call it. 
     * */  
@@ -271,7 +376,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         free(bc->write_buffer);  
         free(bc);  
     }  
-      
+#+end_src
+
+*** update_items
+#+begin_src c       
     //利用it的信息（pos）更新args对应的树  
     void update_items(Item *it, void *args)  
     {  
@@ -290,7 +398,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         }  
         free(p);  
     }  
-      
+#+end_src
+
+*** bc_optimize
+#+begin_src c       
     //在经过一段时间的运行后，新的bc->tree会新增或者删除一些节点，原来的datafile中的记录有可能就  
     //就应该被删除了。为了节省文件空间，需要将那些空的比较多的datafile中的有效的DataRecord保留下来，而  
     //而将该删的DataRecord删掉。  
@@ -324,7 +435,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
             build_hint(cur_tree, hint);  
         }  
     }  
-      
+#+end_src
+
+*** bc_get
+#+begin_src c        
     //从bc中对应的datafile中查找key对应的DataRecord  
     //注意bc中能存放一个value的结构是：  
     //a.已经被持久化的datafile   
@@ -414,7 +528,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         free(item);  
         return r;  
     }  
-      
+#+end_src
+
+*** build_thread
+#+begin_src c        
     struct build_thread_args {  
         HTree *tree;  
         char *path;  
@@ -429,7 +546,10 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         free(param);  
         return NULL;  
     }  
-      
+#+end_src
+
+*** bc_flush
+#+begin_src c        
     //清空write_buffer，将其内容写入active datafile中。  
     //因为datafile的大小是有限制的，所以有可能会持久化当前的datafile而新建一个active  
     //1.打开当前的active datafile，并检测文件大小跟当前的cur_pos是否相同  
@@ -520,143 +640,142 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         }  
         pthread_mutex_unlock(&bc->flush_lock);  
     }  
-      
-    //set是beansdb的核心操作，也是实现sync的方式。  
-    //set有四种类型：替换，插入，删除，同步。  
-    //version的更新应该遵循这样的规则：  
-    //  a.每次更新时，需要将version+1  
-    //  b.每次删除时，如果此前version为正，则version为version+1的绝对值  
-    //这样做是为了得到sync的方法：  
-    //比如节点1跟节点2同时add了一个key，然后又都delete了它，这时key的version为-2  
-    //此后节点1失效，节点2更新了这个key，key的version变为3，当节点1与节点2sync时，  
-    //节点1给出的version为-2，节点2给出的为3，节点1得知自己落后，从而进行追赶。  
-    //1.得到本bc(节点)中该key对应的ver，设为oldv  
-    //2.根据version和oldv的大小比较来判断到底是哪种类型，给ver赋值。  
-    //3.更新两个htree和datafile文件  
-    //  3.1.value相同，那么只需更新htree中的version  
-    //  3.2.否则无论是删除，插入还是更新，都要新建一个DataRecord，加入当前的datafile中。  
-    //          如果是更新或者删除的话，原来datafile中的数据会在Optimize的时候被删除。  
-    bool bc_set(Bitcask *bc, const char* key, char* value, int vlen, int flag, int version)  
-    {  
-        if (version < 0 && vlen > 0 || vlen > MAX_RECORD_SIZE){  
-            fprintf(stderr, "invalid set cmd \n");  
-            return false;  
-        }  
-      
-        bool suc = false; //是否成功的标识  
-        pthread_mutex_lock(&bc->write_lock);  
-      
-        int oldv = 0, ver = version;  
-        Item *it = ht_get(bc->tree, key);  
-        if (it != NULL) {  
-            oldv = it->ver;  
-        }  
-      
-        //2  
-        if (version == 0 && oldv > 0){ // replace  
-            //更新，版本号+1  
-            ver = oldv + 1;  
-        } else if (version == 0 && oldv <= 0){ // add  
-            //从被删除状态转为存在状态，ver应该为-oldv+1  
-            //这个ver=1应该是不对的。  
-            ver = 1;  
-        } else if (version < 0 && oldv <= 0) { // delete, not exist  
-            goto SET_FAIL; //如果存在，不应该返回FAIL呀  
-        } else if (version == -1) { // delete  
-            ver = - abs(oldv) - 1;  
-        } else if (abs(version) <= abs(oldv)) { // sync  
-            //例如： version       oldver      op  
-            //           5          8             这个不是最新的  
-            //          -5          8             这已经不是它想要删除的那个item了  
-            goto SET_FAIL;  
-        } else { // sync  
-            //例如： version       oldver      op  
-            //           8           5           更新  
-            //           8           -5          插入  
-            //          -8           5           删除  
-            ver = version;  
-        }  
-      
-        uint16_t hash = gen_hash(value, vlen);  
-        //这个item要被删除了  
-        if (ver < 0) hash = 0;  
-      
-        //tree中存在这个it，那么更新  
-        if (NULL != it && hash == it->hash) {  
-            DataRecord *r = bc_get(bc, key);  
-            //  
-            if (r != NULL && r->flag == flag && vlen  == r->vsz  
-                && memcmp(value, r->value, vlen) == 0) {  
-                    //  
-                    if (version != 0){  
-                        ht_add(bc->tree, key, it->pos, it->hash, ver);  
-                        if (it->pos & 0xff == bc->curr){  
-                            if (bc->curr_tree == NULL) {  
-                                fprintf(stderr, "BUG: curr_tree should not be NULL\n");  
-                            }else{  
-                                ht_add(bc->curr_tree, key, it->pos, it->hash, ver);  
-                            }  
-                        }  
-                    }  
-                    suc = true;  
-                    free_record(r);  
-                    goto SET_FAIL;  
-            }  
-        }  
-      
-        //tree中不存在这个it，或者it的value跟set的value不同。  
-        //即使是删除了，也要加入到datafile中  
-        int klen = strlen(key);  
-        DataRecord *r = malloc(sizeof(DataRecord) + klen);  
-        r->ksz = klen;  
-        memcpy(r->key, key, klen);  
-        r->vsz = vlen;  
-        r->value = value;  
-        r->free_value = false;  
-        r->flag = flag;  
-        r->version = ver;  
-        r->tstamp = time(NULL);  
-      
-        int rlen;  
-        char *rbuf = encode_record(r, &rlen);  
-        if (rbuf == NULL || (rlen & 0xff) != 0){  
-            fprintf(stderr, "encode_record() failed with %d\n", rlen);  
-            if (rbuf != NULL) free(rbuf);  
-            goto SET_FAIL;   
-        }  
-      
-        pthread_mutex_lock(&bc->buffer_lock);  
-        //如果这个write_buffer已经装不下这个record了，清空  
-        if (bc->wbuf_curr_pos + rlen > bc->wbuf_size) {  
-            pthread_mutex_unlock(&bc->buffer_lock);  
-            bc_flush(bc, 0);  
-            pthread_mutex_lock(&bc->buffer_lock);  
-        }  
-        // record maybe larger than buffer  
-        //如果是更新的话，那么这个DataRecord的bucket就可能改变了。  
-        while (bc->wbuf_curr_pos + rlen > bc->wbuf_size) {  
-            bc->wbuf_size *= 2;  
-            bc->write_buffer = realloc(bc->write_buffer, bc->wbuf_size);  
-        }  
-        memcpy(bc->write_buffer + bc->wbuf_curr_pos, rbuf, rlen);  
-      
-        int pos = (bc->wbuf_start_pos + bc->wbuf_curr_pos) | bc->curr;  
-        bc->wbuf_curr_pos += rlen;  
-        pthread_mutex_unlock(&bc->buffer_lock);  
-      
-        //更新tree  
-        ht_add(bc->tree, key, pos, hash, ver);  
-        ht_add(bc->curr_tree, key, pos, hash, ver);  
-        suc = true;  
-        free(rbuf);  
-        free_record(r);  
-      
-    SET_FAIL:  
-        pthread_mutex_unlock(&bc->write_lock);  
-        if (it != NULL) free(it);  
-        return suc;  
+#+end_src
+
+*** bc_set
+#+begin_src c        
+//set是beansdb的核心操作，也是实现sync的方式。  
+//set有四种类型：替换，插入，删除，同步。  
+//version的更新应该遵循这样的规则：  
+//  a.每次更新时，需要将version+1  
+//  b.每次删除时，如果此前version为正，则version为version+1的绝对值  
+//这样做是为了得到sync的方法：  
+//比如节点1跟节点2同时add了一个key，然后又都delete了它，这时key的version为-2  
+//此后节点1失效，节点2更新了这个key，key的version变为3，当节点1与节点2sync时，  
+//节点1给出的version为-2，节点2给出的为3，节点1得知自己落后，从而进行追赶。  
+//1.得到本bc(节点)中该key对应的ver，设为oldv  
+//2.根据version和oldv的大小比较来判断到底是哪种类型，给ver赋值。  
+//3.更新两个htree和datafile文件  
+//  3.1.value相同，那么只需更新htree中的version  
+//  3.2.否则无论是删除，插入还是更新，都要新建一个DataRecord，加入当前的datafile中。  
+//          如果是更新或者删除的话，原来datafile中的数据会在Optimize的时候被删除。  
+bool bc_set(Bitcask *bc, const char* key, char* value, int vlen, int flag, int version)  
+{  
+    if (version < 0 && vlen > 0 || vlen > MAX_RECORD_SIZE){  
+        fprintf(stderr, "invalid set cmd \n");  
+        return false;  
     }  
+  
+    bool suc = false; //是否成功的标识  
+    pthread_mutex_lock(&bc->write_lock);  
+  
+    int oldv = 0, ver = version;  
+    Item *it = ht_get(bc->tree, key);  
+    if (it != NULL) {  
+        oldv = it->ver;  
+    }  
+  
+    //2  
+    if (version == 0 && oldv > 0){ // replace  
+        //更新，版本号+1  
+        ver = oldv + 1;  
+    } else if (version == 0 && oldv <= 0){ // add  
+        //从被删除状态转为存在状态
+        ver = -oldv + 1;
+    } else if (version < 0 && oldv <= 0) { // delete, not exist  
+        goto SET_FAIL;
+    } else if (version == -1) { // delete  
+        ver = - abs(oldv) - 1;  
+    } else if (abs(version) <= abs(oldv)) { // sync  
+        //例如： version       oldver      op  
+        //           5          8             这个不是最新的  
+        //          -5          8             这已经不是它想要删除的那个item了  
+        goto SET_FAIL;  
+    } else { // sync  
+        //例如： version       oldver      op  
+        //           8           5           更新  
+        //           8           -5          插入  
+        //          -8           5           删除  
+        ver = version;  
+    }  
+  
+    uint16_t hash = gen_hash(value, vlen);  
+    //这个item要被删除了  
+    if (ver < 0) hash = 0;
+  
+    //tree中存在这个it，那么更新  
+    if (NULL != it && hash == it->hash) {
+        DataRecord *r = bc_get(bc, key);
+        if (r != NULL && r->flag == flag && vlen  == r->vsz
+             && memcmp(value, r->value, vlen) == 0) {
+            if (version != 0){
+                // update version
+                if (it->pos & 0xff == bc->curr){
+                    ht_add(bc->curr_tree, key, it->pos, it->hash, ver);
+                }
+                ht_add(bc->tree, key, it->pos, it->hash, ver);
+            }
+            suc = true;
+            free_record(r);
+            goto SET_FAIL;
+        }
+        if (r != NULL) free_record(r);
+    }
       
+    //tree中不存在这个it，或者it的value跟set的value不同。  
+    //即使是删除了，也要加入到datafile中  
+    int klen = strlen(key);  
+    DataRecord *r = malloc(sizeof(DataRecord) + klen);  
+    r->ksz = klen;  
+    memcpy(r->key, key, klen);  
+    r->vsz = vlen;  
+    r->value = value;  
+    r->free_value = false;  
+    r->flag = flag;  
+    r->version = ver;  
+    r->tstamp = time(NULL);  
+ 
+    int rlen;
+    char *rbuf = encode_record(r, &rlen);
+    if (rbuf == NULL || (rlen & 0xff) != 0){
+        fprintf(stderr, "encode_record() failed with %d\n", rlen);
+        if (rbuf != NULL) free(rbuf);
+        goto SET_FAIL; 
+    }
+
+    pthread_mutex_lock(&bc->buffer_lock);
+    // record maybe larger than buffer
+    if (bc->wbuf_curr_pos + rlen > bc->wbuf_size) {
+        pthread_mutex_unlock(&bc->buffer_lock);
+        bc_flush(bc, 0, 0);
+        pthread_mutex_lock(&bc->buffer_lock);
+        
+        while (rlen > bc->wbuf_size) {
+            bc->wbuf_size *= 2;
+            free(bc->write_buffer);
+            bc->write_buffer = malloc(bc->wbuf_size);
+        }
+        if (bc->wbuf_start_pos + bc->wbuf_size > MAX_BUCKET_SIZE) {
+            bc_rotate(bc);
+        }
+    }
+    memcpy(bc->write_buffer + bc->wbuf_curr_pos, rbuf, rlen);
+    int pos = (bc->wbuf_start_pos + bc->wbuf_curr_pos) | bc->curr;
+    bc->wbuf_curr_pos += rlen;
+    pthread_mutex_unlock(&bc->buffer_lock);
+   
+    ht_add(bc->curr_tree, key, pos, hash, ver);
+    ht_add(bc->tree, key, pos, hash, ver);
+    suc = true;
+    free(rbuf);
+    free_record(r);
+
+SET_FAIL:
+    pthread_mutex_unlock(&bc->write_lock);
+    if (it != NULL) free(it);
+    return suc;
+}
+
     bool bc_delete(Bitcask *bc, const char* key)  
     {  
         return bc_set(bc, key, "", 0, 0, -1);  
@@ -1440,25 +1559,24 @@ void visit_record(const char* path, RecordVisitor visitor, void *arg1, void *arg
 }  
 #+end_src
 ** htree.c
-
 *** 数据结构
 #+begin_src c
 typedef struct t_item Item;
 struct t_item {
-        //int bucket = item->pos & 0xff; //表示是第几个文件
-        //uint32_t pos = item->pos & 0xffffff00; //表示在文件中的位置
-        uint32_t pos;
-      
-        //大于0该数据有效，小于0表明无效。
-        //ver不会等于0，因此如果set的参数为0时，表示是更新
-        //ver不会等于-1，因此set的参数为-1时，表示是删除。
-        //ver的更新方法见bitcast.c中的bc_set函数
-        //
-        int32_t  ver;
-      
-        uint16_t hash; //在bitcask.c的bc_set函数中被赋值  
-        uint8_t  length; //这个item的长度。通过这个长度找到下一个item  
-        char     name[1];
+    //int bucket = item->pos & 0xff; //表示是第几个文件
+    //uint32_t pos = item->pos & 0xffffff00; //表示在文件中的位置
+    uint32_t pos;
+  
+    //大于0该数据有效，小于0表明无效。
+    //ver不会等于0，因此如果set的参数为0时，表示是更新
+    //ver不会等于-1，因此set的参数为-1时，表示是删除。
+    //ver的更新方法见bitcast.c中的bc_set函数
+    //
+    int32_t  ver;
+  
+    uint16_t hash; //在bitcask.c的bc_set函数中被赋值  
+    uint8_t  length; //这个item的长度。通过这个长度找到下一个item  
+    char     name[1];
 };
 //key的最大长度  
 const int MAX_KEY_LENGTH = 200;  
@@ -1496,7 +1614,7 @@ struct t_data {
     int used; //已用大小  
     int count;//item的个数  
     Item head[0];  
-};  
+};
   
 typedef struct t_node Node;  
 struct t_node {  
@@ -1623,6 +1741,7 @@ static void add_item(HTree *tree, Node *node, Item *it, uint32_t keyhash, bool e
     Data *data = get_data(node);
     Item *p = data->head;
     int i;
+    //2.
     for (i=0; i<data->count; i++){
         if (it->length == p->length && 
                 memcmp(it->key, p->key, KEYLENGTH(it)) == 0){
@@ -1963,3 +2082,16 @@ static void visit_node(HTree *tree, Node* node, fun_visitor visitor, void* param
     }    
 }
 #+end_src
+* 什么时间开始GC数据
+  接受到flush_all命令
+  hs_optimize()
+
+
+
+
+
+
+
+
+
+
