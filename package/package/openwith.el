@@ -80,6 +80,7 @@ where the symbol 'file' is replaced by the file to be opened."
             (when (or (not openwith-confirm-invocation)
                       (y-or-n-p (format "%s %s? " (cadr oa)
                                         (mapconcat #'identity params " "))))
+              (message "debug open-with: %s %s" (cadr oa) params)
               (apply #'start-process "openwith-process" nil (cadr oa) params)
               (kill-buffer nil)
               ;; inhibit further actions

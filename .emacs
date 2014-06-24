@@ -59,6 +59,7 @@
 ;;(menu-bar-mode nil)
 
 (setq-default indent-tabs-mode nil)
+(setq default-tab-width 4)
 
 (setq buffer-file-coding-system 'utf-8)
 
@@ -100,8 +101,8 @@
 (global-set-key [(control ?\\)] 'indent-region)
 ;(global-set-key (kbd "<f4>") 'shell-command)
 (global-set-key (kbd "C-SPC") 'nil)
-(global-set-key [(control tab)] 'other-frame)
 
+(require 'etags-extension)
 ;; find . -name "*.[ch] | xargs  etags -
 ;; find . -name "*.[ch]" -o -name "*.cpp" -o -name "*.hpp" | xargs etags -a
 ;; M-x visit-tags-table
@@ -142,6 +143,8 @@
 (add-to-list 'load-path "~/package/color-theme-6.6.0")
 (add-to-list 'load-path "~/package/dark-mode")
 
+(require 'go-mode-load)
+(add-hook 'go-mode-hook 'yxf-go-mode-startup)
 ;; auto detect unicode
 (require 'unicad)
 
@@ -271,6 +274,7 @@
 ;; auto-save
 (setq epa-file-inhibit-auto-save nil)
 
+
 (require 'tabbar)
 (tabbar-mode)
 ;;(global-set-key  'tabbar-backward-group)
@@ -279,6 +283,8 @@
 (global-set-key [(control down)] 'tabbar-backward-group)
 (global-set-key [(control right)] 'tabbar-forward)
 (global-set-key [(control left)] 'tabbar-backward)
+;; not in tabbar
+(global-set-key [(control tab)] 'other-window)
 
 (setq display-time-24hr-format t)
 (setq display-time-day-and-date t)

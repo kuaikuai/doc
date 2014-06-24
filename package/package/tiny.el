@@ -39,6 +39,13 @@
   (call-process "d:/tools/pscp.exe" nil nil nil "-pw" "hisense~!@#hitv" "-scp" "d:/code/mon/views/*.*"  "root@172.16.132.234:/root/mon/views")
   (call-process "d:/tools/pscp.exe" nil nil nil "-pw" "root" "-scp" "d:/code/mon/*.py"  "root@10.0.64.18:/root/mon"))
 
+(defun yxf-go-mode-startup ()
+  ""
+  (interactive)
+  (setq tab-width 4)
+  ;; Autoconvert tabs to spaces
+  (setq indent-tabs-mode nil))
+
 
 (defvar point-stack nil)
 

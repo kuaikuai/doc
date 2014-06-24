@@ -6,39 +6,46 @@ http://www.linuxvirtualserver.org/zh/lvs3.html
 
 2. LB 配置
 - 配置网络地址
+#+begin_example
   #配置eth0的VIP地址
   /sbin/ifconfig eth0:0 192.168.1.100 broadcast 192.168.1.100 netmask 255.255.255.255 up
   #加路由
   /sbin/route add –host 192.168.1.100 dev eth0:0
-
+#+end_example
 - 配置网络系统参数（eth0为绑定VIP的网卡设备） TODO？下面四条是否有必要？
   echo "0" >/proc/sys/net/ipv4/ip_forward
   echo "1" >/proc/sys/net/ipv4/conf/all/send_redirects   
   echo "1" >/proc/sys/net/ipv4/conf/default/send_redirects
   echo "1" >/proc/sys/net/ipv4/conf/eth0/send_redirects
 - 配置IPVS的服务类型、VIP地址以及对应的RS信息，例如：
-/sbin/ipvsadm -A –t 192.168.1.100:80 -s rr
+#+begin_example
+/sbin/ipvsadm -A -t 192.168.1.100:80 -s rr
 /sbin/ipvsadm -a -t 192.168.1.100:80 -r 192.168.1.10 -i -w 1
 /sbin/ipvsadm -a -t 192.168.1.100:80 -r 192.168.1.20 -i -w 1
-
+#+end_example
 3. RS 配置
 - 配置网络地址
+#+begin_example
   #配置tunl0
   /sbin/ifconfig tunl0 192.168.1.100 broadcast 192.168.1.100 netmask 255.255.255.255 up
   #增加路由
-  /sbin/route add –host 192.168.1.100 dev tunl0
+  /sbin/route add -host 192.168.1.100 dev tunl0
+#+end_example
 - 配置系统参数
   #关闭转发功能
   echo "0" >/proc/sys/net/ipv4/ip_forward
 - 解决arp问题
+#+begin_example
   echo 1 > /proc/sys/net/ipv4/conf/tunl0/arp_ignore
   echo 2 > /proc/sys/net/ipv4/conf/tunl0/arp_announce
   echo 1 > /proc/sys/net/ipv4/conf/all/arp_ignore
   echo 2 > /proc/sys/net/ipv4/conf/all/arp_announce
+#+end_example
 - 解决源地址验证问题
+#+begin_example
   echo 0 > /proc/sys/net/ipv4/conf/tunl0/rp_filter
   echo 0 > /proc/sys/net/ipv4/conf/all/rp_filter
-
+#+end_example
 4. 在其他机器访问http://192.168.1.100:80测试
 
 * ipvsmand
@@ -80,7 +87,6 @@ http://www.linuxvirtualserver.org/zh/lvs3.html
 6. iptv_ipvsman 启动、停止ipvsmand服务的脚本
 
 * LVS集群系统网络核心原理分析
-
 ** LVS结构与工作原理
 
 　　LVS由前端的负载均衡器(Load Balancer，LB)和后端的真实服务器(Real Server，RS)群组成。RS间可通过局域网或广域网连接。
@@ -515,7 +521,7 @@ static int tcp_app_conn_bind(struct ip_vs_conn *cp)
   代码见ip_vs_ctl.c
   /proc/net/ip_vs
   ip_vs_conn.c
-  /proc/net/ipv_vs_conn
+  /proc/net/ip_vs_conn
 
 在18上运行lvs director.
 #+begin_example
@@ -557,3 +563,448 @@ TCP 0A004013 9B2C 0A0040F4 1F90 0A004075 1F90 FIN_WAIT        110
   因为这两种模式不会修改4层的报文。
 
   有这需求时需要使用NAT模式
+* 运行中常见问题
+查看
+ipvsadm -Ln
+ipvsadm -Ln --stats
+ipvsadm -Ln --rate
+
+cat /proc/net/ip_vs
+cat /proc/net/ip_vs_conn
+cat /proc/net/ip_vs_conn_sync
+** RealServer 上 rp_filter 被打开
+在LVS上执行 cat /proc/net/ip_vs_conn
+看是否有大量链接处于SYN的状态
+
+** no destination available
+   dmesg 查看发现有IPVS: no destination available之类的日志
+   现场采用Round-Robin方式调度负载
+#+begin_src c
+/*
+ * Round-Robin Scheduling
+ */
+static struct ip_vs_dest *
+ip_vs_rr_schedule(struct ip_vs_service *svc, const struct sk_buff *skb)
+{
+	struct list_head *p, *q;
+	struct ip_vs_dest *dest;
+
+	IP_VS_DBG(6, "%s(): Scheduling...\n", __func__);
+
+	write_lock(&svc->sched_lock);
+	p = (struct list_head *)svc->sched_data;
+	p = p->next;
+	q = p;
+	do {
+		/* skip list head */
+		if (q == &svc->destinations) {
+			q = q->next;
+			continue;
+		}
+
+		dest = list_entry(q, struct ip_vs_dest, n_list);
+		if (!(dest->flags & IP_VS_DEST_F_OVERLOAD) &&
+		    atomic_read(&dest->weight) > 0)
+			/* HIT */
+			goto out;
+		q = q->next;
+	} while (q != p);
+	write_unlock(&svc->sched_lock);
+	ip_vs_scheduler_err(svc, "no destination available");
+	return NULL;
+
+  out:
+	svc->sched_data = q;
+	write_unlock(&svc->sched_lock);
+    ...
+	return dest;
+}
+#+end_src
+可以看出一种可能：所有后端都overload了。
+另一种可能:destinations链表被清空。
+第一种情况，由于现场没有设置threshold，所以可以忽略。
+第二种情况，应该是由ipvsmon程序通过检测后端服务，发现后端服务没有及时响应时，把后端从ipvs中删除了。
+
+** LVS和nginx引发的问题
+  有人反映aaa/sigon请求超时。
+  我写的小程序请求几个相关的URL，有几分之几的失败率。
+  而另外/cam/user/getxxxx这个URL也超时。
+  我猜测可能其他的URL也存在问题，不单是反映的aaa/sigon请求慢。
+  于是在请求的URL后加上"&myseq=1"
+  其中myseq的序号不停增加。
+  看aaaservice日志和access.log日志
+  发现access.log日志中收到的myseq序号有丢失的情况，
+  而从nginx到aaaservice，没有丢包。
+  
+  nginx共有三台：nginx-a、ngnix-b、nginx-c
+  其中nginx-c中 我发的特殊请求这种格式"myseq=", 一个都没有收到。
+  
+
+  怀疑是lvs的问题，又担心是测试机器到nginx之间网络问题，不确定。
+  后来通过ipvsadmin -ln
+  看
+        ActiveConn  InactiveConn
+  131    75          1000 
+  141    945         1234
+  145    879         1334
+
+  ngnix-c上负载严重不均衡。
+  
+
+  想排除网络。
+  于是在生产环境的局域网中一台机器中
+  请求这URL: http://132.103.18.129:8080/cam/user/getxxxx?xxxx
+  发现还是经常无影响。
+
+  后来我想进一步确实问题，跟nginx转发无法，也就是与aaa无关。
+  请求这个URL: http://132.103.18.129:8080/none
+  故意让ngnix直接返回404，不启动转发功能，不与upstream server交互。
+  发现还是经常连接不上。
+  
+  后来我想直接连接ngnix-a的ip
+  http://132.103.18.141:8080/none
+  很快响应。
+  其他两台ngnix也同样测试了，没有问题。
+
+  现在问题与LVS关系比较大了。
+
+  但是没有直接证据，证明问题。
+  Tony提议，抓包，
+  在一台机器D上运行lwp-request -m GET http://132.103.18.129:8080/none
+  
+  在lvs上运行tcpdump -i eth0 tcp and host hostD-ip 
+  抓数据。发现出问题时，确实有不断想机器D的syn请求重传。
+
+  在ngnix-c上tcpdump -i tunl0 src hostD-ip
+           tcpdump -i eth1 dst hostD-ip
+  发现有收到lvs的syn请求，但是没有回应。
+
+  后来重启了ngnix-c，问题消失。
+
+  tony说可能是rp_filter的问题。
+
+* rp_filter
+** conf
+The rp_filter can reject incoming packets if their source address doesn’t match the network interface that they’re arriving on, which helps to prevent IP spoofing. Turning this on, however, has its consequences: If your host has several IP addresses on different interfaces, or if your single interface has multiple IP addresses on it, you’ll find that your kernel may end up rejecting valid traffic. It’s also important to note that even if you do not enable the rp_filter, protection against broadcast spoofing is always on. Also, the protection it provides is only against spoofed internal addresses; external addresses can still be spoofed.. By default, it is disabled. To enable it, run the following:
+
+
+rp_filter - INTEGER
+
+ 0 - No source validation.
+ 1 - Strict mode as defined in RFC3704 Strict Reverse Path
+ Each incoming packet is tested against the FIB and if the interface
+ is not the best reverse path the packet check will fail.
+ By default failed packets are discarded.
+ 2 - Loose mode as defined in RFC3704 Loose Reverse Path
+ Each incoming packet's source address is also tested against the FIB
+ and if the source address is not reachable via any interface
+ the packet check will fail.
+Current recommended practice in RFC3704 is to enable strict mode
+ to prevent IP spoofing from DDos attacks. If using asymmetric routing
+ or other complicated routing, then loose mode is recommended.
+The max value from conf/{all,interface}/rp_filter is used
+ when doing source validation on the {interface}.
+Default value is 0　based our os. Note that some distributions enable it
+ in startup scripts.
+
+
+ 检查流入本机的 IP 地址是否合法，是否从对应接口的路由进来，是否是最佳路由。
+
+设置方法：
+
+系统配置文件
+1. /etc/sysctl.conf
+
+
+把 net.ipv4.conf.all.rp_filter和net.ipv4.conf.default.rp_filter设为0即可
+net.ipv4.conf.default.rp_filter = 0
+net.ipv4.conf.all.rp_filter = 0
+系统启动后，会自动加载这个配置文件，内核会使用这个变量。
+
+2. 命令行
+显示一个内核变量 sysctl net.ipv4.conf.all.rp_filter
+设置一个内核变量 sysctl -w net.ipv4.conf.all.rp_filter=0
+设置完后，会更新内核（实时的内存）中的变量的值，但不会修改sysctl.conf的值
+
+3. 使用/proc文件系统
+查看 cat /proc/sys/net/ipv4/conf/all/rp_filter
+设置 echo "0">/proc/sys/net/ipv4/conf/all/rp_filter
+** code
+kernel 3.0.13
+#+begin_src c
+/* Given (packet source, input interface) and optional (dst, oif, tos):
+ * - (main) check, that source is valid i.e. not broadcast or our local
+ *   address.
+ * - figure out what "logical" interface this packet arrived
+ *   and calculate "specific destination" address.
+ * - check, that packet arrived from expected physical interface.
+ * called with rcu_read_lock()
+ */
+int fib_validate_source(struct sk_buff *skb, __be32 src, __be32 dst, u8 tos,
+			int oif, struct net_device *dev, __be32 *spec_dst,
+			u32 *itag)
+{
+	struct in_device *in_dev;
+	struct flowi4 fl4;
+	struct fib_result res;
+	int no_addr, rpf, accept_local;
+	bool dev_match;
+	int ret;
+	struct net *net;
+
+	fl4.flowi4_oif = 0;
+	fl4.flowi4_iif = oif;
+	fl4.daddr = src;
+	fl4.saddr = dst;
+	fl4.flowi4_tos = tos;
+	fl4.flowi4_scope = RT_SCOPE_UNIVERSE;
+
+	no_addr = rpf = accept_local = 0;
+	in_dev = __in_dev_get_rcu(dev);
+	if (in_dev) {
+		no_addr = in_dev->ifa_list == NULL;
+
+		/* Ignore rp_filter for packets protected by IPsec. */
+		rpf = secpath_exists(skb) ? 0 : IN_DEV_RPFILTER(in_dev);
+
+		accept_local = IN_DEV_ACCEPT_LOCAL(in_dev);
+		fl4.flowi4_mark = IN_DEV_SRC_VMARK(in_dev) ? skb->mark : 0;
+	}
+
+	if (in_dev == NULL)
+		goto e_inval;
+
+	net = dev_net(dev);
+	if (fib_lookup(net, &fl4, &res))
+		goto last_resort;
+	if (res.type != RTN_UNICAST) {
+		if (res.type != RTN_LOCAL || !accept_local)
+			goto e_inval;
+	}
+	*spec_dst = FIB_RES_PREFSRC(net, res);
+	fib_combine_itag(itag, &res);
+	dev_match = false;
+
+#ifdef CONFIG_IP_ROUTE_MULTIPATH
+	for (ret = 0; ret < res.fi->fib_nhs; ret++) {
+		struct fib_nh *nh = &res.fi->fib_nh[ret];
+
+		if (nh->nh_dev == dev) {
+			dev_match = true;
+			break;
+		}
+	}
+#else
+	if (FIB_RES_DEV(res) == dev)
+		dev_match = true;
+#endif
+	if (dev_match) {
+		ret = FIB_RES_NH(res).nh_scope >= RT_SCOPE_HOST;
+		return ret;
+	}
+	if (no_addr)
+		goto last_resort;
+    // 这里可以看到当dev_match为false，也就是fib表认为不应该dev接受消息时，返回错误
+	if (rpf == 1)
+		goto e_rpf;
+	fl4.flowi4_oif = dev->ifindex;
+
+	ret = 0;
+	if (fib_lookup(net, &fl4, &res) == 0) {
+		if (res.type == RTN_UNICAST) {
+			*spec_dst = FIB_RES_PREFSRC(net, res);
+			ret = FIB_RES_NH(res).nh_scope >= RT_SCOPE_HOST;
+		}
+	}
+	return ret;
+
+last_resort:
+	if (rpf)
+		goto e_rpf;
+	*spec_dst = inet_select_addr(dev, 0, RT_SCOPE_UNIVERSE);
+	*itag = 0;
+	return 0;
+
+e_inval:
+	return -EINVAL;
+e_rpf:
+	return -EXDEV;
+}
+#+end_src
+** 查看命令
+   使用netstat -st | grep IPReversePathFilter
+   可以看到由于rp_filter过滤掉的数据包的个数
+
+   这个值可以通过/proc/net/netstat查看
+是由ip_rcv_finish中设置的
+#+begin_src c
+static int ip_rcv_finish(struct sk_buff *skb)
+{
+    ...
+	if (skb_dst(skb) == NULL) {
+		int err = ip_route_input_noref(skb, iph->daddr, iph->saddr,
+					       iph->tos, skb->dev);
+		if (unlikely(err)) {
+			if (err == -EHOSTUNREACH)
+				IP_INC_STATS_BH(dev_net(skb->dev),
+						IPSTATS_MIB_INADDRERRORS);
+			else if (err == -ENETUNREACH)
+				IP_INC_STATS_BH(dev_net(skb->dev),
+						IPSTATS_MIB_INNOROUTES);
+            // 这里由于rp_filter过滤不过，返回的错误码
+			else if (err == -EXDEV)
+				NET_INC_STATS_BH(dev_net(skb->dev),
+						 LINUX_MIB_IPRPFILTER);
+			goto drop;
+		}
+	}
+}
+#+end_src
+* tunnel
+** code
+
+Linux实现一个称为tunl的网络设备（类似loopback设备），此设备具有其他网络设备共有的特征，对于使用此设备的上层应用来说，对这些网络设备不加区分，调用及处理方法当然也完全一样。
+
+我们知道，每一个IP数据包均交由ip_rcv函数处理，在进行一些必要的判断后，ip_rcv对于发送给本机的数据包将交给上层处理程序。
+对于IPIP包来说，其处理函数是ipip_rcv（就如TCP包的处理函数是tcp_rcv一样，IP层不加区分）。
+也就是说，当一个目的地址为本机的封包到达后，ip_rcv函数进行一些基本检查并除去IP头，然后交由ipip_rcv解封。
+ipip_rcv所做的工作就是去掉封包头，还原数据包，然后把还原后的数据包放入相应的接收队列（netif_rx()）。
+
+
+   /net/ipv4/tunnel4.c
+#+begin_src c
+static struct net_protocol tunnel4_protocol = {
+	.handler	=	tunnel4_rcv,
+	.err_handler	=	tunnel4_err,
+	.no_policy	=	1,
+};
+
+static int __init tunnel4_init(void)
+{
+	if (inet_add_protocol(&tunnel4_protocol, IPPROTO_IPIP)) {
+		printk(KERN_ERR "tunnel4 init: can't add protocol\n");
+		return -EAGAIN;
+	}
+	return 0;
+}
+int xfrm4_tunnel_register(struct xfrm_tunnel *handler)
+{
+	struct xfrm_tunnel **pprev;
+	int ret = -EEXIST;
+	int priority = handler->priority;
+
+	mutex_lock(&tunnel4_mutex);
+
+	for (pprev = &tunnel4_handlers; *pprev; pprev = &(*pprev)->next) {
+		if ((*pprev)->priority > priority)
+			break;
+		if ((*pprev)->priority == priority)
+			goto err;
+	}
+
+	handler->next = *pprev;
+	*pprev = handler;
+
+	ret = 0;
+
+err:
+	mutex_unlock(&tunnel4_mutex);
+
+	return ret;
+}
+static int tunnel4_rcv(struct sk_buff *skb)
+{
+	struct xfrm_tunnel *handler;
+
+	if (!pskb_may_pull(skb, sizeof(struct iphdr)))
+		goto drop;
+
+	for (handler = tunnel4_handlers; handler; handler = handler->next)
+		if (!handler->handler(skb))
+			return 0;
+
+	icmp_send(skb, ICMP_DEST_UNREACH, ICMP_PORT_UNREACH, 0);
+
+drop:
+	kfree_skb(skb);
+	return 0;
+}
+#+end_src
+   /net/ipv4/ipip.c
+#+begin_src c
+static struct xfrm_tunnel ipip_handler = {
+	.handler	=	ipip_rcv,
+	.err_handler	=	ipip_err,
+	.priority	=	1,
+};
+static int __init ipip_init(void)
+{
+	int err;
+
+	printk(banner);
+
+	if (xfrm4_tunnel_register(&ipip_handler)) {
+		printk(KERN_INFO "ipip init: can't register tunnel\n");
+		return -EAGAIN;
+	}
+
+	ipip_fb_tunnel_dev = alloc_netdev(sizeof(struct ip_tunnel),
+					   "tunl0",
+					   ipip_tunnel_setup);
+	if (!ipip_fb_tunnel_dev) {
+		err = -ENOMEM;
+		goto err1;
+	}
+
+	ipip_fb_tunnel_dev->init = ipip_fb_tunnel_init;
+
+	if ((err = register_netdev(ipip_fb_tunnel_dev)))
+		goto err2;
+ out:
+	return err;
+ err2:
+	free_netdev(ipip_fb_tunnel_dev);
+ err1:
+	xfrm4_tunnel_deregister(&ipip_handler);
+	goto out;
+}
+
+static int ipip_rcv(struct sk_buff *skb)
+{
+	struct iphdr *iph;
+	struct ip_tunnel *tunnel;
+
+	iph = skb->nh.iph;
+
+	read_lock(&ipip_lock);
+	if ((tunnel = ipip_tunnel_lookup(iph->saddr, iph->daddr)) != NULL) {
+		if (!xfrm4_policy_check(NULL, XFRM_POLICY_IN, skb)) {
+			read_unlock(&ipip_lock);
+			kfree_skb(skb);
+			return 0;
+		}
+
+		secpath_reset(skb);
+
+		skb->mac.raw = skb->nh.raw;
+		skb->nh.raw = skb->data;
+		skb->protocol = htons(ETH_P_IP);
+		skb->pkt_type = PACKET_HOST;
+
+		tunnel->stat.rx_packets++;
+		tunnel->stat.rx_bytes += skb->len;
+		skb->dev = tunnel->dev;
+		dst_release(skb->dst);
+		skb->dst = NULL;
+		nf_reset(skb);
+		ipip_ecn_decapsulate(iph, skb);
+		netif_rx(skb);
+		read_unlock(&ipip_lock);
+		return 0;
+	}
+	read_unlock(&ipip_lock);
+
+	return -1;
+}
+
+#+end_src

@@ -20,3 +20,171 @@
  http://www.nowamagic.net/librarys/veda/cate/Program
  酷壳
  http://coolshell.cn/
+* How I Learned to Stop Worrying and Love Golang
+  http://corte.si/posts/code/go/golang-practicaly-beats-purity/
+
+Here's a riff on Malcolm Gladwell's rule of thumb about mastery: you don't really know a programming language until you've written 10,000 lines of production-quality code in it. Like the original this is a generalization that is undoubtedly false in many cases - still, it broadly matches my intuition for most languages and most programmers1. At the beginning of this year, I wrote a sniffy post about Go when I was about 20% of the way to knowing the language by this measure. Today's post is an update from further along the curve - about 80% - following a recent set of adventures that included entirely rewriting choir.io's core dispatcher in Go. My opinion of Go has changed significantly in the meantime. Despite my initial exasperation, I found that the experience of actually writing Go was not unpleasant. The shallow issues became less annoying over time (perhaps just due to habituation), and the deep issues turned out to be less problematic in practice than in theory. Most of all, though, I found Go was just a fun and productive language to work in. Go has colonized more and more use cases for me, to the point where it is now seriously eroding my use of both Python and C.
+
+After my rather slow Road to Damascus experience, I noticed something odd: I found it difficult to explain why Go worked so well in practice. Sure, Go has a triad of really smashing ideas (interfaces, channels and goroutines), but my list of warts and annoyances is long enough that it's not clear on paper that the upsides outweigh the downsides. So, my experience of actually cutting code in Go was at odds with my rational analysis of the language, which bugged me. I've thought about this a lot over the last few months, and eventually came up with an explanation that sounds like nonsense at first sight: Go's weaknesses are also its strengths. In particular, many design choices that seem to reduce coherence and maintainability at first sight actually combine to give the language a practical character that's very usable and compelling. Lets see if I can convince you that this isn't as crazy as it sounds.
+Maps and magic
+
+Lets pretend that we're the designers of Go, and see if we can follow the thinking that went into a seemingly simple part of the language - the value retrieval syntax for maps. We begin with the simplest possible case - direct, obvious, and familiar from a number of other languages:
+#+begin_src go
+v := mymap["foo"]
+#+end_src
+It would be nice if we could keep it this simple, but there's a complication - what if "foo" doesn't exist in the map? The fact that Go doesn't have exceptions limits the possibilities. We can discard some gross options out of hand - for instance, making this a runtime error or returning a magic value flagging non-existence are both pretty horrible. A more plausible route is to pass an existence flag back as a second return value:
+#+begin_src go
+v, ok := mymap["foo"]
+#+end_src
+So far, so logical, and if consistency was the primary goal, we would stop here. However, having two return arguments would make many common patterns of use inconvenient. You would constantly be discarding the ok flag in situations where it wasn't needed. Another repercussion is that you couldn't directly use the results in an if clause. Instead of a clean phrasing like this (relying on the zero value returned by default):
+
+if map["foo"] {
+    // Do something
+}
+
+... you would have to do this:
+
+if _, ok := map["foo"]; ok {
+    // Do something
+}
+
+Ugh. What we really want, is to get the best of both worlds. The ease of the first signature, plus the flexibility of the second. In fact, Go does exactly that, in a surprising way: it discards some basic conceptual constraints, and makes the data returned by the map accessor depend on how many variables it's assigned to. When it's assigned to one variable, it just returns the value. When it's assigned to two variables, it also returns an existence flag.
+
+Compare this with Python. The dictionary access syntax is identical:
+
+v = mymap["foo"]
+
+Python does have exceptions, so non-existence is signaled through a KeyError, and the dictionary interface includes a get method that allows the user to specify a default return when this is too cumbersome. This is certainly consistent on the surface, but there's also a deeper structure that helps the user understand what's going on. The square bracket accessor syntax is just syntactic sugar, because the call above is equivalent to this:
+
+v = mymap.__getitem__("foo")
+
+In a sense, then, the value access is just a method call. The coder can write a dictionary of their own that acts just like a built-in dictionary2, and can also build a clear mental model of what's going on underneath. Python dictionaries are conceptually built up from more primitive language elements, where Go maps are designed down from concrete use cases.
+Range: a compendium of use cases
+
+An even stranger beast is the range clause of Go's for loops. Like map accessors, range will return either one value or two, depending on the number of variables assigned to. What's particularly revealing about range is the way these results differ depending on the data type being ranged over. Consider this piece of code, for example:
+
+for x, y := range v {
+}
+
+To figure out what this does, we need to know the type of v, and then consult a table like this:3
+Range expression 	1st Value 	2nd Value
+array or slice 	index i 	a[i]
+map 	key k 	m[k]
+string 	index i of rune 	rune int
+channel 	element 	error
+
+What range does for arrays and maps seems consistent and not particularly surprising. Things get a tad slightly odd with channels. A second variable arguably doesn't make much sense when ranging over a channel, so trying to do this results in a compile time error. Not terribly consistent, but logical.
+
+Weirder still is range over strings. When operating on a string, range returns runes (Unicode code points) not bytes. So, this code:
+
+s := "a\u00fcb"
+for a, b := range s {
+    fmt.Println(a, b)
+}
+
+Prints this:
+
+0 97
+1 252
+3 98
+
+Notice the jump from 1 to 3 in the array index, because the rune at offset 1 is two bites wide in UTF-8. And look what happens when we now retrieve the value at that offset from the array. This:
+
+fmt.Println(s[1])
+
+Prints this:
+
+195
+
+What gives? At first glance, it's reasonable to expect this to print 252, as returned by range. That's wrong, though, because string access by index operates on bytes, so what we're given is the first byte of the UTF-8 encoding of the rune. This is bound to cause subtle bugs. Code that works perfectly on ASCII text simply due to the fact that UTF-8 encodes these in a single byte will fail mysteriously as soon as non-ASCII characters appear.
+
+My argument here is that range is a very clear example of design directly from concrete use cases down, with little concern for consistency. In fact, the table of range return values above is really just a compendium of use cases: at each point the result is simply the one that is most directly useful. So, it makes total sense that ranging over strings returns runes. In fact, doing anything else would arguably be incorrect. What's characteristic here is that no attempt was made to reconcile this interface with the core of the language. It serves the use case well, but feels jarring.
+Arrays are values, maps are references
+
+One final example along these lines. A core irregularity at the heart of Go is that arrays are values, while maps are references. So, this code will modify the s variable:
+
+func mod(x map[int] int){
+    x[0] = 2
+}
+
+func main() {
+    s := map[int]int{}
+    mod(s)
+    fmt.Println(s)
+}
+
+And print:
+
+map[0:2]
+
+While this code won't:
+
+func mod(x [1]int){
+    x[0] = 2
+}
+
+func main() {
+    s := [1]int{}
+    mod(s)
+    fmt.Println(s)
+}
+
+And will print:
+
+[0]
+
+This is undoubtedly inconsistent, but it turns out not to be an issue in practice, mostly because slices are references, and are passed around much more frequently than arrays. This issue has surprised enough people to make it into the Go FAQ, where the justification is as follows:
+
+    There's a lot of history on that topic. Early on, maps and channels were syntactically pointers and it was impossible to declare or use a non-pointer instance. Also, we struggled with how arrays should work. Eventually we decided that the strict separation of pointers and values made the language harder to use. This change added some regrettable complexity to the language but had a large effect on usability: Go became a more productive, comfortable language when it was introduced.
+
+This is not exactly the clearest explanation for a technical decision I've ever read, so allow me to paraphrase: "Things evolved this way for pragmatic reasons, and consistency was never important enough to force a reconciliation".
+The G Word
+
+Now we get to that perpetual bugbear of Go critiques: the lack of generics. This, I think, is the deepest example of the Go designers' willingness to sacrifice coherence for pragmatism. One gets the feeling that the Go devs are a tad weary of this argument by now, but the issue is substantive and worth facing squarely. The crux of the matter is this: Go's built-in container types are super special. They can be parameterized with the type of their contained values in a way that user-written data structures can't be.
+
+The supported way to do generic data structures is to use blank interfaces. Lets look at an example of how this works in practice. First, here is a simple use of the built-in array type.
+
+l := make([]string, 1)
+l[0] = "foo"
+str := l[0]
+
+In the first line we initialize the array with the type string. We then insert a value, and in the final line, we retrieve it. At this point, str has type string and is ready to use. The user-written analogue of this might be a modest data structure with put and get methods. We can define this using interfaces like so:
+
+type gtype struct {
+    data interface{}
+}
+func (t *gtype) put(v interface{}) {
+    t.data = v
+}
+func (t *gtype) get() interface{} {
+    return t.data
+}
+
+To use this structure, we would say:
+
+v := gtype{}
+v.put("foo")
+str := v.get().(string)
+
+We can assign a string to a variable with the empty interface type without doing anything special, so put is simple. However, we need to use a type assertion on the way out, otherwise the str variable will have type interface{}, which is probably not what we want.
+
+There are a number of issues here. It's cosmetically bothersome that we have to place the burden of type assertion on the caller of our data structure, making the interface just a little bit less nice to use. But the problems extend beyond syntactic inconvenience - there's a substantive difference between these two ways of doing things. Trying to insert a value of the wrong type into the built-in array causes a compile-time error, but the type assertion acts at run-time and causes a panic on failure. The blank-interface paradigm sidesteps Go's compile time type checking, negating any benefit we may have received from it.
+
+The biggest issue for me, though, is the conceptual inconsistency. This is something that's difficult to put into words, so here's a picture:
+
+The fact that the built-in containers magically do useful things that user-written code can't irks me. It hasn't become less jarring over time, and still feels like a bit of grit in my eye that I can't get rid of. I might be an extreme case, but this is an aesthetic instinct that I think is shared by many programmers, and would have convinced many language designers to approach the problem differently.
+
+The extent to which Go's lack of generics is a critical problem, however, is not the point here. The meat of the matter is why this design decision was taken, and what it reveals about the character of Go. Here's how the lack of generics is justified by the Go developers:
+
+    Many proposals for generics-like features have been mooted both publicly and internally, but as yet we haven't found a proposal that is consistent with the rest of the language. We think that one of Go's key strengths is its simplicity, so we are wary of introducing new features that might make the language more difficult to understand.
+
+Instead of creating the atomic elements needed to support generic data structures then adding a suite of them to the standard library, the Go team went the other way. There was a concrete use case for good data structures, and so they were added. Attempting a deep reconciliation with the rest of the language was a secondary requirement that was so unimportant that it fell by the wayside for Go 1.x.
+A Pragmatic Beauty
+
+Lets over-simplify for a moment and divide languages into two extreme camps. On the one hand, you have languages that are highly consistent, with most higher order functionality deriving from the atomic elements of the language. In this camp, we can find languages like Lisp. On the other hand are languages that are shamelessly eager to please. They tend to grow organically, sprouting syntax as needed to solve specific pragmatic problems. As a consequence, they tend to be large, syntactically diverse, not terribly coherent, and, occasionally, sometimes even unparseable. In this camp, we find languages like Perl. It's tempting to think that there exists a language somewhere in the infinite multiverse of possibilities that unites perfect consistency and perfect usability, but if there is, we haven't found it. The reality is that all languages are a compromise, and that balancing these two forces against each other is really what makes language design so hard. Placing too much value on consistency constrains the human concessions we can make for mundane use cases. Making too many concessions results in a language that lacks coherence.
+
+Like many programmers, I instinctively prefer purity and consistency and distrust "magic". In fact, I've never found a language with a strongly pragmatic bent that I really liked. Until now, that is. Because there's one thing I'm pretty clear on: Go is on the Perl end of this language design spectrum. It's designed firmly from concrete use cases down, and shows its willingness to sacrifice consistency for practicality again and again. The effects of this design philosophy permeate the language. This, then, is the source of my initial dissatisfaction with Go: I'm pre-disposed to dislike many of its core design decisions.
+
+Why, then, has the language grown on me over time? Well, I've gradually become convinced that practically-motivated flaws like the ones I list in this post add up to create Go's unexpected nimbleness. There's a weird sort of alchemy going on here, because I think any one of these decisions in isolation makes Go a worse language (even if only slightly). Together, however, they jolt Go out of a local maximum many procedural languages are stuck in, and take it somewhere better. Look again at each of the cases above, and imagine what the cumulative effect on Go would have been if the consistent choice had been made each time. The language would have more syntax, more core concepts to deal with, and be more verbose to write. Once you reason through the repercussions, you find that the result would have been a worse language overall. It's clear that Go is not the way it is because its designers didn't know better, or didn't care. Go is the result of a conscious pragmatism that is deep and audacious. Starting with this philosophy, but still managing to keep the language small and taut, with almost nothing dispensable or extraneous took great discipline and insight, and is a remarkable achievement.
+
+So, despite its flaws, Go remains graceful. It just took me a while to appreciate it, because I expected the grace of a ballet dancer, but found the grace of an battered but experienced bar-room brawler.

@@ -9,7 +9,8 @@
 (openwith-mode t)
 (when (eq system-type 'gnu/linux)
   (setq openwith-associations
-        '(("\\.pdf$" "acroread" (file)) ("\\.mp3$" "mplayer" (file) )
+        ;; acroread to evince
+        '(("\\.pdf$" "evince" (file)) ("\\.mp3$" "mplayer" (file) )
           ("\\.mov\\|\\.RM$\\|\\.RMVB$\\|\\.avi$\\|\\.AVI$\\|\\.flv$\\|\\.mp4\\|\\.mkv$\\|\\.rmvb$" "mplayer" (file) )
 ;;          ("\\.jpe?g$\\|\\.png$\\|\\.bmp\\|\\.gif$" "gpicview" (file))
           ("\\.CHM$\\|\\.chm$" "chmsee"  (file) )

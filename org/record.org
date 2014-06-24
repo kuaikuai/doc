@@ -51,109 +51,6 @@
 
 可以通过这个查看某个进程的limits
 cat /proc/${pid}/limits
-* LVS和nginx引发的问题
-  有人反映aaa/sigon请求超时。
-  我写的小程序请求几个相关的URL，有几分之几的失败率。
-  而另外/cam/user/getxxxx这个URL也超时。
-  我猜测可能其他的URL也存在问题，不单是反映的aaa/sigon请求慢。
-  于是在请求的URL后加上"&myseq=1"
-  其中myseq的序号不停增加。
-  看aaaservice日志和access.log日志
-  发现access.log日志中收到的myseq序号有丢失的情况，
-  而从nginx到aaaservice，没有丢包。
-  
-  nginx共有三台：nginx-a、ngnix-b、nginx-c
-  其中nginx-c中 我发的特殊请求这种格式"myseq=", 一个都没有收到。
-  
-
-  怀疑是lvs的问题，又担心是测试机器到nginx之间网络问题，不确定。
-  后来通过ipvsadmin -ln
-  看
-        ActiveConn  InactiveConn
-  131    75          1000 
-  141    945         1234
-  145    879         1334
-
-  ngnix-c上负载严重不均衡。
-  
-
-  想排除网络。
-  于是在生产环境的局域网中一台机器中
-  请求这URL: http://132.103.18.129:8080/cam/user/getxxxx?xxxx
-  发现还是经常无影响。
-
-  后来我想进一步确实问题，跟nginx转发无法，也就是与aaa无关。
-  请求这个URL: http://132.103.18.129:8080/none
-  故意让ngnix直接返回404，不启动转发功能，不与upstream server交互。
-  发现还是经常连接不上。
-  
-  后来我想直接连接ngnix-a的ip
-  http://132.103.18.141:8080/none
-  很快响应。
-  其他两台ngnix也同样测试了，没有问题。
-
-  现在问题与LVS关系比较大了。
-
-  但是没有直接证据，证明问题。
-  Tony提议，抓包，
-  在一台机器D上运行lwp-request -m GET http://132.103.18.129:8080/none
-  
-  在lvs上运行tcpdump -i eth0 tcp and \( src hostD-ip or dst hostD-ip \)
-  抓数据。发现出问题时，确实有不断想机器D的syn请求重传。
-
-  在ngnix-c上tcpdump -i tunl0 src hostD-ip
-           tcpdump -i eth1 dst hostD-ip
-  发现有收到lvs的syn请求，但是没有回应。
-
-  后来重启了ngnix-c，问题消失。
-
-  tony说可能是rp_filter的问题。
-
-The rp_filter can reject incoming packets if their source address doesn’t match the network interface that they’re arriving on, which helps to prevent IP spoofing. Turning this on, however, has its consequences: If your host has several IP addresses on different interfaces, or if your single interface has multiple IP addresses on it, you’ll find that your kernel may end up rejecting valid traffic. It’s also important to note that even if you do not enable the rp_filter, protection against broadcast spoofing is always on. Also, the protection it provides is only against spoofed internal addresses; external addresses can still be spoofed.. By default, it is disabled. To enable it, run the following:
-
-
-rp_filter - INTEGER
-
- 0 - No source validation.
- 1 - Strict mode as defined in RFC3704 Strict Reverse Path
- Each incoming packet is tested against the FIB and if the interface
- is not the best reverse path the packet check will fail.
- By default failed packets are discarded.
- 2 - Loose mode as defined in RFC3704 Loose Reverse Path
- Each incoming packet's source address is also tested against the FIB
- and if the source address is not reachable via any interface
- the packet check will fail.
-Current recommended practice in RFC3704 is to enable strict mode
- to prevent IP spoofing from DDos attacks. If using asymmetric routing
- or other complicated routing, then loose mode is recommended.
-The max value from conf/{all,interface}/rp_filter is used
- when doing source validation on the {interface}.
-Default value is 0　based our os. Note that some distributions enable it
- in startup scripts.
-
-
- 检查流入本机的 IP 地址是否合法，是否从对应接口的路由进来，是否是最佳路由。
-
-设置方法：
-
-系统配置文件
-1. /etc/sysctl.conf
-
-
-把 net.ipv4.conf.all.rp_filter和net.ipv4.conf.default.rp_filter设为0即可
-net.ipv4.conf.default.rp_filter = 0
-net.ipv4.conf.all.rp_filter = 0
-系统启动后，会自动加载这个配置文件，内核会使用这个变量。
-
-2. 命令行
-显示一个内核变量 sysctl net.ipv4.conf.all.rp_filter
-设置一个内核变量 sysctl -w net.ipv4.conf.all.rp_filter=0
-设置完后，会更新内核（实时的内存）中的变量的值，但不会修改sysctl.conf的值
-
-3. 使用/proc文件系统
-查看 cat /proc/sys/net/ipv4/conf/all/rp_filter
-设置 echo "0">/proc/sys/net/ipv4/conf/all/rp_filter
-
 * nmap
 
 使用nmap扫描生产网络。
@@ -2691,10 +2588,10 @@ net.netfilter.nf_conntrack_max=655360
 iptables -t nat -A PREROUTING -d 10.0.0.1 -j DNAT –-to-destination 172.16.93.1
 此条规则将请求IP为10.0.0.1的数据包转发到后端172.16.93.1主机上
 
-iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp –-dport 80 -j DNAT –-to-destination 172.16.93.1
+iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp --dport 80 -j DNAT --to-destination 172.16.93.1
 此条规则将请求IP为10.0.0.1并且端口为80的数据包转发到后端的172.16.93.1主机上，通过定义不同的端口，就可以实现PNAT，将同一个IP不同的端口请求转发到后端不同的主机
 
-iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp –-dport 80 -j DNAT –-to-destination 172.16.93.1:8080
+iptables -t nat -A PREROUTING -d 10.0.0.1 -p tcp --dport 80 -j DNAT --to-destination 172.16.93.1:8080
 此条规则在上条规则的基础上，发往后端的数据包的目标端口改为8080，在后端主机的web服务器上使用8080端口接收访问， 这样能更好的保护后端主机
 
 ** 使用SNAT上网
@@ -2766,6 +2663,15 @@ SNAT       all  --  192.168.100.0/24     0.0.0.0/0           to:172.16.132.189
 
 最后，我使用的机器将IP设置为192.168.0.109，网关设置为192.168.0.86
 现在就可以自由的上网了。
+
+** 使用DNAT对外开放服务
+在10.0.64.19上有外网IP，我们希望通过该外网IP开放6006端口
+
+在10.0.64.19上：
+iptables -t nat -A PREROUTING  -p tcp --dport 6006 -j DNAT --to-destination 10.0.64.18:6006
+
+在10.0.64.18上
+route add default gw 10.0.64.19
 
 * TIME_WAIT状态是否占用文件描述符
 
@@ -3081,7 +2987,50 @@ int main()
 * 检查内存泄漏
   1. valgrind 见 [[valgrind]]
 
-  2. malloc_stats()
+  2. glic函数 malloc_stats()
 
 * ext3 文件恢复
-  ext3undelete
+  工具 ext3undelete
+* XEN 虚拟机中LVS realserver
+  运维部门要使用使用两台物理中的两个虚拟机当作realserver
+  一个物理机有一个虚拟机。
+  使用LVS tunnel方式。
+  在虚拟机中按照物理机一样配置方式配置realserver
+  （创建tunl0口，设置tunl0口IP等等）
+  就可以了。
+
+** TODO  xen是怎样做到呢？
+
+  显然我们在虚拟机内配置tunl0口时，物理机知道了虚拟机的配置信息：tunl0口的IP信息。
+  否则虚拟机不会通过tunl0口实现LVS
+* txqueuelen
+Here we can see how to increase the txqueuelen for a Ethernet port in Linux
+
+txqueuelen = Transfer Queue Length
+
+We may ask the Question What’s the need of Increasing this ?
+
+The need of increasing this value to higher will make the transfer queue more length
+If we have a server machine we need to assign this value to high, because the transfer rate
+want to be hight to server the data’s for all client machine’s.
+
+For Desktop PC’s we Don’t need to Assign this value
+By Default value of the txq is 1000, if we need to increase it Use the command
+#+begin_example
+# ifconfig eth0 txqueuelen 10000
+#+end_example
+This will make the changed from 1000 to 10000
+
+If we need to make the value for permanent, Add the Command to rc.local file to get run while boot
+
+Edit the file
+#+begin_example
+# vim /etc/rc.local 
+#+end_example
+Enter the command as follow for Respective Ethernet Port’s
+#+begin_example
+# ifconfig eth0 txqueuelen 10000
+# ifconfig eth1 txqueuelen 10000
+#+end_example
+* How golang deal with epoll Supporting
+  src/pkg/net/fd_poll_runtime.go

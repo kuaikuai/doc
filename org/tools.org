@@ -11,7 +11,7 @@
 * 编码转换工具iconv
   还有对应libiconv库，方便编写转换程序
 * 常用的网络工具
-wireshark  报文分析
+wireshark  报文分析 见[[wireshark]]
 
 nmap 网络扫描器
 
@@ -23,8 +23,6 @@ tcpdump
 
 snort 
 
-ethereal(wireshark)
-
 hping2
 iptables/netfilter/ipchains/ipfwadm
 traceroute/ping/telnet
@@ -32,13 +30,17 @@ lsof
 
 openvas
 
-
 * 制作windosXP系统U盘启动
   使用WinSetupFromUSB
   
-* 协议分析工具 wireshark 
+* wireshark 
   用wireshark帮助学习TCP/IP
-  wireshark 过滤语句
+** wireshark 过滤语句
+   查找tcp报文内容中有POST字串的报文
+   tcp contains 6c:6f:61:64
+** 查看一个TCP链接的数据流
+   选择一条消息，点击鼠标，在弹出的菜单中选择“Follow TCP Stream"
+
 ** wireshark 在windows中无法获取loopback
   解决办法:
   使用RawCap抓包，生成文件，然后用wireshark打卡
@@ -880,3 +882,7 @@ That said, all you need to do is get gcclint. gcclint is part of ALOA, a tool th
     export PCLINT_PATH="~/opt/pclint"
 
 Happy Linting!
+* 搜索引擎
+  google总被墙
+  duckduckgo.com
+  www.bing.com

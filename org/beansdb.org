@@ -153,7 +153,6 @@ int main(int argc, char* argv[])
 crc tstamp flag version ksz vsz key
 2218528001 1401211526 0 1 36 5998 Mc6aa98a3d8241a7a5f1fb1348857ef2.jpg
 
-
 * 作者视频
   http://www.infoq.com/cn/presentations/lhq-beansdb-design-implementation
 * 他人心得
@@ -222,6 +221,68 @@ BeansDB使用了Leader/Follower的线程模型替代以往的生产者消费者�
         memcached_send_timeout 1s;
     }
 #+end_example
+* python
+** proxy.py
+   使用key散列到不同的beansdb上。
+   多节点负载均衡
+** sync.py
+   节点同步
+* proxy 
+  使用go语言实现 见 github beanseye
+  另有简单实现为python版本。
+
+  Client、RClient、mapStore实现了Storage和DistributeStorage这两个接口
+  其中mapStore用于白盒测试
+
+  protocol.go实现Request、Response两个类
+  用于处理请求和应答的协议解释
+
+  Host使用Request、Response实现代理工作。
+
+  Client使用Host实现负载工作
+
+  Server 对外服务类
+
+  Scheduler 调度节点访问次序
+
+** 使用方法
+   我们使用proxy的ManualScheduler
+   示例配置文件
+example.yaml
+
+#+begin_example
+servers:
+- localhost:7901 0 1 2 3 4 5 6 7 8 9 A
+- 127.0.0.1:7902 8 9 A B C D E F 0 1 2
+- 127.0.0.1:7903 3 4 5 6 7 B C D E F
+port: 7905
+webport: 7908
+threads: 8
+n: 2
+w: 1
+r: 1
+buckets: 16
+slow: 200
+listen: 0.0.0.0
+proxies:
+- localhost:7905
+accesslog: /usr/local/fountain/beansproxy.log
+errorlog: /usr/local/fountain/beansproxy_error.log
+basepath: /root/beanseye-master
+readonly: false
+#+end_example
+
+每个bucket有两个备份。
+如果提高可以可靠性的话，可以使用 N:3 W:2 R:1的配置。
+
+分别启动三个beansdb
+#+begin_example
+/usr/local/bin/beansdb1 -u root -p 7901 -H /usr/local/fountain/data/beansdb_data/7901 -P /usr/local/fountain/data/beansdb_data/7901/7901.pid -v -v -d -L /var/log/hitv/beansdb_7901.log
+/usr/local/bin/beansdb2 -u root -p 7902 -H /usr/local/fountain/data/beansdb_data/7902 -P /usr/local/fountain/data/beansdb_data/7902/7902.pid -v -v -d -L /var/log/hitv/beansdb_7902.log
+/usr/local/bin/beansdb3 -u root -p 7903 -H /usr/local/fountain/data/beansdb_data/7903 -P /usr/local/fountain/data/beansdb_data/7903/7903.pid -v -v -d -L /var/log/hitv/beansdb_7903.log
+#+end_example
+然后启动proxy，就可以通过proxy来访问，后面的三个beansdb了。
+
 * get
 1. hs_get先对key做hash，决定value是在哪个bitcask。然后调用bitcask模块的bc_get
 2. bc_get先调用htree模块的ht_get，找到对应的Item。
@@ -1558,6 +1619,161 @@ void visit_record(const char* path, RecordVisitor visitor, void *arg1, void *arg
     fclose(df);  
 }  
 #+end_src
+
+*** optimizeDataFile
+#+begin_src c
+// path 待优化的数据文件
+// hintpath 对应数据文件的hint文件
+// lastdata 优化后的数据文件名  输出参数
+// lasthit 优化后的hint的文件名 输出参数
+
+// 概要过程：
+// 1. 将待优化的数据文件读入内存
+// 2. 将读入hint文件
+// 3. 遍历数据文件，读取DataRecord
+// 3.1 对于record在当前bucket，且ver>0，将record信息写入新数据文件和hint文件
+// 3.2 record在当前bucket且ver < 0, 将record相关信息加到临时的curr_tree中
+// 4. 将curr_tree中item全部添加tree中，并销毁curr_tree
+// 4. 删除原始数据文件和hint文件
+
+uint32_t optimizeDataFile(HTree* tree, int bucket, const char* path, const char* hintpath,
+    bool skipped, uint32_t max_data_size, int last_bucket, const char *lastdata, const char *lasthint) 
+{
+    // 将待优化的数据文件读入内存
+    MFile *f = open_mfile(path);
+    if (f == NULL) return -1;
+    
+    FILE *new_df = NULL;
+    char tmp[255], *hintdata = NULL;
+    uint32_t hint_used=0, hint_size = 0, old_data_size=0;
+    if (lastdata != NULL) {
+        new_df = fopen(lastdata, "ab");
+        old_data_size = ftello(new_df);
+
+        if (old_data_size > 0) {
+            HintFile *hint = open_hint(lasthint, NULL);
+            if (hint == NULL) {
+                fprintf(stderr, "open last hint file %s failed\n", lasthint);
+                close_mfile(f);
+                return 0;
+            }
+            hint_size = hint->size * 2;
+            if (hint_size < 4096) hint_size = 4096;
+            hintdata = malloc(hint_size);
+            memcpy(hintdata, hint->buf, hint->size);
+            hint_used = hint->size;
+            close_hint(hint);
+        } else {
+            hint_size = 4096;
+            hintdata = malloc(hint_size);
+            hint_used = 0;
+        }
+    } else {
+        sprintf(tmp, "%s.tmp", path);
+        new_df = fopen(tmp, "wb");
+        hintdata = malloc(1<<20);
+        hint_size = 1<<20;
+    }
+    if (new_df == NULL){
+        fprintf(stderr, "open new datafile failed\n");
+        close_mfile(f);
+        return -1;
+    }
+    
+    HTree *cur_tree = ht_new(0,0);
+    int deleted = 0, broken = 0;
+    char *p = f->addr, *end = f->addr + f->size;
+    size_t last_advise = 0;
+    while (p < end) {
+        DataRecord *r = decode_record(p, end-p, false);
+        if (r == NULL) {
+            broken ++;
+            if (broken > 40960) { // 10M
+                // TODO: delete broken keys from htree
+                fprintf(stderr, "unexpected broken data in %s at %ld\n", path, p - f->addr - broken * PADDING);
+                break;
+            }
+            p += PADDING;
+            continue;
+        }
+        Item *it = ht_get2(tree, r->key, r->ksz);
+        uint32_t pos = p - f->addr;
+        if (it && it->pos  == (pos | bucket) && (it->ver > 0 || skipped)) {
+            uint32_t new_pos = ftello(new_df);
+            if (new_pos + record_length(r) > max_data_size) {
+                fprintf(stderr, "optimize %s into %s failed\n", path, lastdata);
+                free(hintdata);
+                ht_destroy(cur_tree);
+                close_mfile(f);
+                ftruncate(new_df, old_data_size);
+                fclose(new_df);
+                return 0; // overflow
+            }
+
+            uint16_t hash = it->hash;
+            ht_add2(cur_tree, r->key, r->ksz, new_pos | last_bucket, hash, it->ver);
+            // append record to hint file
+            int hsize = sizeof(HintRecord) - NAME_IN_RECORD + r->ksz + 1;
+            if (hint_used + hsize > hint_size) {
+                hint_size *= 2;
+                hintdata = realloc(hintdata, hint_size);
+            }
+            HintRecord *hr = (HintRecord*)(hintdata + hint_used);
+            hr->ksize = r->ksz;
+            hr->pos = new_pos >> 8;
+            hr->version = it->ver;
+            hr->hash = hash;
+            memcpy(hr->key, r->key, r->ksz + 1);
+            hint_used += hsize;
+
+            if (write_record(new_df, r) != 0) {
+                fprintf(stderr, "write error: %s\n", path);
+                free(hintdata);
+                ht_destroy(cur_tree);
+                close_mfile(f);
+                fclose(new_df);
+                return -1;
+            }
+        }else{
+            if (it && it->pos == (pos | bucket) && it->ver < 0) 
+                ht_add2(cur_tree, r->key, r->ksz, 0, it->hash, it->ver);
+            deleted ++;
+        }
+        if (it) free(it);
+        p += record_length(r); 
+        free_record(r);
+	
+	if (pos - last_advise > (64<<20)) {
+	    madvise(f->addr, pos, MADV_DONTNEED);  
+#if _XOPEN_SOURCE >= 600 || _POSIX_C_SOURCE >= 200112L        
+	    posix_fadvise(f->fd, 0, pos, POSIX_FADV_DONTNEED);
+#endif        
+	    last_advise = pos;
+	}
+    }
+    uint32_t deleted_bytes = f->size - (ftello(new_df) - old_data_size);
+    
+    close_mfile(f);
+    fclose(new_df);
+    
+    ht_visit(cur_tree, update_items, tree);
+    ht_destroy(cur_tree);
+    //4.
+    //删除原始数据文件
+    mgr_unlink(path);
+    if (lastdata == NULL) 
+        mgr_rename(tmp, path);
+    //删除原始hint文件
+    mgr_unlink(hintpath);
+    write_hint_file(hintdata, hint_used, lasthint ? lasthint : hintpath);
+    free(hintdata);
+
+    fprintf(stderr, "optimize %s complete, %d records deleted, %u bytes came back\n", 
+            path, deleted, deleted_bytes);
+    return deleted_bytes;
+
+#+end_src
+
 ** htree.c
 *** 数据结构
 #+begin_src c

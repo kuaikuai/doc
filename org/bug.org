@@ -1297,7 +1297,6 @@ sec, 3)
   于是我执行了sysctl -p使用/etc/sysctl.conf的参数。
   问题就没有了。
 
-
 * c++ 数字转换string的错误写法
   使用类似java的数字转换为字符串的方法。
   string str = "" + 3;

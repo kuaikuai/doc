@@ -1409,8 +1409,6 @@ Show me all SYNCHRONIZE/ACKNOWLEDGE (SYNACK) packets...
 #+end_example
 tcp[ 13 ]: TCP头中13位偏移
 
-* wireshark 
-  用wireshark帮助学习TCP/IP
 * tinyperl
   可以学习tinyperl的裁减通用版的perl
   可以把perl精简为3M左右

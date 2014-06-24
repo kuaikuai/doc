@@ -742,3 +742,108 @@ __ret;})
 #define NF_HOOK(pf, hook, skb, indev, outdev, okfn) \
 	NF_HOOK_THRESH(pf, hook, skb, indev, outdev, okfn, INT_MIN)
 #+end_src
+* fastcgi
+** OS_Accept
+   多进程同时accept
+   使用spawn-fcgi fork出N个子进程，而每个子进程都在调用accept()，获取新链接。
+   os_unix.c
+#+begin_src c
+   int OS_Accept(int listen_sock, int fail_on_intr, const char *webServerAddrs)
+{
+    ...
+    for (;;) {
+        if (AcquireLock(listen_sock, fail_on_intr))
+            return -1;
+        ...
+        socket = accept(listen_sock, (struct sockaddr *)&sa, &len);
+        ...
+        if (ReleaseLock(listen_sock))
+            return (-1);
+        ...
+     }
+     return socket;
+}
+#+end_src
+在accept之前加锁，成功accept后解锁。防止群惊
+
+直接使用fcntl对listen socket进行加锁，实现进程间锁
+#+begin_src c
+/*
+ *----------------------------------------------------------------------
+ *
+ * AcquireLock --
+ *
+ *      On platforms that implement concurrent calls to accept
+ *      on a shared listening ipcFd, returns 0.  On other platforms,
+ *	acquires an exclusive lock across all processes sharing a
+ *      listening ipcFd, blocking until the lock has been acquired.
+ *
+ * Results:
+ *      0 for successful call, -1 in case of system error (fatal).
+ *
+ * Side effects:
+ *      This process now has the exclusive lock.
+ *
+ *----------------------------------------------------------------------
+ */
+static int AcquireLock(int sock, int fail_on_intr)
+{
+#ifdef USE_LOCKING
+    do {
+        struct flock lock;
+        lock.l_type = F_WRLCK;
+        lock.l_start = 0;
+        lock.l_whence = SEEK_SET;
+        lock.l_len = 0;
+
+        if (fcntl(sock, F_SETLKW, &lock) != -1)
+            return 0;
+    } while (errno == EINTR 
+             && ! fail_on_intr 
+             && ! shutdownPending);
+
+    return -1;
+
+#else
+    return 0;
+#endif
+}
+
+/*
+ *----------------------------------------------------------------------
+ *
+ * ReleaseLock --
+ *
+ *      On platforms that implement concurrent calls to accept
+ *      on a shared listening ipcFd, does nothing.  On other platforms,
+ *	releases an exclusive lock acquired by AcquireLock.
+ *
+ * Results:
+ *      0 for successful call, -1 in case of system error (fatal).
+ *
+ * Side effects:
+ *      This process no longer holds the lock.
+ *
+ *----------------------------------------------------------------------
+ */
+static int ReleaseLock(int sock)
+{
+#ifdef USE_LOCKING
+    do {
+        struct flock lock;
+        lock.l_type = F_UNLCK;
+        lock.l_start = 0;
+        lock.l_whence = SEEK_SET;
+        lock.l_len = 0;
+
+        if (fcntl(sock, F_SETLK, &lock) != -1)
+            return 0;
+    } while (errno == EINTR);
+
+    return -1;
+
+#else
+    return 0;
+#endif
+}
+#+end_src
