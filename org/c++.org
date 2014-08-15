@@ -1,0 +1,68 @@
+* std::tr1::bind std::tr1::function
+  有一段代码：
+#+begin_src c++
+        int rc = 0;
+        if(File_DateofChange(path) < 0)
+        {
+            sleep(1);
+            if(File_DateofChange(path) < 0)
+            {
+                sleep(5);
+                if(File_DateofChange(path) < 0)
+                {
+                    merror(QUEUE_ERROR, __local_name, path, "Queue not found");
+                    sleep(15);
+                    if(File_DateofChange(path) < 0)
+                    {
+                        return(-1);
+                    }
+                }
+            }
+        }
+
+        /* Wait up to 3 seconds to connect to the unix domain.
+         * After three errors, exit.
+         */
+        if((rc = OS_ConnectUnixDomain(path, OS_MAXSTR + 256)) < 0)
+        {
+            sleep(1);
+            if((rc = OS_ConnectUnixDomain(path, OS_MAXSTR + 256)) < 0)
+            {
+                sleep(2);
+                if((rc = OS_ConnectUnixDomain(path, OS_MAXSTR + 256)) < 0)
+                {
+                    merror(QUEUE_ERROR, __local_name, path,
+                           strerror(errno));
+                    return(-1);
+                }
+            }
+        }
+#+end_src
+
+代码很丑，本质上就是延时重试。
+我想改成类似下面的代码：
+#+begin_src c++
+try_call(File_DateofChange, path);
+try_call(OS_ConnectUnixDomain, path, OS_MAXSTR + 256);
+#+end_src
+而c++11之前没有lambda。
+后来看到了std::tr1::bind std::tr1::function
+实现如下：
+#+begin_src c++
+static int try_call(std::tr1::function <int ()> call)
+{
+    int i;
+    for(i = 0; !call() && i < MAX_RETRY; i++) {
+        sleep(1 + 5*i);
+    }
+    if(i >= MAX_RETRY) {
+        return -1;
+    }
+    return 0;
+}
+
+...
+try_call(std::tr1::bind(file_is_exist, _path));
+try_call(std::tr1::bind(connect_unix_domain, (char *)_path.c_str(), 1024 + 512);
+...
+#+end_src
