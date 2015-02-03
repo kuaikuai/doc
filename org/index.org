@@ -14,5 +14,6 @@
 * [[file:booklist.org][我的书库]]
 * [[file:emacs.org][emacs]]
 * [[file:kernel.org][linux内核代码]]
+* [[file:c++.org][c++]]
 * [[file:notes.org][乱记]]
 * [[file:dream.org][梦]]

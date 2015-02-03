@@ -22,9 +22,17 @@ perldoc -f sin
 perldoc -f open
 perldoc -f print
 
-* 交互环境
+* perl 交互环境
   perl -de 1
   没有python这么方便的交互环境，但是我们可以使用调试模式来
+* perl cgi调试
+$ export HTTP_COOKIE="user_id=abc123"
+$ export QUERY_STRING="month=jan&year=2001"
+$ export REQUEST_METHOD="GET"
+$ ./calendar.cgi
+As of 2.57, CGI.pm no longer automatically prompts for values. Instead, you can pass parameters as arguments to your script (this works for previous versions, too):
+$ ./calendar.cgi month=jan year=2001
+
 * perl Base64编码
 编码: perl -MMIME::Base64 -e 'print encode_base64("XXX");'
 解码: perl -MMIME::Base64 -e 'print decode_base64("XXX");'

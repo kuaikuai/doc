@@ -4,6 +4,13 @@
   http://www.gtdstudy.com
   http://mindhacks.cn/
   http://www.geekonomics10000.com/
+  kernel nginx
+  http://simohayha.iteye.com/blog/
+  TCP
+  http://zhangxiaolong.org/archives/269.html
+  kernel nginx
+  http://lenky.info/
+
 弯曲评论
   http://www.tektalk.org
  外刊IT评论  http://www.aqee.net/ 有一些好的技术心得
@@ -188,3 +195,5 @@ Like many programmers, I instinctively prefer purity and consistency and distrus
 Why, then, has the language grown on me over time? Well, I've gradually become convinced that practically-motivated flaws like the ones I list in this post add up to create Go's unexpected nimbleness. There's a weird sort of alchemy going on here, because I think any one of these decisions in isolation makes Go a worse language (even if only slightly). Together, however, they jolt Go out of a local maximum many procedural languages are stuck in, and take it somewhere better. Look again at each of the cases above, and imagine what the cumulative effect on Go would have been if the consistent choice had been made each time. The language would have more syntax, more core concepts to deal with, and be more verbose to write. Once you reason through the repercussions, you find that the result would have been a worse language overall. It's clear that Go is not the way it is because its designers didn't know better, or didn't care. Go is the result of a conscious pragmatism that is deep and audacious. Starting with this philosophy, but still managing to keep the language small and taut, with almost nothing dispensable or extraneous took great discipline and insight, and is a remarkable achievement.
 
 So, despite its flaws, Go remains graceful. It just took me a while to appreciate it, because I expected the grace of a ballet dancer, but found the grace of an battered but experienced bar-room brawler.
+* emacs lisp
+http://www.emacswiki.org/emacs/EmacsLisp

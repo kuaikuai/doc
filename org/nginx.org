@@ -29,3 +29,184 @@ GET / HTTP/1.0
 Host: localhost
 Connection: close
 #+end_example
+
+* nginx 模块开发例子
+
+为毛要开发Ngnix 模块：
+
+对于一些访问量特别大，业务逻辑也相对简单的Web调用来说，通过一个nginx module来实现是一种比较好的优化方法。实现一个nginx module实际上比较简单。（@TimYang）
+
+Nginx 配置结构了解
+
+Nginx的配置文件是以block的形式组织的，一个block通常使用大括号“{}”表示。block分为几个层级，整个配置文件为main层级，这 是最大的层级；在main层级下可以有event、http等层级，而http中又会有server block，server block中可以包含location block
+
+Nginx模块工作原理概述
+
+Nginx本身做的工作实际很少，当它接到一个HTTP请求时，它仅仅是通过查找配置文件将此次请求映射到一个location block，而此location中所配置的各个指令则会启动不同的模块去完成工作，因此模块可以看做Nginx真正的劳动工作者。通常一个 location中的指令会涉及一个handler模块和多个filter模块（当然，多个location可以复用同一个模块）。handler模块负 责处理请求，完成响应内容的生成，而filter模块对响应内容进行处理。因此Nginx模块开发分为handler开发和filter开发
+
+展示一个简单的Nginx模块开发全过程
+我们开发一个叫echo的handler模块，这个模块功能非常简单，它接收“echo”指令，指令可指定一个字符串参数，模块会输出这个字符串作为HTTP响应。例如，做如下配置：
+
+location /echo {
+echo “hello nginx”;
+}
+
+首先我们需要一个结构用于存储从配置文件中读进来的相关指令参数，即模块配置信息结构。根据Nginx模块开发规则，
+这个结构的命名规则为ngx_http_[module-name]_[main|srv|loc]_conf_t
+
+实现这个功能需要三步：
+1、读入配置文件中echo指令及其参数；
+2、进行HTTP包装（添加HTTP头等工作）；
+3、将结果返回给客户端。
+
+Nginx模块的安装
+
+Nginx不支持动态链接模块，所以安装模块需要将模块代码与Nginx源代码进行重新编译。安装模块的步骤如下：
+
+1、编写模块config文件，这个文件需要放在和模块源代码文件放在同一目录下。文件内容如下：
+
+ngx_addon_name=模块完整名称
+HTTP_MODULES=”$HTTP_MODULES 模块完整名称”
+NGX_ADDON_SRCS=”$NGX_ADDON_SRCS $ngx_addon_dir/源代码文件名”
+
+2、进入Nginx源代码，使用下面命令编译安装
+
+./configure --prefix=安装目录 --add-module=模块源代码文件目录
+make
+make install
+
+这样就完成安装了，例如，我的源代码文件放在/home/zj/tmp/ngx/ngx_http_echo下，我的config文件为：
+
+ngx_addon_name=ngx_http_echo_module
+HTTP_MODULES=”$HTTP_MODULES ngx_http_echo_module”
+NGX_ADDON_SRCS=”$NGX_ADDON_SRCS $ngx_addon_dir/ngx_http_echo_module.c”
+
+编译安装命令为：
+
+./configure –prefix=/usr/local/nginx –add-module=/home/zj/tmp/ngx/ngx_http_echo
+make
+sudo make install
+
+这样echo模块就被安装在我的Nginx上了，下面测试一下，修改配置文件，增加以下一项配置：
+
+location /echo {
+echo “This is my first nginx module!!!”;
+}
+
+然后用curl测试一下：
+
+curl -i http://localhost/echo
+* ngx_upload_module
+
+** source
+ngx_http_upload_handler->
+ngx_http_do_read_upload_client_request_body
+
+ngx_http_read_upload_client_request_body
+->ngx_http_do_read_upload_client_request_body
+
+ngx_http_read_upload_client_request_body_handler
+->ngx_http_do_read_upload_client_request_body
+
+ngx_http_do_read_upload_client_request_body
+->ngx_http_process_request_body
+
+ngx_http_process_request_body
+-> data_handler (upload_process_buf  upload_process_raw_buf)
+
+upload_process_buf/upload_process_raw_buf
+->upload_start_file -> ngx_http_upload_start_handler
+
+** ngx_upload_module 协议
+  multipart/form-data encoding 
+  见 [[http://www.ietf.org/rfc/rfc1867.txt][RFC 1867]]
+  断点上传协议
+  见： http://www.grid.net.ru/nginx/resumable_uploads.en.html
+*** Resumable uploads over HTTP. Protocol specification
+Valery Kholodkov <valery@grid.net.ru>, 2010
+1. Introduction
+
+This document describes application protocol that is used by nginx upload module to implement resumable file uploads. The first version of the module that supports this protocol is 2.2.0.
+2. Purpose
+
+The HTTP implements file uploads according to RFC 1867. When the request length is excessively large, the probability that connection will be interrupted is high. HTTP does not foresee a resumption mechanism. The goal of the protocol being described is to implement a mechanism of resumption of interrupted file transfer or suspension of upload upon user request.
+2.1. Splitting file into segments
+
+When TCP-connection interrupts abnormaly there is no way to determine what part of data stream has been succesfully delivered and what hasn't been delivered. Therefore a client cannot determine what position to resume from without communicating to server. In order to eliminate additional communication file is represented as an array of segments of reasonable length. When TCP-connection interrupts while transmitting certain segment, client retransmits the whole segment until a positive reponse will be received from server or maximal number of tries will be reached. In the protocol being described the client is responsible for choosing optimal length of a segment.
+
+For tracking the progress of file upload client and server use identical numbering scheme for each byte of a file. The first byte of a file has number 0, the last byte has number n-1, where n is the length of file in bytes.
+
+The order of transmission of a segment is not defined. Client may choose arbitrary order. However it is recommended to send segments in order ascention of byte numbers. Moreover, a user agent might decide to send multiple segments simultaneously using multiple independent connections. If a client exceeds maximal number of simultaneous connections allowed, server might return 503 "Service Unavailable" response.
+
+In case of simultaneous transmission it is prohibited to send 2 or more requests with overlapping ranges within one session. Whenever server detects simultaneous requests with overlapping ranges it must return an errorneous response.
+2.2. Encapsulation
+
+Each segment of a file is encapsulated into a separate HTTP-request. The method of the request is POST. Each request contains following specific headers:
+| Header name                   | Function                                                              |
+| Content-Disposition           | attachment, filename="name of the file being uploaded"                |
+| Content-Type                  | mime type of a file being uploaded (must not be multipart/form-data); |
+| X-Content-Range/Content-Range | byte range of a segment being uploaded;                               |
+| X-Session-ID/Session-ID       | identifier of a session of a file being uploaded (see 2.3);           |
+
+The body of the request must contain a segment of the file, corresponding to the range that was specified in X-Content-Range or Content-Range headers.
+
+Whenever a user agent is not able to determine mime type of a file, it may use application/octet-stream.
+2.3. Session management
+
+In order to identify requests containing segments of a file, a user agent sends a unique session identified in headers X-Session-ID or Session-ID. User agent is responsible for making session identifiers unique. Server must be ready to process requests from different IP-addresses corresponding to a single session.
+2.4. Acknowledgment
+
+Server acknowledges reception of each segment with a positive response. Positive responses are: 201 "Created" whenever at the moment of the response generation not all segments of the file were received or other 2xx and 3xx responses whenever at the moment of the response generation all segments of the file were received. Server must return positive response only when all bytes of a segment were successfully saved and information about which of the byte ranges were received was successfully updated.
+
+Upon reception of 201 "Created" response client must proceed with transmission of a next segment. Upon reception of other positive response codes client must proceed according to their standart interpretation (see. RFC 2616).
+
+In each 201 "Created" response server returns a Range header containing enumeration of all byte ranges of a file that were received at the moment of the response generation. Server returns identical list of ranges in response body.
+Appendix A: Session examples
+
+Example 1: Request from client containing the first segment of the file
+#+begin_example
+POST /upload HTTP/1.1
+Host: example.com
+Content-Length: 51201
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="big.TXT"
+X-Content-Range: bytes 0-51200/511920
+Session-ID: 1111215056 
+
+<bytes 0-51200>
+#+end_example
+Example 2: Response to a request containing first segment of a file
+#+begin_example
+HTTP/1.1 201 Created
+Date: Thu, 02 Sep 2010 12:54:40 GMT
+Content-Length: 14
+Connection: close
+Range: 0-51200/511920
+
+0-51200/511920 
+#+end_example
+Example 3: Request from client containing the last segment of the file
+#+begin_example
+POST /upload HTTP/1.1
+Host: example.com
+Content-Length: 51111
+Content-Type: application/octet-stream
+Content-Disposition: attachment; filename="big.TXT"
+X-Content-Range: bytes 460809-511919/511920
+Session-ID: 1111215056
+
+<bytes 460809-511919>
+#+end_example
+Example 4: Response to a request containing last segment of a file
+#+begin_example
+HTTP/1.1 200 OK
+Date: Thu, 02 Sep 2010 12:54:43 GMT
+Content-Type: text/html
+Connection: close
+Content-Length: 2270
+
+<response body>
+#+end_example
+* source code
+  http配置块解释
+  ngx_http_block

@@ -2239,3 +2239,45 @@ socket:      root  11861    ...e.    socket
 
 * stdbuf 命令
   可以关闭buffer
+* 检测ip地址冲突
+How to: Detect Duplicate IP Address With arping command under Linux
+
+by Nix Craft on November 23, 2007 · 7 comments· LAST UPDATED November 23, 2007
+
+in CentOS, Debian / Ubuntu, Hardware
+
+Q. I run quite large network with different subnets. I'd like to know how can I find out duplicate IP address under Linux / UNIX?
+
+A. You can use arpping command. The arping utility performs an action similar to ping command, but at the Ethernet layer. You can send ARP REQUEST to a neighbor host / computers.
+Task: Send ARP request
+
+Let us find out reachability of an IP on the local Ethernet with arping i.e send ARP request 192.168.1.1:
+$ sudo arping -I eth0 -c 3 192.168.1.1
+Output:
+
+ARPING 192.168.1.1 from 192.168.1.106 ra0
+Unicast reply from 192.168.1.1 [00:18:39:6A:C6:8B]  2.232ms
+Unicast reply from 192.168.1.1 [00:18:39:6A:C6:8B]  1.952ms
+Sent 3 probes (1 broadcast(s))
+Received 3 response(s)
+
+Where,
+
+    -I eth0 : Specify network interface i.e. name of network device where to send ARP REQUEST packets. This option is required.
+    -c 3 : Stop after sending 3 ARP REQUEST packets
+
+Task: Find duplicate IP
+
+The -D option specifies duplicate address detection mode (DAD). It returns exit status 0, if DAD succeeded i.e. no replies are received.
+$ sudo arping -D -I eth0 -c 2 192.168.1.1
+If 192.168.1.1 duplicated you should see zero exit status:
+$ echo $?
+Always use following syntax for duplicate address detection with arping:
+$ sudo arping -D -I <interface-name> -c 2 <IP-ADDRESS-TO-TEST>
+$ echo $?
+* 通过ssh代理上网
+  ssh -TfnN -D 7070 root@10.18.207.102
+
+  然后在浏览器中设置SOCKS代理为127.0.0.1 7070
+* SSH 端口转发
+http://linux-wiki.cn/wiki/zh-hans/SSH%E7%AB%AF%E5%8F%A3%E8%BD%AC%E5%8F%91%EF%BC%88%E9%9A%A7%E9%81%93%EF%BC%89

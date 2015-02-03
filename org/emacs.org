@@ -603,6 +603,8 @@ M-<down>	使 item 下移一层
    (setq tramp-default-method "ssh")
    然后使用 /usr@machine:/path/to.file 的语法来访问远程文件。
    tramp与ido-mode冲突时，使用前先关闭ido-mode
+
+   C-x C-f /ssh:root@10.0.64.18
 * c/c++几个操作
 M-a        移动到当前语句的开始
 M-e        移动到当前语句的末尾
@@ -681,9 +683,13 @@ int var_is_less_long       = 4;
 *** 调用外部程序
     (call-process "cmd" nil t nil "/c" "dir")
 
-
 * 自动检测文件编码，防止乱码
   ;; auto detect unicode
 #+begin_src lisp
   (require 'unicad)
 #+end_src
+* 画框图
+  artist-mode
+  按鼠标中键，在弹出的菜单中选择图形
+* Ctrl+Space
+  在fedora上ctrl+space被ibus占用了。运行ibus-setup修改其设置
