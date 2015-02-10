@@ -489,3 +489,263 @@ int tcp_twsk_unique(struct sock *sk, struct sock *sktw, void *twp)
 * tcp_tw_recycle
   快速回收处于TIMEWAIT状态的sock
   见inet_twsk_schedule()
+* TCPIP函数调用大致流程
+
+**  ip_send_reply 
+    ip_route_output_key 
+    ip_push_pending_frames 
+
+
+** tcp_v4_send_ack(发送ACK) 
+    ip_send_reply 
+        ip_route_output_key 
+        ip_push_pending_frames 
+
+
+** 用户子上而下的读函数都间接的调用了tcp_recvmsg 
+tcp_recvmsg
+skb_copy_datagram_iovec 
+tcp_recv_urg(接受一个字节的URG数据) 
+
+** UDP
+UDP的写函数都调用了udp_sendmsg 
+udp_sendmsg
+    ip_route_output_flow 
+    ip_append_data 
+    udp_flush_pending_frames 
+        ip_flush_pending_frames 
+    udp_push_pending_frames 
+        ip_push_pending_frames 
+
+接收
+硬件->IP层->运输层收到数据，添加到对应的SOCKET缓冲区中 
+由ip_rcv间接调用 
+udp_rcv 
+    __udp4_lib_rcv 
+        if(是多播或广播) 
+            __udp4_lib_mcast_deliver 
+                udp_queue_rcv_skb(对每个需要接受的UDP SOCKET缓冲调用) 
+        __udp4_lib_lookup 
+        udp_queue_rcv_skb 
+
+
+把数据块sk_buff放到一个sock结构的接受缓存的末尾中 
+udp_queue_rcv_skb 
+    sock_queue_rcv_skb 
+        skb_queue_tail 
+
+用户子上而下的读函数都间接的调用了udp_recvmsg 
+udp_recvmsg
+__skb_recv_datagram 
+skb_copy_datagram_iovec 
+skb_copy_and_csum_datagram_iovec 
+
+** 原始套接字 
+RAW Socket的写函数都调用了raw_sendmsg 
+raw_sendmsg
+    ip_route_output_flow 
+    if(设置了IP_HDRINCL选项，即自己构造ip头部) 
+        raw_send_hdrinc
+    else 
+        ip_append_data 
+        ip_flush_pending_frames或 
+        ip_push_pending_frames 
+
+
+自底向上的收包 
+raw_rcv 
+由ip_forward调用ip_call_ra_chain，然后再调用的raw_rcv 
+raw_rcv 
+sock_queue_rcv_skb 
+skb_queue_tail 
+sk->sk_data_ready = sock_def_readable 
+waitqueue_active 
+sk_wake_async 
+
+
+用户子上而下的读函数都间接的调用了raw_recvmsg 
+raw_recvmsg
+skb_recv_datagram 
+__skb_recv_datagram 
+wait_for_packet(如果没有数据，则调用此函数等待数据) 
+
+
+** ICMP 
+在任何需要发送ICMP报文的时候都会调用此函数 
+icmp_send 
+    __ip_route_output_key 
+        ip_route_output_slow 
+    ip_route_output_key 
+        ip_route_output_flow 
+    icmp_push_reply    
+        ip_append_data 
+        ip_flush_pending_frames或 
+        ip_push_pending_frames 
+
+
+硬件->IP层->运输层收到ICMP数据，作出处理逻辑 
+由ip_rcv间接调用 
+icmp_rcv 
+    完全就是icmp协议的处理逻辑，通过函数指针icmp_pointers[icmph->type].handler调用了一下函数中的某一个 
+    icmp_discard 
+    icmp_unreach 
+    icmp_redirect 
+    icmp_timestamp 
+    icmp_address 
+    icmp_address_reply 
+    icmp_echo 
+
+
+** 网络层 
+IP发送 
+网络层中主要的发送函数有以下三个：ip_push_pending_frames，ip_queue_xmit，raw_send_hdrinc 
+ip_push_pending_frames 
+将所有pending状态的IP分组组合成一个IP分组，并发送 
+    ip_local_out 
+
+
+ip_queue_xmit 
+    ip_route_output_flow(找路由) 
+    ip_local_out 
+
+
+raw_send_hdrinc 
+    NF_HOOK(dst_output) 
+
+
+ip_local_out 
+    __ip_local_out 
+        nf_hook(dst_output) 
+    dst_output 
+
+路由选择 
+ip_route_output_flow 
+    __ip_route_output_key 
+        ip_route_output_slow 
+
+路由选择 
+ip_route_output_slow 
+    fib_lookup 
+    ip_mkroute_output 
+        __mkroute_output 
+        rt_hash 
+        rt_intern_hash 
+            arp_bind_neighbour 
+                __neigh_lookup_errno 
+                    neigh_lookup 
+                    neigh_create 
+
+
+dst_output 
+    dst->output = ip_output 
+    NF_HOOK_COND(ip_finish_output) 
+        dst_output 
+        ip_fragment 
+        ip_finish_output2 
+            neigh_hh_output 
+                hh->hh_output = dev_queue_xmit 
+            dst->neighbour->output = neigh_resolve_output 
+                neigh->ops->queue_xmit = dev_queue_xmit 
+
+IP接受 
+接收IPv4包，由netif_rx间接调用 
+ip_rcv 
+    NF_HOOK 
+    ip_rcv_finish 
+        ip_route_input 
+        dst_input 
+            dst->input(可能是ip_local_deliver或ip_forward) 
+            if(是发给本地的包) 
+                dst->input是ip_local_deliver 
+                    NF_HOOK 
+                    ip_local_deliver_finish 
+                    ipprot->handler(可能是tcp_v4_rcv,udp_rcv,icmp_rcv,igmp_rcv) 
+            else 
+                dst->input是ip_forward 
+
+更新路由 
+ip_route_input 
+    ip_route_input_mc(多播) 
+        rt_hash 
+        rt_intern_hash 
+    ip_route_input_slow(其它) 
+        ip_mkroute_input 
+            __mkroute_input 
+            rt_hash 
+            rt_intern_hash 
+每收到一个IP报文都会调用此函数更新路由表。ip_route_input函数的上半部分是在hash table寻找路由项，如果找到就返回。找不到才会调用后面的ip_route_input_mc或ip_route_input_slow来更新路由表。 
+
+
+转发 
+ip_forward 
+ip_call_ra_chain 
+raw_rcv 
+    xfrm4_route_forward(处理路由) 
+        xfrm_route_forward 
+            __xfrm_route_forward 
+                xfrm_lookup 
+                    __xfrm_lookup 
+                        xfrm_find_bundle 
+                            afinfo->find_bundle = __xfrm4_find_bundle 
+                        xfrm_bundle_create 
+                            xfrm_dst_lookup 
+                                afinfo->dst_lookup = xfrm4_dst_lookup 
+                                    __ip_route_output_key 
+                                        ip_route_output_slow 
+    处理各个参数(在一定条件下发送ICMP) 
+    ip_decrease_ttl(减少TTL) 
+    NF_HOOK(ip_forward_finish) 
+        dst_output 
+
+
+** 链路层 
+接收帧 
+由硬件驱动在中断处理程序中直接调用netif_rx 
+netif_rx 
+    if(netpoll_rx函数与把数据拿走) 
+        return 
+    __skb_queue_tail(把所有收到的数据保存起来) 
+    napi_schedule 
+        __napi_schedule 
+            __raise_softirq_irqoff(NET_RX_SOFTIRQ); 
+
+在net_dev_init函数中初始化了软中断： 
+open_softirq(NET_TX_SOFTIRQ, net_tx_action, NULL); 
+open_softirq(NET_RX_SOFTIRQ, net_rx_action, NULL); 
+所以NET_RX_SOFTIRQ中断的处理函数是net_rx_action，NET_TX_SOFTIRQ中断的处理函数是net_tx_action。需要让上层接收数据时，只要触发相应的软中断，如__raise_softirq_irqoff(NET_RX_SOFTIRQ)。内核就会在适当时机执行do_softirq来处理pending的软中断。 
+
+
+net_rx_action 
+    n->poll = process_backlog 
+        netif_receive_skb 
+            pt_prev->func = ip_rcv(在这里完成了交接) 
+    __raise_softirq_irqoff(NET_RX_SOFTIRQ) 
+
+
+发送帧 
+dev_queue_xmit 
+    rcu_read_lock_bh 
+    if(设备有发送队列) 
+        q->enqueue(将数据追加到发送队列，软中断处理函数net_tx_action会执行真正的发送工作) 
+    else 
+        dev_hard_start_xmit 
+            dev->hard_start_xmit = el_start_xmit 
+                调用outw汇编指令发送数据，够底层了 
+    rcu_read_unlock_bh 
+
+
+net_tx_action 
+    __kfree_skb(释放已发送的，此时中断由dev_kfree_skb_irq函数发起) 
+    qdisc_run 
+        __qdisc_run 
+qdisc_restart 
+                dev_hard_start_xmit 
+            netif_schedule 
+    netif_schedule 
+
+
+netif_schedule 
+    __netif_schedule 
+        raise_softirq_irqoff(NET_TX_SOFTIRQ)  
+
+

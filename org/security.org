@@ -559,3 +559,224 @@ Struts2的核心是使用的WebWork，处理Action时通过ParametersInterceptor
 
 
 可以停止当前Action所在的J2EE服务器（Tomcat, Resin, WebLogic，……）。
+* java 破解
+通过jd反编译其jar文件，阅读代码。
+找到与解密license文件有关的函数为：
+com.aa.base.reg.decode()
+#+begin_src java
+private static byte[] tinyDecode(byte[] bytes)
+{
+    //解密过程
+    ...
+    return result;
+}
+#+end_src
+通过复用解密的过程代码摘出来，实现了一个程序去获取到license文件解密后的结果。
+但是如果将整个过程返回来，实现产生合法license，却很困难。
+于是想想得到直接将decode()函数直接短接掉，
+让它直接返回输入的内容。
+我在将自己希望的license，解密后的结果直接写出来
+例如: 
+connection: 100000
+deadline: xxxxxxx
+等等
+这样真个流程就会读到我期望的东西了。
+
+那么获取修改这个函数呢？
+我选择了javassist。
+hack代码实现为ServletContextListener
+我修改工程的web.xml，增加:
+#+begin_example
+<listener>
+      <listener-class>MyContext</listener-class>
+ </listener>
+#+end_example
+然后修改tomcat的启动脚本中JAVA_OPTS变量，
+JAVA_OPTS="xxxxxxx..."
+为
+JAVA_OPTS="xxxxxxx... -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address =18000"
+
+启动tomcat后MyContext会将相关类在JVM中修改，重新加载，并且写到本地磁盘上。
+这样做的好处时，可以实时看到修改是否正确。
+
+一切修改都OK了，将jar包用winrar之类的工具打开，把产生的.class文件拖进去，
+将新生成的.class覆盖旧的文件，对jar包进行重新打包，
+无限制的jar文件就问世了。
+
+#+begin_src java
+import javax.servlet.ServletContextListener;
+import javax.servlet.ServletContextEvent;
+import javax.servlet.*;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.*;
+
+import javassist.ClassPool;
+import javassist.CtClass;
+import javassist.CtConstructor;
+import javassist.CtField;
+import javassist.CtMethod;
+import javassist.CtNewMethod;
+import javassist.util.HotSwapper;
+import javassist.ClassClassPath;
+
+public	class MyContext implements ServletContextListener {
+    private ServletContext context = null;
+    public void contextDestroyed(ServletContextEvent event){
+        this.context = null;
+    }
+
+    public void contextInitialized(ServletContextEvent event){
+        this.context = event.getServletContext();
+        System.out.println("begin to hack.................................");
+        hack();
+        System.out.println("end .....................");
+    }
+
+
+    private void rewrite(HotSwapper hs, String className, String methodName, String[] parameterNames, String code) {
+         try {
+            CtClass ctClass = ClassPool.getDefault().get(className);
+            CtMethod method = null;
+            CtConstructor constructor = null;
+            CtConstructor[] constructorArray = null;
+            if (null==parameterNames) {
+                if (null == methodName) {
+                    constructorArray = ctClass.getConstructors();
+                }
+                else {
+                    method = ctClass.getDeclaredMethod(methodName);
+                }
+            }
+            else {
+                CtClass paramClass[] = new CtClass[parameterNames.length];
+                for(int i = 0; i < parameterNames.length; i++) {
+                    paramClass[i] = ClassPool.getDefault().get(parameterNames[i]);
+                }
+                if (null == methodName) {
+                    constructor = ctClass.getDeclaredConstructor(paramClass);
+                }
+                else {
+                    method = ctClass.getDeclaredMethod(methodName, paramClass);
+                }
+            }
+            ctClass.defrost();
+            if (null != method) {
+                method.insertBefore(code);
+            }
+            if (null != constructor) {
+                System.out.println("insert constructor ........................");
+                constructor.insertBefore(code);
+            }
+            if (null != constructorArray) {
+                for(int i = 0; i < constructorArray.length; i++) {
+                    System.out.println("insert constructor ........................");
+                    constructorArray[i].insertBefore(code);
+                }
+            }
+            // 将修改后的class，写到/tmp路径下
+            ctClass.writeFile("/tmp");
+            byte[] bytes = ctClass.toBytecode();
+            ctClass.detach();
+            // 重新加载修改后的类到JVM
+            hs.reload(className, bytes);
+
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+   private void rewrite2(HotSwapper hs, CtClass ctClass, String methodName, String[] parameterNames, String code) {
+       try {
+            CtMethod method = null;
+            CtConstructor constructor = null;
+            CtConstructor[] constructorArray = null;
+            if (null==parameterNames) {
+                if (null == methodName) {
+                    constructorArray = ctClass.getConstructors();
+                }
+                else {
+                    method = ctClass.getDeclaredMethod(methodName);
+                }
+            }
+            else {
+                CtClass paramClass[] = new CtClass[parameterNames.length];
+                for(int i = 0; i < parameterNames.length; i++) {
+                    paramClass[i] = ClassPool.getDefault().get(parameterNames[i]);
+                }
+                if (null == methodName) {
+                    constructor = ctClass.getDeclaredConstructor(paramClass);
+                }
+                else {
+                    method = ctClass.getDeclaredMethod(methodName, paramClass);
+                }
+            }
+            ctClass.defrost();
+            if (null != method) {
+                method.insertBefore(code);
+            }
+            if (null != constructor) {
+                System.out.println("insert constructor ........................");
+                constructor.insertBefore(code);
+            }
+            if (null != constructorArray) {
+                for(int i = 0; i < constructorArray.length; i++) {
+                    System.out.println("insert constructor ........................");
+                    constructorArray[i].insertBefore(code);
+                }
+            }
+            System.out.println("write class file -------------");
+            ctClass.writeFile("/tmp");
+            byte[] bytes = ctClass.toBytecode();
+            ctClass.detach();
+
+            hs.reload(className, bytes);
+
+        } catch(Exception e) {
+            e.printStackTrace();
+        }
+    }
+    // 由于com.aa.core.ut.in是com.aa.core.ut内的定义内部类，所以麻烦一些
+    private void fixInnerClasses(HotSwapper hs)
+        throws Exception {
+       ClassPool.getDefault().insertClassPath(new ClassClassPath(com.aa.core.ut.in.class));
+       CtClass ctClass = ClassPool.getDefault().get("com.aa.core.ut");
+       CtClass[] nested = ctClass.getNestedClasses();
+       for (CtClass n : nested) {
+          System.out.println("nested "+ n.getSimpleName());
+          if(n.getName().equals("com.aa.core.ut$in")) {
+             System.out.println("--------------------in OK ----------------");
+             rewrite2(hs, n, "is_ok", null, "return true;");
+             break;
+          }
+       }
+    }
+
+    private void hack() {
+        HotSwapper hs = null;
+        try {
+            hs = new HotSwapper(18000);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+        ClassPool.getDefault().insertClassPath(new ClassClassPath(com.aa.base.reg.class));
+        StringBuffer body = new StringBuffer();
+        // 解释输出内容以便查看是否hack成功
+        body.append("System.out.println(new String($1));");
+        // 直接返回输入内容
+        body.append("return $1;");
+        rewrite(hs, "com.aa.base.reg", "decode", null, body.toString());
+
+        try {
+           fixInnerClasses(hs);
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
+        }
+    }
+
+}
+
+#+end_src
