@@ -7,15 +7,7 @@
   (progn
     ;;(set-default-font "Inconsolata-11")
     ))
-(add-to-list 'load-path "~/package")
-;; server mode
-(require 'server)
-(when (and (>= emacs-major-version 23)
-           (equal window-system 'w32))
-  (defun server-ensure-safe-dir (dir) "Noop" t)) ; Suppress error "directory
-                                        ; ~/.emacs.d/server is unsafe"
-                                        ; on windows.
-;;(server-start)
+
 ;;(require 'cl)
 
 ;; solve problem "Variable binding depth exceeds max-specpdl-size", 
@@ -23,26 +15,27 @@
 (setq max-specpdl-size 34000)
 (setq max-lisp-eval-depth 20000)
 
+;; 关闭菜单栏、工具条、滚动条
 (if (fboundp 'scroll-bar-mode) (scroll-bar-mode -1))
 (if (fboundp 'tool-bar-mode) (tool-bar-mode -1))
 (if (fboundp 'menu-bar-mode) (menu-bar-mode -1))
 
-
+;;使用鼠标选择后，自动进入kill-ring
 (setq mouse-drag-copy-region t) 
 (setq x-select-enable-clipboard t)
-
+;;显示括号匹配
 (show-paren-mode t)
-
+;;括号匹配时显示另外一边的括号，而不是跳到另一个括号
 (setq show-paren-style 'parentheses)
-
+;;显示所在行号和列号
 (column-number-mode t)
-
+;; 光标显示为一竖线
 (setq-default cursor-type 'bar)
-
+;; 不要问 yes-or-no,只问 y-or-n
 (fset 'yes-or-no-p 'y-or-n-p)
-
+;; 关闭工具栏
 (tool-bar-mode -1)
-
+;; 平滑滚动
 (setq scroll-step           1
       scroll-conservatively 10000)
 (setq mouse-wheel-scroll-amount '(1 ((shift) . 1))) ;; one line at a time
@@ -50,71 +43,74 @@
 (setq mouse-wheel-follow-mouse 't) ;; scroll window under mouse
 (setq scroll-step 1) ;; keyboard scroll one line at a time
 
-
+;; 正在编辑的文件被其他程序修改时，自动更新缓存区
 (global-auto-revert-mode 1)
 (setq view-read-only t)
 (setq make-backup-files nil)
 ;;(setq default-frame-alist'((height . 30) (width .40) (menu-bar-lines . 20) (tool-bar-lines . 0)))
 
 (desktop-save-mode 1)
+;;禁用菜单栏，F10 开启关闭菜单
 ;;(menu-bar-mode nil)
-
+;;用空格代替TAB
 (setq-default indent-tabs-mode nil)
-(setq default-tab-width 4)
-
+;;写文件时的默认编码
 (setq buffer-file-coding-system 'utf-8)
-
+;;读文件时的编码
 (prefer-coding-system 'utf-8)
-
+;; windows文件名编码要改回 gbk
 (if (eq system-type 'windows-nt)
     (setq file-name-coding-system 'chinese-gbk))
-(when (eq window-system 'x)
+(when (eq window-system 'x) ; emacs和其它程序互相拷贝
   (setq x-select-enable-clipboard t))
-
+;; 设置emacs的标题
 (setq frame-title-format
       '(:eval (if (buffer-file-name)
                   (file-truename (buffer-file-name))
                 (buffer-name))))
 
+;; iimage mode 显示内置图片
+;; 使用iimage-mode看org文档中的图片
 (autoload 'iimage-mode "iimage" "Support Inline image minor mode." t)
 (autoload 'turn-on-iimage-mode "iimage" "Turn on Inline image minor mode." t)
 
-
+;; 终端中可以paste字符串
 (add-hook 'term-mode-hook (lambda ()
                             (define-key term-raw-map (kbd "C-y") 'term-paste)))
 
 ;;(add-hook 'term-mode-hook 'term-line-mode)
 
-
+;; 基本功能的键盘绑定----------------------------
+;; backspace太远 从effective emacs学的招
 (global-set-key "\C-w" 'backward-kill-word)
-
+;;既又原来c-k又有c-w的功能
 (global-set-key "\C-k" 'yxf-kill-region-or-line)
 (defalias 'qrr 'query-replace-regexp)
 
+;;C-.记录当前位置，稍后可用C-,跳回来
 (global-set-key [(control ?\.)] 'point-to-register)
 (global-set-key [(control ?\,)] 'jump-to-register)
-
+;;不使用默认的list-buffers
 (global-set-key (kbd "C-x C-b") 'ibuffer)
 (global-set-key (kbd "C-c r") 'replace-string)
 (global-set-key (kbd "C-c p") 'delete-indentation)
 (global-set-key (kbd "C-c q") 'query-replace)
-
+;; 交换了ctrl 与ATL 键盘后， C-M-\键盘不起作用了
 (global-set-key [(control ?\\)] 'indent-region)
 ;(global-set-key (kbd "<f4>") 'shell-command)
-
+(global-set-key [f1] 'compile)
 (global-set-key (kbd "C-SPC") 'nil)
-(global-set-key (kbd "M-SPC") 'set-mark-command)
-(require 'etags-extension)
+(global-set-key [(control tab)] 'other-frame)
+
 ;; find . -name "*.[ch] | xargs  etags -
-;; find . -name "*.[ch]" -o -name "*.cpp" -o -name "*.hpp" | xargs etags -a
-;; M-x visit-tags-table
-;; M-. find a tag
-;; C-u M-. find next tag
-;; M-, back
+;; atl + .  查找一个TAG
+;; atl + ,  跳到查找之前的位置
 (global-set-key [(meta ?\,)] 'pop-tag-mark)
 
 (define-prefix-command 'ctl-z-map)
 (global-set-key (kbd "C-z") 'ctl-z-map)
+;; 设置标记 默认C-SPC 被输入法截获，无法使用
+(global-set-key (kbd "C-z m") 'set-mark-command)
 
 (autoload 'todo-mode "todo-mode"
   "Major mode for editing TODO lists." t)
@@ -135,25 +131,31 @@
 (require 'tempo)
 (setq tempo-interactive t)
 
-
+;;;;启动Emacs Server
 (setq server-mode t)
 (server-start)
-
-;(add-to-list 'load-path "~/package")
+;; 扩展模块---------------------------------------
+(add-to-list 'load-path "~/package")
 (add-to-list 'load-path "~/package/color-theme-6.6.0")
 (add-to-list 'load-path "~/package/dark-mode")
 
-;; common lisp IDE
-(add-to-list 'load-path "~/package/slime")
-(require 'slime-autoloads)
-(setq inferior-lisp-program "/usr/bin/sbcl")
-(setq slime-contribs '(slime-fancy))
-;; golang
-(require 'go-mode-load)
-(add-hook 'go-mode-hook 'yxf-go-mode-startup)
-;; auto detect unicode
-(require 'unicad)
-;; edit rectangle
+(add-to-list 'load-path "~/package/smex")
+;; 快速输入emacs 命令
+(require 'smex) ; Not needed if you use package.el
+(smex-initialize) ; Can be omitted. This might cause a (minimal) delay
+                  ; when Smex is auto-initialized on its first run.
+(global-set-key (kbd "M-x") 'smex)
+(global-set-key (kbd "M-X") 'smex-major-mode-commands)
+;; This is your old M-x.
+(global-set-key (kbd "C-c C-c M-x") 'execute-extended-command)
+
+
+
+(autoload 'lua-mode "lua-mode" "Lua editing mode." t)
+(add-to-list 'auto-mode-alist '("\\.lua$" . lua-mode))
+(add-to-list 'interpreter-mode-alist '("lua" . lua-mode))
+
+;; 矩形块操作
 (require 'rect-mark)
 (define-key ctl-x-map "r\C-m" 'rm-set-mark)
 (define-key ctl-x-map [?r ?\C-\ ] 'rm-set-mark)
@@ -172,18 +174,18 @@
 (autoload 'rm-mouse-drag-region "rect-mark"  
    "Drag out a rectangular region with the mouse." t)
 
-
+;; windows 使用cygwin
 (if (eq system-type 'windows-nt)
     (progn
-      (setenv "PATH" (concat "D:/cygwin/bin;" (getenv "PATH")))
-      (setq exec-path (cons "D:/cygwin/bin/" exec-path))
+      (setenv "PATH" (concat "E:/cygwin/bin;" (getenv "PATH")))
+      (setq exec-path (cons "E:/cygwin/bin/" exec-path))
       (require 'cygwin-mount)
       (cygwin-mount-activate)
       (add-hook 'comint-output-filter-functions
                 'shell-strip-ctrl-m nil t)
       (add-hook 'comint-output-filter-functions
                 'comint-watch-for-password-prompt nil t)
-      (setq explicit-shell-file-name "bash.exe")
+      (setq explicit-shell-file-name "E:/cygwin/bin/bash.exe")
       ;; For subprocesses invoked via the shell
       ;; (e.g., "shell -c command")
       (setq shell-file-name explicit-shell-file-name)
@@ -198,28 +200,15 @@
           ad-do-it))
       (ad-activate 'grep-compute-defaults)))
 
-;; edit remote file
 (require 'tramp)
 (setq tramp-default-method "ssh")
 
-(if (eq system-type 'windows-nt)
-  (eval-after-load "tramp"
-    '(progn
-       (add-to-list 'tramp-methods
-                    (mapcar
-                     (lambda (x)
-                       (cond
-                        ((equal x "sshx") "cygssh")
-                        ((eq (car x) 'tramp-login-program) (list 'tramp-login-program "fakecygpty ssh"))
-                        (t x)))
-                     (assoc "sshx" tramp-methods)))
-       (setq tramp-default-method "cygssh"))))
 
-(setq password-cache-expiry nil)
 (require 'yaml-mode)
 (add-to-list 'auto-mode-alist '("\\.yml$" . yaml-mode))
 (add-to-list 'auto-mode-alist '("\\.yaml$" . yaml-mode))
-
+;; C-return 使用 c的模板
+;; 详见代码
 (require 'tempo-c-cpp)
 
 (load "~/package/haskell-mode-2.8.0/haskell-site-file")
@@ -228,27 +217,25 @@
 ;;(add-hook 'haskell-mode-hook 'turn-on-haskell-indent)
 ;;(add-hook 'haskell-mode-hook 'turn-on-haskell-simple-indent)
 
-
-(eval-when-compile (require 'lusty-explorer))
-(require 'lusty-explorer)
-;;(eval-when-compile (require 'anything-config))
 (require 'tiny)
 ;;(yxf-switch-num-sign)
+;;快速切换到*scratch*
 (global-set-key (kbd "C-z c") 'ywb-create/switch-scratch)
 (global-set-key (kbd "C-z e") 'yxf-create/switch-shell)
-
+;;格式化整个缓存区
 (global-set-key (kbd "C-z f" ) 'yxf-format-full)
-
+;;history stack,跳来跳去
 (global-set-key (kbd "<f7>") 'yxf-point-stack-push)
 (global-set-key (kbd "<f8>") 'yxf-point-stack-pop)
 (require 'copy)
 (global-set-key (kbd "C-z w")         (quote copy-word))
-(global-set-key (kbd "C-z l")         (quote copy-line))
+;;(global-set-key (kbd "C-z l")         (quote copy-line))
 ;;(global-set-key (kbd "C-z d")         (quote copy-paragraph))
 (global-set-key (kbd "C-z s")         (quote thing-copy-parenthesis-to-mark))
-
+;;M-C-a，在gnome有别的键绑定了
+;;跳到函数开头
 (global-set-key (kbd "C-z a")         (quote beginning-of-defun))
-
+;;跳到函数结尾
 (global-set-key (kbd "C-z e")         (quote end-of-defun))
 
 (global-set-key (kbd "C-x C-s") 
@@ -257,29 +244,30 @@
    (set-buffer-file-coding-system 'unix 't)
 
     (save-buffer)))
-;; M-x w32-fullscreen
-(if (eq system-type 'windows-nt)
-    (require 'darkroom-mode))
+;;用于w32系统，全屏; M-x w32-fullscreen
+;;(if (eq system-type 'windows-nt)
+;;    (require 'darkroom-mode))
 
-(require 'smart-compile)
-(global-set-key (kbd "<f1>") 'smart-compile)
 (require 'color-theme)
 (color-theme-initialize)
 (color-theme-gnome2)
 
-;; multi-terminal
-(require 'multi-term)
-(setq multi-term-program "/bin/bash")
-(setq multi-term-buffer-name "term")
+;; 将color-theme放在multi-term前，
+;; 否则color-theme的颜色设置回混乱
+;; 可以运行多个终端，呵呵
+;;(defun ad-advised-definition-p (def) t)
+;;(require 'multi-term)
+;;(setq multi-term-program "/bin/bash")
+;;(setq multi-term-buffer-name "term")
 
-
+;; 在dired下使用应用打开文件,具体joseph-openwith
 (require 'joseph-openwith)
 
+;; 调用gnupg加密
 (require 'epa-file)
 (epa-file-enable)
 ;; auto-save
 (setq epa-file-inhibit-auto-save nil)
-
 
 (require 'tabbar)
 (tabbar-mode)
@@ -289,14 +277,12 @@
 (global-set-key [(control down)] 'tabbar-backward-group)
 (global-set-key [(control right)] 'tabbar-forward)
 (global-set-key [(control left)] 'tabbar-backward)
-;; not in tabbar
-(global-set-key [(control tab)] 'other-window)
-
+(global-set-key [(meta down)] 'other-frame)
 (setq display-time-24hr-format t)
 (setq display-time-day-and-date t)
 (display-time)
 
-
+;;用于加亮变量, cedet中也该功能，不过较慢
 (require 'highlight-symbol)
 (global-set-key [(control f3)] 'highlight-symbol-at-point)
 ;(global-set-key [f3] 'highlight-symbol-next)
@@ -305,45 +291,37 @@
 
 (require 'xcscope)
 
-;; c-x c-f ido-find-file
 (require 'ido)
 (ido-mode t)
 
-;; redo/undo key: c-c <left>/<right>
-(when (fboundp 'winner-mode)
-  (winner-mode 1))
+;; most powerful !!!
+;; 说明文档见http://tuhdo.github.io/helm-intro.html
+(add-to-list 'load-path "~/package/helm")
+(require 'helm)
+(require 'helm-config)
 
-(eval-after-load 'anything
-  '(progn
-     (setq anything-enable-digit-shortcuts t)
-     (global-set-key (kbd "C-z a") 'anything)))
+;; The default "C-x c" is quite close to "C-x C-c", which quits Emacs.
+;; Changed to "C-c h". Note: We must set "C-c h" globally, because we
+;; cannot change `helm-command-prefix-key' once `helm-config' is loaded.
+(global-set-key (kbd "C-c h") 'helm-command-prefix)
+(global-unset-key (kbd "C-x c"))
+(global-set-key (kbd "C-x b") 'helm-mini)
+(define-key helm-map (kbd "<tab>") 'helm-execute-persistent-action) ; rebind tab to run persistent action
+(define-key helm-map (kbd "C-i") 'helm-execute-persistent-action) ; make TAB works in terminal
+(define-key helm-map (kbd "C-z")  'helm-select-action) ; list actions using C-z
 
-(eval-after-load 'anything-config
-  '(add-to-list 'anything-sources anything-c-source-file-cache))
-(require 'anything)
-;;(require 'anything-config)
-(global-set-key [f5] 'anything)
+(when (executable-find "curl")
+  (setq helm-google-suggest-use-curl-p t))
 
-;; This is how you would do it by hand
-(defun view-pdf ()
-  "Use evince to view PDFs."
-  (interactive)
-  (progn
-    (read-only-mode t)
-    (start-process "pdf" nil
-                   "evince" (buffer-file-name))
-    (kill-buffer (current-buffer))))
+(setq helm-split-window-in-side-p           t ; open helm buffer inside current window, not occupy whole other window
+      helm-move-to-line-cycle-in-source     t ; move to end or beginning of source when reaching top or bottom of source.
+      helm-ff-search-library-in-sexp        t ; search for library in `require' and `declare-function' sexp.
+      helm-scroll-amount                    8 ; scroll 8 lines other window using M-<next>/M-<prior>
+      helm-ff-file-name-history-use-recentf t)
 
-;;;_ , Word documents
+(helm-mode 1)
 
-(defun no-word ()
-  "Run antiword on the entire buffer."
-  (shell-command-on-region (point-min) (point-max) "antiword - " t t))
-;;(autoload 'no-word "no-word" "word to txt")
-;;(add-to-list 'auto-mode-alist '("\\.doc\\'" . no-word))
-
-
-;; ------------------- org-mode ----------------------------
+;; org-mode ----------------------------
 (require 'org-install)
 (add-to-list 'auto-mode-alist '("\\.org\\'" . org-mode))
 (add-hook 'org-mode-hook 'turn-on-font-lock)
@@ -352,15 +330,25 @@
 (add-hook 'org-mode-hook
           (lambda ()
             (define-key org-mode-map "\C-z\C-t" 'org-insert-todo-heading)
+                            ;; keybinding for editing source code blocks
+            (local-set-key (kbd "C-c s e")
+                           'org-edit-src-code)
+            ;; keybinding for inserting code blocks
+            (local-set-key (kbd "C-c s i")
+                           'org-insert-src-block)
+            ;; org mode 中代码着色
+            (setq org-src-fontify-natively t)
             (define-key org-mode-map "\C-z\C-e" 'org-insert-todo-subheading)))
+
 
 (setq org-default-notes-file "~/.notes")
 (define-key global-map [f12] 'org-remember)
 
-
+;;C-c a 进入日程表
 (define-key global-map "\C-ca" 'org-agenda)
+;;给已完成事项打上时间戳。可选 note，附加注释
 (setq org-log-done 'time)
-
+;;防止下划线在export时变成下标
 (setq org-export-with-sub-superscripts nil)
 (autoload 'org-diary "org" "Diary entries from Org mode" )
 (setq org-todo-keywords
@@ -370,7 +358,7 @@
 
 (setq org-agenda-files (file-expand-wildcards "~/org/*.org"))
 
-(setq org-log-done t)
+(setq org-log-done t) ;; 变到 done 状态的时候，记录一下时间
 (setq org-log-done 'time)
                                         ;(setq org-log-done 'note)
 
@@ -406,10 +394,12 @@
 
 (setq org-clock-persist 'history)
 (org-clock-persistence-insinuate)
-
+;;自动换行
 (add-hook 'org-mode-hook (lambda () (setq truncate-lines nil)))
 ;;-------------AUTO COMPLETE----------------------------
-(add-to-list 'load-path "~/package/auto-complete-1.3.1")
+(add-to-list 'load-path "~/package/fuzzy-el")
+(add-to-list 'load-path "~/package/popup-el")
+(add-to-list 'load-path "~/package/auto-complete")
 (require 'auto-complete)
 (require 'auto-complete-config)
 (ac-config-default)
@@ -473,37 +463,25 @@
              (c-set-style "linux")
 	     (setq c-basic-offset 4)))
 
-(setq compile-command "make")
+(setq compile-command "make ")
 
 ;;----------------CEDET-----------------------
-
+;;使用emacs自带
 (require 'cedet)
 ;; Enable EDE (Project Management) features
 (global-ede-mode 1)
-
+;;现在使用auto-complete 补全
 ;(global-set-key [(meta ?/)] 'hippie-expand)
 
-
-;; 
-;;(add-to-list 'load-path "~/package/auctex")
-;;(load "auctex.el" nil t t)
-;;(setq TeX-auto-save t)
-;;(setq TeX-parse-self t)
-;;(setq-default TeX-master nil)
-;;(load "preview-latex.el" nil t t)
-
-;;(setq TeX-output-view-style (quote (("^pdf$" "." "evince %o %(outpage)"))))
-;;(setq TeX-output-view-style (quote (("^pdf$" "." "AcroRd32.exe %o %(outpage)"))))
-
 (custom-set-variables
- ;; custom-set-variables was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
- '(org-agenda-files (quote ("~/org/body.org" "~/org/booklist.org" "~/org/booknotes.org" "~/org/bug.org" "~/org/capture.org" "~/org/ceph.org" "~/org/dream.org" "~/org/emacs.org" "~/org/faq.org" "~/org/health.org" "~/org/index.org" "~/org/kernel.org" "~/org/kernel2.org" "~/org/kidfs.org" "~/org/link.org" "~/org/linux_command.org" "~/org/lvs_source.org" "~/org/memo.org" "~/org/mygtd.org" "~/org/notes.org" "~/org/org-mode.org" "~/org/paxos.org" "~/org/perl.org" "~/org/python.org" "~/org/record.org" "~/org/record_syncookie.org" "~/org/security.org" "~/org/sourcecode.org" "~/org/think.org" "~/org/todo.org" "~/org/tools.org" "~/org/work.org"))))
+  ;; custom-set-variables was added by Custom.
+  ;; If you edit it by hand, you could mess it up, so be careful.
+  ;; Your init file should contain only one such instance.
+  ;; If there is more than one, they won't work right.
+ '(org-agenda-files (quote ("~/org/body.org" "~/org/booklist.org" "~/org/booknotes.org" "~/org/bug.org" "~/org/ceph.org" "~/org/dream.org" "~/org/emacs.org" "~/org/health.org" "~/org/index.org" "~/org/kernel.org" "~/org/kidfs.org" "~/org/link.org" "~/org/mrouter.org" "~/org/mygtd.org" "~/org/net.org" "~/org/notes.org" "~/org/paxos.org" "~/org/perl.org" "~/org/think.org" "~/org/todo.org" "~/org/work.org"))))
 (custom-set-faces
- ;; custom-set-faces was added by Custom.
- ;; If you edit it by hand, you could mess it up, so be careful.
- ;; Your init file should contain only one such instance.
- ;; If there is more than one, they won't work right.
+  ;; custom-set-faces was added by Custom.
+  ;; If you edit it by hand, you could mess it up, so be careful.
+  ;; Your init file should contain only one such instance.
+  ;; If there is more than one, they won't work right.
  )
