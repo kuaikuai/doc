@@ -1164,7 +1164,9 @@ while(1) {
 * tcpdump 抓ipip包
   在realserver上
   在接收LVS消息的物理网口上
+#+begin_example
   tcpdump -nn -i eth0 'ip[9] = 4'
+#+end_example
   就可以看到IPIP报文
   在tunl0口上执行
   tcddump -nn -i tunl0 tcp port 80

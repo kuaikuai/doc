@@ -1,27 +1,9 @@
 #+OPTIONS: "\n:t"
 
 * C-h r 自带manual
-* emacsW32报错
-Debugger entered--Lisp error: (file-error "Opening output file" "permission denied" "d:/home/.emacs.d/server/server")
-  write-region(nil nil "d:/home/.emacs.d/server/server" nil 0)
-于是我就在d:/home/.emacs.d/下建立server/server目录
-而且.emacs中对应配置: 
-;; server mode
-(require 'server)
-(when (and (>= emacs-major-version 23)
-           (equal window-system 'w32))
-  (defun server-ensure-safe-dir (dir) "Noop" t)) ; Suppress error "directory
-                                        ; ~/.emacs.d/server is unsafe"
-                                        ; on windows.
-;;(server-start)
-但是始终报这个错误.
-后来发现不应建立server/server两级目录.
-
-建立d:/home/.emacs.d/server目录即可.并且保准当前用户有可写可读权限.
-
 * shell
    emacs支持shell模式有
-   shell term ansi-term muti-term
+   shell term ansi-term muti-term eshell
    muti-term可以很容易支持开多个终端
    
    shell-command执行一条命令时很方便 Alt+!
@@ -30,6 +12,11 @@ Debugger entered--Lisp error: (file-error "Opening output file" "permission deni
    在multi-term下使用vi编辑文件时，无法使用esc退出编辑状态
    可以使用C-c C-c term-interrupt-subjob
  
+   eshell 是全用elisp实现的，直接直接执行elisp
+   (+ 1 1) 输出2
+   (find-file /tmp)
+   或者file-file /tmp
+   如果想打开多个eshell，可以在eshell中执行eshell N （其中N为数字）
 
    在emacs中，使用ansi-term muti-term登录到其它机器上，
    运行top命令时，会出现'eterm-color'  Unknown terminal type
@@ -96,7 +83,7 @@ C-x r i 可以恢复这个文字.
 
 * buffer切换
   我之前buffer之前的切换，几乎全用tabbar，效率低。
-  现在采用history stack 、anything 和 register方式，实现快速跳转。
+  现在采用helm、history stack 和 register方式，实现快速跳转。
 * 版本控制
   emacs 统一的前端VC，
   无论底层使用CVS、SVN操作都一样。
