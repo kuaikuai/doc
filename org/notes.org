@@ -97,17 +97,6 @@ OK
   一些经典的技术书有许多是chm的。
   用xchm 或者
   emacs + emacs-w3m + archimg
-* linux qq 1.0老自动退出
-只要修改一下qq配置文件(/usr/bin/qq)就可以了。具体如下。
-1. 打开qq配置文件：在终端输入命令代码：sudo gedit /usr/bin/qq
-2. 在打开的qq配置文件中，在#!bin/sh下面一行，cd /usr/share/tencent/qq/前面一行的位置插入代码：
-export GDK_NATIVE_WINDOWS=true
-3. 最终修改后的QQ脚本配置文件如下，保存关闭即可。
-#!/bin/sh
-export GDK_NATIVE_WINDOWS=true
-cd /usr/share/tencent/qq/
-./qq
- 4. 重启QQ，qq不再自动退出和关闭了。
 * 0BB40E64Eh security cookie（防止栈溢出的cookie检查）
 
 dword_10047564   dd 0BB40E64Eh
@@ -734,9 +723,6 @@ usermod -a -G oinstall username
   当涉及大量字符串拼接时，如生成大量的XML文件，性能差距就看出来了。
 
 * IBM 红皮书有许多有用的资料                                           :tips:
-* 办公室政治
-** 保持中立
-** 拒绝人生攻击
 * emacs上IRC
   M-x erc-select
 
@@ -1527,14 +1513,14 @@ usermod -a -G oinstall username
   RETR 1 # 获取第一封邮件
   ....
 * tar 压缩
-  压缩为gz格式
+    压缩为gz格式
   tar zcvf xxx.tgz xxx
   压缩为bz2格式
   tar jcvf xxx.bz xxx
   压缩为lzma格式
   tar lzmacvf xxx.lzma xxx
-  其中以lzma格式压缩比最高, gz压缩比最低，压缩和解压速度最快
-* icmp捕捉不到
+  其中以lzma格式压缩比最高, gz压缩比最低，压缩和解压速度最快*
+ icmp捕捉不到
   学习TCP/IP协议时，想捕捉到Unreachable Destinations。
   使用ping，ping一个局域网中不存在的IP时，
   ping返回
@@ -1707,14 +1693,6 @@ unsigned short cksum(struct ip *ip, int len)
         return ((unsigned short) sum);
 }
 #+END_SRC
-* opera 在www.google.com.hk CPU高
-  由于www.google.com.hk页面上的js, opera解释的问题。
-  我直接把opera的javascript关掉了。
-  发现象www.csdn.net对javascript依赖严重。
-  
-  在www.google.com.hk页面上（左手鼠标）左击，
-  弹出菜单->编辑站点首选项->去掉javascript，呵呵。很好。
-  “编辑站点首选项”这个功能很好。
 * 制作光盘的ISO文件
   在Linux系统中，我们可以通过拷贝命令，将光驱上的内容拷贝到一个 ISO 文件中，如： cp /dev/cdrom xxx.iso
   但是这样好像不能制作启动盘，待确定。
@@ -2944,7 +2922,6 @@ if (fib_lookup(&fl, &res)) {
      SO_BINGTODEVICE仅仅为套接字绑定了一个接口，而SO_DONTROUTE仅仅是不通过网关发送，不管你设置网关是什么，它总是以数据的目的地址作为下一跳。   
 
 * TCP协议疑难杂症全景解析
-2011-07-17 19:28 15106人阅读 评论(38) 收藏 举报
 tcp网络路由器算法网络协议互联网
 
 目录(?)[+]
@@ -3513,3 +3490,23 @@ FTP端口
  -M -S
  -M -L
  在iptables中有几个不同的链。
+* linux下动态链接库搜索路径问题
+Linux动态链接库的搜索路径按优先级排序为：
+
+1.编译目标代码时指定的动态库搜索路径；
+在编译时通过gcc 的参数”-Wl,-rpath,”指定。当指定多个动态库搜索路径时，路径之间用冒号”：”分隔。
+
+2.环境变量LD_LIBRARY_PATH指定的动态库搜索路径；
+
+3.配置文件/etc/ld.so.conf中指定的动态库搜索路径；
+/etc/ld.so.conf的第一行有个引用命令：include ld.so.conf.d/*.conf
+因此，最优雅的方式是在ld.so.conf.d目录下创建一个你的程序依赖的配置文件，配置文件内容为程序依赖的动态链接库的路径，一个路径一行。
+添加完配置文件后执行ldconfig使其生效。
+如果启用了 ld.so.cache 的话，系统会在 /etc/ld.so.cache 中存储所有可引用的动态链接库。
+这个文件的内容可以通过 /etc/ld.so.conf 来指定；这个是比较固定的机制，对全局所有用户都有影响；不过更改设置后需要 root 调用 ldconfig 来刷新一下。
+4.默认的动态库搜索路径/lib；
+5.默认的动态库搜索路径/usr/lib；
+如果是64位系统，还包括 /lib64 和 /usr/lib64。
+
+奇怪的是， /usr/local/lib 和 /usr/local/lib64 居然不在标准路径之列。
+
