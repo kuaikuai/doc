@@ -1,0 +1,22 @@
+tcpcopy 代码
+
+
+tc_proc_server_msg() -> tc_proc_outgress()
+
+tc_proc_outgress() 处理intercept发送来的消息，对client进行回应
+
+fake_syn() 向target server发送伪造的syn报文
+fake_syn() -> send_router_info()
+send_router_info() 向intercept 发送CLIENT_ADD消息
+
+
+intercept 使用router_add处理CLIENT_ADD消息
+
+tc_intercept.c:
+server_init()
+1、创建socket，监听（默认端口为36524）来自tcpcopy server的管理消息
+2、初始化nfp_queue 或者 RAW Socket接受来自tcpcopy server需要转发到client的消息
+
+intercept:
+void router_update(tc_iph_t *ip)
+截取返回消息一部分，发回给tcpcopy
