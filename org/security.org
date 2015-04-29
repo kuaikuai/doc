@@ -398,7 +398,6 @@ I have only scratched the surface as to researching and exploiting application f
 
  
 
-
 * http://stackoverflow.com
 * curl -H 'Accept-Language: en-us;q=2.2250738585072012e-308' http://example.org
  Accept-Language: da, en-gb;q=0.022250738585072012e-00306, en;q=0.022250738585072012e-00306
@@ -780,3 +779,13 @@ public	class MyContext implements ServletContextListener {
 }
 
 #+end_src
+* 漏洞扫描工具
+w3af
+
+nikto是一款扫描指定主机的web类型，主机名。特定目录，cookie，特定cgi漏洞，xss漏洞，sql漏洞，返回主机允许的http方法等安全问题的工具。
+
+skipfish
+
+skipfish是一款有google出品的漏洞扫描工具，基于命令行模式下工作
+* 基于异常的入侵检测系统SuStorID
+  把机器学习和入侵检测结合起来，有空研究一下。

@@ -73,6 +73,13 @@ C-x r i 可以恢复这个文字.
 -  开始 C-x (
 -  结束 C-x )
 -  播放 C-x e
+可以利用重复动作执行10次： C-u 10 C-x e
+也可以对宏进行命令并保存在文本中，可以下次使用
+M-x name-last-kbd-macro
+输入宏的名字
+M-x inster-kbd-macro
+输入宏的名字，就可以把宏插入到当前buffer中
+
 * kill buffer
    C-x k bufname <RET>
    Kill buffer bufname (kill-buffer). 
@@ -666,10 +673,6 @@ int var_is_less_long       = 4;
    安装wvHtml
    sudo yum wv
    然后就可以了
-* emacs lisp
-*** 调用外部程序
-    (call-process "cmd" nil t nil "/c" "dir")
-
 * 自动检测文件编码，防止乱码
   ;; auto detect unicode
 #+begin_src lisp

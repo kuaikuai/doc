@@ -27,6 +27,8 @@
  http://www.nowamagic.net/librarys/veda/cate/Program
  酷壳
  http://coolshell.cn/
+安全
+gxtester.blog.163.com 
 * How I Learned to Stop Worrying and Love Golang
   http://corte.si/posts/code/go/golang-practicaly-beats-purity/
 
