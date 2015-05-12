@@ -1,0 +1,271 @@
+
+* 为什么 nginx 如此之快?
+nginx 是单线程的，而单线程的模型,为什么可以承担上万甚至上几十万的并发請求?! 因为 nginx 的工作方式,如动画所示,这是我刚刚用 perl 生成的一个简单 git 动画:
+这其实是操作系统线程作的事儿
+前面3个,分别对应不同的 http 请求
+每个方块代表一个读或是写操作
+最后的 epoll_wait 就是 linux 系統中最高效的一种事件接口，也就是説 nginx 内部其实是种事件驱动的机制。
+只有相关事件发生时,才处理具体数据，如果当前接口没有数据时,就会立即切换出去,处理其它请求。
+所以,虽然只有一个线程,但是,可以同时处理很多很多线程的請求处理 那么,这种形式的 web 系統,可以很轻易的将 cpu 跑满,即使带宽没有跑满的情况下; 
+而 apache 这类多进程多线程模型的服务器,则很难将 cpu 跑满:
+因为并发达到一定量时内存首先将耗尽
+因为在 linux 系统中,线程数是有限的,每个线程必须预分配8m大小的栈,不论是否使用!
+所以,线程增加时,内存首先成为瓶颈
+即使挺过内存问题,当并发请求足够多时,cpu 争用线程的调度问题又成为系統瓶颈
+
+* cosocket
+
+
+    写是顺序写,但是执行是非阻塞的! 这点非常重要!
+    因为早年,基于阻塞的应用开发太习惯了
+    而基于异步的开发, 要求改变思維方式来考虑问题
+
+    cpu 的执行效率
+    当你的并发模式,已经是极致的时候
+    cpu 很容易成为瓶颈!
+
+    一般情况下是 带宽首先不够了,然后 cpu 被跑满
+    而在 apache 模型中,反而是内存首先不足
+    经常是24个进程,swap 8G/24G 不断的增长,卡住什么也玩不了了
+    而cpu 光在那儿进行上下文切换,没有作什么有意义的事儿 即,所謂内耗
+
+    当我们将应用从 I/O 模型解放后,拼的都是 CPU:
+    因为,内存一般消耗都不太大
+    我们经常在 256M 内存的虚拟机,或是64M 内存的嵌入式设备中跑生产服务 内存,真心不应该是问题所在,,,
+
+    但是,要进行計算时就一定要快!
+    而 Lua 近年发展编译器到什么地步?
+    有种编译器,可以运行时动态生成机器码
+    在我们的测试中,高过了末启用优化的 gpc
+    而启用优化的 gpc ,消耗资源又高过 Lua
+
+    所以, Lua 的性能没有问题
+    业务团队实际并没有直接使用 Lua 来写,而是使用我们为业务专门定制的一种专用脚本(DSL)
+    所以,代码量非常的少 而且,我们的定制小語言,是强类型的:
+    强类型語言有很多好处
+    而且,可以在小語言中,定义对业务領域的高层次約束
+    你就可以很方便的查找出业务工程师常范的错误,转化成語言特性包含到约束中,在编译器中实现!
+    最后编译成包含优化的 Lua 代码,让它跑的象飞一样! 而且! 哪天,我高兴了,也可以让它生成 C 代码让它跑到极致!
+    这样,业务不用改一行代码,但是,系统效能可以提高几倍
+    等等,这些都是可以实现的,,,
+
+    要,实现这些,要求我们的基础必须非常非常的高效,同时又非常非常小巧!
+
+
+还有些慢连接就是恶意攻击:
+
+    我可以生成很多 http 连接,接进来后,慢的发送,甚至就不发送,来拖死你的应用
+
+
+    这样,我就不用通过 nginx 的上游模块来访问http 请求:
+    我们就可以让 Lua 直接通过 http,或是 unix socket 协议,访问任意后端服务
+
+    local sock = ngx.socket.tcp()
+    sock:settimeout(1000)   -- one second
+    local ok, err = sock:connect("127.0.0.1", 11211)
+    if not ok then
+       ngx.say("failed to connect: ", err)
+       return
+    end
+
+    象这样,建立 socket 端口,并可以设定超时
+    我们就可以进行非阻塞的访问控制,当超时时,nginx 就可以自动挂起,切入其它协程进行处理
+    如果所有连接都不活跃,我也可以等待系统的 epoll 调用了 就不用傻傻的完全呆在那儿了
+
+    local bytes, err = sock:send("flush_all\r\n")
+    if not bytes then
+        ngx.say("failed to send query: ", err)
+        return
+    end
+     
+    local line, err = sock:receive()
+    if not line then
+        ngx.say("failed to receive a line: ", err)
+        return
+    end
+     
+    ngx.say("result: ", line)
+
+    或是使用 sock:send 直接返回,就可以继续其它请求了
+    使用 receive 来接收查询的返回,读失败有失败处理,成功就打印出来 一切都是自然顺序
+
+    local ok, err = sock:setkeepalive(60000, 500)
+    if not ok then
+        ngx.say("failed to put the connection into pool "
+            .. "with pool capacity 500 "
+            .. "and maximal idle time 60 sec")
+        return
+    end
+
+    这是连接池的调用
+    通过 sock:setkeepalive , Lua 模块,就会将当前连接,放入另一连接池中以供其它請求复用
+    也就是說,如果其它請求,請求到同一个url 时, nginx 会直接交給它原先的连接,而省去了开新连接的消耗
+    keepalive 的参数比较少:
+        头一个是,最大空闲时间,即,一个连接放在连接池里没有任何人来使用的最大时间
+            这里是60秒,因为维持一连接的代价还是很昂贵的,如果一分钟了也没有人来用,我就主动关闭你节省资源
+            对于负载比较大的应用,这样可以减少浪费
+        第二个参数是,最大连接数,
+            这里是500,如果连接数超过限制,就自动进入转移连接的模式
+
+            Unix 域套接字 是 Linux/Unix 系统独特的进程接口
+    虽然不走 http 协议,但是调用形式和 tcp 的 socket 完全类似
+
+    	
+    local sock = ngx.socket.tcp()
+    local ok, err = sock:connect("/tmp/some.sock")
+    if not ok then
+        ngx.say("failed to connect to /tmp/some.sock: ", err)
+        return
+    end
+
+    一樣通过 ngx.socket.tcp 来建立连接
+    然后,使用 sock:connect 来指定一个特殊文件,接入套接字
+    就可以进行各种日常的操作了
+
+
+性能非常接近纯 C 写的模块,我评测下来,也就差 10~20% 的响应 
+
+* sleep例子讲非阻塞
+一个例子nginx的配置
+ worker_processes  1;
+ http {
+    server {
+       listen 9000 backlog=10240;
+       location /test {
+         content_by_lua ' ngx.sleep(2)
+                          ngx.say("test") ';
+       }
+    }
+ }
+为了说明问题，特别nginx设置为一个worker进程
+
+ab测试结果
+bss-18:/usr/local/apache2/bin # ./ab -t 60 -n 10000 -c 1000 http://10.18.210.44:9000/test
+....
+Concurrency Level:      1000
+Time taken for tests:   20.209568 seconds
+Complete requests:      10000
+Failed requests:        0
+Write errors:           0
+Total transferred:      1660000 bytes
+HTML transferred:       50000 bytes
+Requests per second:    494.82 [#/sec] (mean)
+Time per request:       2020.957 [ms] (mean)
+Time per request:       2.021 [ms] (mean, across all concurrent requests)
+Transfer rate:          80.21 [Kbytes/sec] received
+
+可以看出1000请求/秒，由于每个请求阻塞2秒，所以每秒可以完成的请求最高理论值为1000/2=500，和上面 494.82 [#/sec] 相符。
+
+如果ngx.sleep(2)是将这个进程阻塞住的操作，那么每2秒只能完成一个请求。也就是每秒0.5个请求。
+
+
+一个进程对应N个协程，每个协程间数据是隔离，协程可以看成微量级的线程。
+一条执行序列，拥有自己独立的栈、局部变量和指令指针，同时与其他协程共享全局变量和其他资源。
+线程与协程的区别：一个具有多线程的程序，可以同时运行几个线程；而coroutine却需要彼此协作运行，也就一个多协程的程序，
+任意时刻只能运行一个协程，只有当前运行协程显式将自己挂起，它的执行才会暂停。
+
+所以可以我们可以将协程看做非抢占式的多线程程序。
+#+begin_src lua
+co = coroutine.create(function ()
+       for i=1, 10 do
+         print("co", i)
+         coroutine.yield()
+       end
+     end)
+coroutine.resume(co) 会输出co 1
+coroutine.resume(co) 会输出co 2
+...
+coroutine.resume(co) 会输出co 10
+#+end_src
+
+回头看一下ngx.sleep是如何实现的。
+当调用ngx.sleep时，会使用将恢复当前协程的函数定义到nginx的定时器上，
+然后执行coroutine.yield()，将当前的协程挂起。
+这时nginx进程就可以响应别的请求了。
+当2秒过后，nginx定时器调用恢复协程的函数conroutine.resume(co)
+就可以接着执行下面的ngx.say()输出字符串了。
+
+例子一个处理请求的例子
+location /add {
+   content_by_lua "add.lua"
+}
+
+add.lua
+#+begin_src lua
+-- get 请求参数
+local args = ngx.req.get_uri_args()
+ngx.say("result=",args.a + args.b)
+#+end_src
+
+curl http://127.0.0.1/add?a=10&b=20
+返回：
+result=10
+
+* lua
+  table处理复杂数据结构
+  table既可以看成hash table，也可以看成数组，本质是关联数组
+  t = {}
+  t['name'] = 'dog'
+  t['age'] = 10
+
+  t = {10,20,30}
+
+  当数组使用时默认第一个元素的索引是1, t[1] == 20
+  
+* lua 性能
+  luajit lua
+  
+* luajit ffi使用
+
+** 直接调用glibc库
+#+begin_src lua
+local ffi = require("ffi")
+ffi.cdef[[
+int printf(const char *fmt, ...);
+]]
+ffi.C.printf("Hello %s!", "world")
+#+end_src
+
+** 调用自定义动态库
+mylib.c
+int add(int a, int b)
+{
+  return a+b;
+}
+
+将mylib.c编译为mylib.so
+
+mylib.lua
+#+begin_src lua
+local ffi = require 'ffi'
+ffi.cdef[[
+int add(int a, int c);
+]]
+mylib = ffi.load("mylib.so")
+-- 现在可以调用了
+mylib.add(10, 20)
+#+end_src
+
+通过动态库我们可以轻松对luajit进行扩展。
+但是有一点要主要由于C代码中不要出现阻塞网络IO。
+
+复杂一点需要从动态获取内容
+#+begin_src c
+int get_str(char *str, int len)
+{
+    return snprintf(len, "%s", str);
+}
+#+end_src
+
+#+begin_src lua
+local ffi = require 'ffi'
+ffi.cdef[[
+int get_str(char *str, int len);
+]]
+mylib = ffi.load("mylib.so")
+-- 分配内存char[256]， 该内存有lua自动gc
+local str = ffi.new("char[?]", 256)
+mylib.get(str, 256)
+#end_src
+
+

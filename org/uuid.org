@@ -1,0 +1,4 @@
+
+libuuid 用户态代码本身很简单
+
+从/dev/urandom 或者/dev/random 读取16字节。
