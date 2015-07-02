@@ -749,3 +749,516 @@ netif_schedule
         raise_softirq_irqoff(NET_TX_SOFTIRQ)  
 
 
+* Loadavg浅述 
+Loadavg浅述 
+http://kernel.taobao.org/index.php/Loadavg%E9%97%AE%E9%A2%98%E5%88%86%E6%9E%90
+cat /proc/loadavg可以看到当前系统的load 
+$ cat /proc/loadavg 
+0.01 0.02 0.05 2/317 26207 
+前面三个值分别对应系统当前1分钟、5分钟、15分钟内的平均load。load用于反映当前系统的负载情况
+，对于16核的系统，如果每个核上cpu利用率为30%，则在不存在uninterruptible进程的情况下，系统load应该维持在4.8左右。
+对16核系统，如果load维持在16左右，在不存在uninterrptible进程的情况下，意味着系统CPU几乎不存在空闲状态，利用率接近于100%。
+结合iowait、vmstat和loadavg可以分析出系统当前的整体负载，各部分负载分布情况。 
+
+Loadavg读取 
+
+在内核中/proc/loadavg是通过load_read_proc来读取相应数据，下面首先来看一下load_read_proc的实现： 
+fs/proc/proc_misc.c
+#+begin_src c
+static int loadavg_read_proc(char *page, char **start, off_t off, 
+                                 int count, int *eof, void *data) 
+{ 
+        int a, b, c; 
+        int len; 
+
+        a = avenrun[0] + (FIXED_1/200); 
+        b = avenrun[1] + (FIXED_1/200); 
+        c = avenrun[2] + (FIXED_1/200); 
+        len = sprintf(page,"%d.%02d %d.%02d %d.%02d %ld/%d %d\n", 
+                LOAD_INT(a), LOAD_FRAC(a), 
+                LOAD_INT(b), LOAD_FRAC(b), 
+                LOAD_INT(c), LOAD_FRAC(c), 
+                nr_running(), nr_threads, last_pid); 
+        return proc_calc_metrics(page, start, off, count, eof, len); 
+}
+#+end_src
+
+几个宏定义如下： 
+#+begin_src c
+ #define FSHIFT          11              /* nr of bits of precision */ 
+ #define FIXED_1         (1<<FSHIFT)     /* 1.0 as fixed-point */ 
+ #define LOAD_INT(x) ((x) >> FSHIFT) 
+ #define LOAD_FRAC(x) LOAD_INT(((x) & (FIXED_1-1)) * 100)
+#+end_src
+
+根据输出格式，LOAD_INT对应计算的是load的整数部分，LOAD_FRAC计算的是load的小数部分。 
+将a=avenrun[0] + (FIXED_1/200）带入整数部分和小数部分计算可得： 
+#+begin_example
+LOAD_INT(a) = avenrun[0]/(2^11) + 1/200
+LOAD_FRAC(a) = ((avenrun[0]%(2^11) + 2^11/200) * 100) / (2^11)
+             = (((avenrun[0]%(2^11)) * 100 + 2^10) / (2^11)
+             = ((avenrun[0]%(2^11) * 100) / (2^11) +  
+#+end_example
+
+由上述计算结果可以看出，FIXED_1/200在这里是用于小数部分第三位的四舍五入，由于小数部分只取前两位，第三位如果大于5，则进一位，否则直接舍去。 
+
+临时变量a/b/c的低11位存放的为load的小数部分值，第11位开始的高位存放的为load整数部分。因此可以得到a=load(1min) * 2^11 
+因此有: load(1min) * 2^11 = avenrun[0] + 2^11 / 200 
+进而推导出： load(1min)=avenrun[0]/(2^11) + 1/200 
+忽略用于小数部分第3位四舍五入的1/200，可以得到load(1min)=avenrun[0] / 2^11，即： 
+avenrun[0] = load(1min) * 2^11 
+
+avenrun是个陌生的量，这个变量是如何计算的，和系统运行进程、cpu之间的关系如何，在第二阶段进行分析。 
+
+Loadavg和进程之间的关系 
+
+内核将load的计算和load的查看进行了分离，avenrun就是用于连接load计算和load查看的桥梁。 
+下面开始分析通过avenrun进一步分析系统load的计算。 
+avenrun数组是在calc_load中进行更新 
+kernel/timer.c
+#+begin_src c
+ /* 
+ * calc_load - given tick count, update the avenrun load estimates. 
+ * This is called while holding a write_lock on xtime_lock. 
+ */ 
+static inline void calc_load(unsigned long ticks) 
+{ 
+        unsigned long active_tasks; /* fixed-point */ 
+        static int count = LOAD_FREQ;  
+        count -= ticks; 
+        if (count < 0) { 
+                count += LOAD_FREQ; 
+                active_tasks = count_active_tasks(); 
+                CALC_LOAD(avenrun[0], EXP_1, active_tasks); 
+                CALC_LOAD(avenrun[1], EXP_5, active_tasks); 
+                CALC_LOAD(avenrun[2], EXP_15, active_tasks); 
+        } 
+}
+static unsigned long count_active_tasks(void) 
+{ 
+        return nr_active() * FIXED_1; 
+}
+#+end_src
+ #define LOAD_FREQ       (5*HZ)          /* 5 sec intervals */ 
+ #define EXP_1           1884            /* 1/exp(5sec/1min) as fixed-point */ 
+ #define EXP_5           2014            /* 1/exp(5sec/5min) */ 
+ #define EXP_15          2037            /* 1/exp(5sec/15min) */
+
+
+calc_load在每个tick都会执行一次，每个LOAD_FREQ（5s）周期执行一次avenrun的更新。 
+active_tasks为系统中当前贡献load的task数nr_active乘于FIXED_1，用于计算avenrun。宏CALC_LOAD定义如下： 
+ #define CALC_LOAD(load,exp,n) \ 
+       load *= exp; \ 
+       load += n*(FIXED_1-exp); \ 
+       load >>= FSHIFT;
+
+
+用avenrun(t-1)和avenrun(t)分别表示上一次计算的avenrun和本次计算的avenrun，则根据CALC_LOAD宏可以得到如下计算： 
+avenrun(t)=(avenrun(t-1) * EXP_N + nr_active * FIXED_1*(FIXED_1 – EXP_N)) / FIXED_1
+          = avenrun(t-1) + (nr_active*FIXED_1 – avenrun(t-1)) * (FIXED_1 -EXP_N) / FIXED_1
+
+
+推导出： 
+avenrun(t) – avenrun(t-1) = (nr_active*FIXED_1 – avenrun(t-1)) * (FIXED_1 – EXP_N) / FIXED_1
+
+
+将第一阶段推导的结果代入上式，可得： 
+(load(t) – load(t-1)) * FIXED_1 = (nr_active – load(t-1)) * (FIXED_1 – EXP_N)
+
+
+进一步得到nr_active变化和load变化之间的关系式： 
+
+load(t) – load(t-1) = (nr_active – load(t-1)) * (FIXED_1 – EXP_N) / FIXED_1 
+
+这个式子可以反映的内容包含如下两点： 
+1）当nr_active为常数时，load会不断的趋近于nr_active，趋近速率由快逐渐变缓 
+2）nr_active的变化反映在load的变化上是被降级了的，系统突然间增加10个进程， 
+1分钟load的变化每次只能够有不到1的增加（这个也就是权重的的分配）。 
+
+另外也可以通过将式子简化为： 
+
+load(t)= load(t-1) * EXP_N / FIXED_1 + nr_active * (1 - EXP_N/FIXED_1)  
+
+这样可以更加直观的看出nr_active和历史load在当前load中的权重关系 （多谢任震宇大师的指出） 
+#define EXP_1           1884            /* 1/exp(5sec/1min) as fixed-point */ 
+#define EXP_5           2014            /* 1/exp(5sec/5min) */ 
+#define EXP_15          2037            /* 1/exp(5sec/15min) */
+
+
+1分钟、5分钟、15分钟对应的EXP_N值如上，随着EXP_N的增大，(FIXED_1 – EXP_N)/FIXED_1值就越小， 
+这样nr_active的变化对整体load带来的影响就越小。对于一个nr_active波动较小的系统，load会 
+不断的趋近于nr_active，最开始趋近比较快，随着相差值变小，趋近慢慢变缓，越接近时越缓慢，并最 
+终达到nr_active。如下图所示： 
+文件:load 1515.jpg 
+
+
+也因此得到一个结论，load直接反应的是系统中的nr_active。 那么nr_active又包含哪些？ 如何去计算 
+当前系统中的nr_active？ 这些就涉及到了nr_active的采样。 
+
+Loadavg采样 
+
+nr_active直接反映的是为系统贡献load的进程总数，这个总数在nr_active函数中计算： 
+kernel/sched.c
+#+begin_src c
+unsigned long nr_active(void) 
+{ 
+        unsigned long i, running = 0, uninterruptible = 0; 
+
+        for_each_online_cpu(i) { 
+                running += cpu_rq(i)->nr_running; 
+                uninterruptible += cpu_rq(i)->nr_uninterruptible; 
+        } 
+
+        if (unlikely((long)uninterruptible < 0)) 
+                uninterruptible = 0; 
+
+        return running + uninterruptible; 
+}
+#+end_src
+
+ #define TASK_RUNNING            0 
+ #define TASK_INTERRUPTIBLE      1 
+ #define TASK_UNINTERRUPTIBLE    2 
+ #define TASK_STOPPED            4 
+ #define TASK_TRACED             8 
+/* in tsk->exit_state */ 
+ #define EXIT_ZOMBIE             16 
+ #define EXIT_DEAD               32 
+/* in tsk->state again */ 
+ #define TASK_NONINTERACTIVE     64
+
+
+该函数反映，为系统贡献load的进程主要包括两类，一类是TASK_RUNNING，一类是TASK_UNINTERRUPTIBLE。
+ 当5s采样周期到达时，对各个online-cpu的运行队列进行遍历，取得当前时刻该队列上running和uninterruptible的
+ 进程数作为当前cpu的load，各个cpu load的和即为本次采样得到的nr_active。 
+
+
+18内核计算loadavg存在的问题 
+
+xtime_lock解析 
+
+内核在5s周期执行一次全局load的更新，这些都是在calc_load函数中执行。追寻calc_load的调用： 
+kernel/timer.c
+#+begin_src c
+static inline void update_times(void) 
+{  
+        unsigned long ticks; 
+
+        ticks = jiffies - wall_jiffies; 
+        wall_jiffies += ticks; 
+        update_wall_time(); 
+        calc_load(ticks); 
+}
+#+end_src
+
+update_times中更新系统wall time，然后执行全局load的更新。 
+kernel/timer.c
+#+begin_src c
+void do_timer(struct pt_regs *regs) 
+{  
+        jiffies_64++; 
+        /* prevent loading jiffies before storing new jiffies_64 value. */ 
+        barrier(); 
+        update_times(); 
+}
+#+end_src
+
+do_timer中首先执行全局时钟jiffies的更新，然后是update_times。 
+#+begin_src c
+void main_timer_handler(struct pt_regs *regs) 
+{ 
+...
+        write_seqlock(&xtime_lock);
+...
+        do_timer(regs); 
+ #ifndef CONFIG_SMP 
+        update_process_times(user_mode(regs)); 
+ #endif 
+...
+        write_sequnlock(&xtime_lock); 
+}
+#+end_src
+
+对wall_time和全局jiffies的更新都是在加串行锁（sequence lock）xtime_lock之后执行的。 
+include/linux/seqlock.h
+#+begin_src c
+static inline void write_seqlock(seqlock_t *sl) 
+{ 
+        spin_lock(&sl->lock);
+        ++sl->sequence; 
+        smp_wmb(); 
+} 
+
+static inline void write_sequnlock(seqlock_t *sl) 
+{ 
+        smp_wmb(); 
+        sl->sequence++; 
+        spin_unlock(&sl->lock); 
+} 
+ 
+typedef struct { 
+        unsigned sequence; 
+        spinlock_t lock; 
+} seqlock_t;
+#+end_src
+
+sequence lock内部保护一个用于计数的sequence。Sequence lock的写锁是通过spin_lock实现的， 
+在spin_lock后对sequence计数器执行一次自增操作，然后在锁解除之前再次执行sequence的自增操作。 
+sequence初始化时为0。这样，当锁内部的sequence为奇数时，说明当前该sequence lock的写锁正被拿， 
+读和写可能不安全。如果在写的过程中，读是不安全的，那么就需要在读的时候等待写锁完成。对应读锁使用如下： 
+#+begin_src c
+ #if (BITS_PER_LONG < 64) 
+u64 get_jiffies_64(void) 
+{ 
+        unsigned long seq; 
+        u64 ret;  
+
+        do { 
+                seq = read_seqbegin(&xtime_lock); 
+                ret = jiffies_64; 
+        } while (read_seqretry(&xtime_lock, seq)); 
+        return ret; 
+} 
+
+EXPORT_SYMBOL(get_jiffies_64); 
+ #endif 
+#+end_src
+
+读锁实现如下： 
+#+begin_src c
+static __always_inline unsigned read_seqbegin(const seqlock_t *sl) 
+{ 
+        unsigned ret = sl->sequence; 
+        smp_rmb(); 
+        return ret; 
+} 
+
+static __always_inline int read_seqretry(const seqlock_t *sl, unsigned iv) 
+{ 
+        smp_rmb(); 
+      	/*iv为读之前的锁计数器
+        * 当iv为基数时，说明读的过程中写锁被拿，可能读到错误值
+        * 当iv为偶数，但是读完之后锁的计数值和读之前不一致，则说明读的过程中写锁被拿，
+        * 也可能读到错误值。
+        */
+        return (iv & 1) | (sl->sequence ^ iv);  
+}
+#+end_src
+
+至此xtime_lock的实现解析完毕，由于对应写锁基于spin_lock实现，多个程序竞争写锁时等待者会一直循环等待， 
+当锁里面处理时间过长，会导致整个系统的延时增长。另外，如果系统存在很多xtime_lock的读锁，在某个程 
+序获取该写锁后，读锁就会进入类似spin_lock的循环查询状态，直到保证可以读取到正确值。因此需要尽可能 
+短的减少在xtime_lock写锁之间执行的处理流程。 
+
+ 全局load读写分离解xtime_lock问题 
+
+在计算全局load函数calc_load中，每5s需要遍历一次所有cpu的运行队列，获取对应cpu上的load。1）由于cpu个数是不固 
+定的，造成calc_load的执行时间不固定，在核数特别多的情况下会造成xtime_lock获取的时间过长。2）calc_load是 
+每5s一次的采样程序，本身并不能够精度特别高，对全局avenrun的读和写之间也不需要专门的锁保护，可以将全局load的 
+更新和读进行分离。 
+Dimitri Sivanich提出在他们的large SMP系统上，由于calc_load需要遍历所有online CPU，造成系统延迟较大。 
+基于上述原因Thomas Gleixnert提交了下述patch对该bug进行修复： 
+[Patch 1/2] sched, timers: move calc_load() to scheduler
+[Patch 2/2] sched, timers: cleanup avenrun users
+
+
+文件:rw isolate.jpg 
+
+Thomas的两个patch，主要思想如上图所示。首先将全局load的计算分离到per-cpu上，各个cpu上计算load时不加xtime_lock 
+的锁，计算的load更新到全局calc_load_tasks中，所有cpu上load计算完后calc_load_tasks即为整体的load。在5s定 
+时器到达时执行calc_global_load，读取全局cacl_load_tasks，更新avenrun。由于只是简单的读取calc_load_tasks， 
+执行时间和cpu个数没有关系。 
+
+ 几个关键点： 
+
+ 不加xtime_lock的per cpu load计算 
+
+在不加xtime_lock的情况下，如何保证每次更新avenrun时候读取的calc_load_tasks为所有cpu已经更新之后的load？ 
+
+Thomas的解决方案 
+
+Thomas的做法是将定时器放到sched_tick中，每个cpu都设置一个LOAD_FREQ定时器。 
+定时周期到达时执行当前处理器上load的计算。sched_tick在每个tick到达时执行 
+一次，tick到达是由硬件进行控制的，客观上不受系统运行状况的影响。 
+
+sched_tick的时机 
+
+将per-cpu load的计算放至sched_tick中执行，第一反应这不是又回到了时间处理中断之间，是否依旧 
+存在xtime_lock问题？ 下面对sched_tick进行分析（以下分析基于linux-2.6.32-220.17.1.el5源码） 
+#+begin_src c
+static void update_cpu_load_active(struct rq *this_rq) 
+{ 
+        update_cpu_load(this_rq); 
+
+        calc_load_account_active(this_rq); 
+}
+ 
+void scheduler_tick(void) 
+{ 
+        int cpu = smp_processor_id(); 
+        struct rq *rq = cpu_rq(cpu); 
+...
+        spin_lock(&rq->lock); 
+...
+        update_cpu_load_active(rq); 
+...
+        spin_unlock(&rq->lock); 
+
+...
+} 
+ 
+void update_process_times(int user_tick) 
+{ 
+...
+        scheduler_tick(); 
+...
+}
+ 
+static void tick_periodic(int cpu) 
+{ 
+        if (tick_do_timer_cpu == cpu) { 
+                write_seqlock(&xtime_lock); 
+
+                /* Keep track of the next tick event */ 
+                tick_next_period = ktime_add(tick_next_period, tick_period); 
+           
+                do_timer(1);  // calc_global_load在do_timer中被调用
+                write_sequnlock(&xtime_lock); 
+        } 
+ 
+        update_process_times(user_mode(get_irq_regs())); 
+...
+}
+ 
+void tick_handle_periodic(struct clock_event_device *dev) 
+{ 
+        int cpu = smp_processor_id(); 
+...
+        tick_periodic(cpu); 
+...
+}
+#+end_src
+
+交错的时间差 
+
+将per-cpu load的计算放到sched_tick中后，还存在一个问题就是何时执行per-cpu上的load计算，如何保证更新全 
+局avenrun时读取的全局load为所有cpu都计算之后的？ 当前的方法是给所有cpu设定同样的步进时间LOAD_FREQ， 
+过了这个周期点当有tick到达则执行该cpu上load的计算，更新至全局的calc_load_tasks。calc_global_load 
+的执行点为LOAD_FREQ+10，即在所有cpu load计算执行完10 ticks之后，读取全局的calc_load_tasks更新avenrun。 
+
+
+
+通过将calc_global_load和per-cpu load计算的时间进行交错，可以避免calc_global_load在各个cpu load计算之间执行， 
+导致load采样不准确问题。 
+
+32内核Load计数nohz问题 
+
+一个问题的解决，往往伴随着无数其他问题的诞生！Per-cpu load的计算能够很好的分离全局load的更新和读取，避免大型系统中cpu 
+核数过多导致的xtime_lock问题。但是也同时带来了很多其他需要解决的问题。这其中最主要的问题就是nohz问题。 
+
+为避免cpu空闲状态时大量无意义的时钟中断，引入了nohz技术。在这种技术下，cpu进入空闲状态之后会关闭该cpu对应的时钟中断，等 
+到下一个定时器到达，或者该cpu需要执行重新调度时再重新开启时钟中断。 
+
+cpu进入nohz状态后该cpu上的时钟tick停止，导致sched_tick并非每个tick都会执行一次。这使得将per-cpu的load计算放在 
+sched_tick中并不能保证每个LOAD_FREQ都执行一次。如果在执行per-cpu load计算时，当前cpu处于nohz状态，那么当 
+前cpu上的sched_tick就会错过，进而错过这次load的更新，最终全局的load计算不准确。 
+基于Thomas第一个patch的思想，可以在cpu调度idle时对nohz情况进行处理。采用的方式是在当前cpu进入idle前进行一次该cpu 
+上load的更新，这样即便进入了nohz状态，该cpu上的load也已经更新至最新状态，不会出现不更新的情况。如下图所示： 
+
+
+
+理论上，该方案很好的解决了nohz状态导致全局load计数可能不准确的问题，事实上这却是一个苦果的开始。大量线上应用反馈 
+最新内核的load计数存在问题，在16核机器cpu利用率平均为20%~30%的情况下，整体load却始终低于1。 
+
+ 解决方案 
+
+接到我们线上报告load计数偏低的问题之后，进行了研究。最初怀疑对全局load计数更新存在竞争。对16核的系统，如果都没有进入 
+nohz状态，那么这16个核都将在LOAD_FREQ周期到达的那个tick内执行per-cpu load的计算，并更新到全局的load中，这 
+之间如果存在竞争，整体计算的load就会出错。当前每个cpu对应rq都维护着该cpu上一次计算的load值，如果发现本次计算load 
+和上一次维护的load值之间差值为0，则不用更新全局load，否则将差值更新到全局load中。正是由于这个机制，全局load如果被 
+篡改，那么在各个cpu维护着自己load的情况下，全局load最终将可能出现负值。而负值通过各种观察，并没有在线上出现，最终竞 
+争条件被排除。 
+
+通过/proc/sched_debug对线上调度信息进行分析，发现每个时刻在cpu上运行的进程基本维持在2~3个，每个时刻运行有进程的cpu都 
+不一样。进一步分析，每个cpu上平均每秒出现sched_goidle的情况大概为1000次左右。因此得到线上每次进入idle的间隔为1ms/次。 
+结合1HZ=1s=1000ticks，可以得到1tick =1ms。所以可以得到线上应用基本每一个tick就会进入一次idle！！！ 这个发现就好比 
+原来一直用肉眼看一滴水，看着那么完美那么纯净，突然间给你眼前架了一个放大镜，一下出现各种凌乱的杂碎物。 在原有的世界里， 
+10ticks是那么的短暂，一个进程都可能没有运行完成，如今发现10ticks内调度idle的次数就会有近10次。接着用例子对应用场景进行分析： 
+
+
+
+
+
+(说明：可能你注意到了在5HZ+5到5HZ+11过程中也有CPU从非idle进入了idle，但是为什么没有-1，这里是由于每个cpu都保留 
+了一份该CPU上一次计算时的load，如果load没有变化则不进行计算，这几个cpu上一次计算load为0，并没有变化) 
+
+Orz！load为3的情况直接算成了0，难怪系统整体load会偏低。这里面的一个关键点是：对已经计算过load的cpu，我们对idle进 
+行了计算，却从未考虑过这给从idle进入非idle的情况带来的不公平性。这个是当前线上2.6.32系统存在的问题。在定位到问题 
+之后，跟进到upstream中发现Peter Z针对该load计数问题先后提交了三个patch，最新的一个patch是在4月份提交。这三个 
+patch如下： 
+[Patch] sched: Cure load average vs NO_HZ woes
+[Patch] sched: Cure more NO_HZ load average woes
+[Patch] sched: Fix nohz load accounting – again!
+
+
+这是目前我们backport的patch，基本思想是将进入idle造成的load变化暂时记录起来，不是每次进入idle都导致全局load的更新。 
+这里面的难点是什么时候将idle更新至全局的load中？在最开始计算per-cpu load的时候需要将之前所有的idle都计算进来， 
+由于目前各个CPU执行load计算的先后顺序暂时没有定，所以将这个计算放在每个cpu里面都计算一遍是一种方法。接着用示例进行说明： 
+
+
+至此这三个patch能够很好的处理我们的之前碰到的进入idle的问题。 
+将上述三个patch整理完后，在淘客前端线上机器中进行测试，测试结果表明load得到了明显改善。 
+
+ 更细粒度的时间问题 
+* tcp keepalive 报文序号
+
+#+begin_src c
+/* This routine sends a packet with an out of date sequence
+ * number. It assumes the other end will try to ack it.
+ *
+ * Question: what should we make while urgent mode?
+ * 4.4BSD forces sending single byte of data. We cannot send
+ * out of window data, because we have SND.NXT==SND.MAX...
+ *
+ * Current solution: to send TWO zero-length segments in urgent mode:
+ * one is with SEG.SEQ=SND.UNA to deliver urgent pointer, another is
+ * out-of-date with SND.UNA-1 to probe window.
+ */
+static int tcp_xmit_probe_skb(struct sock *sk, int urgent)
+{
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct sk_buff *skb;
+
+	/* We don't queue it, tcp_transmit_skb() sets ownership. */
+	skb = alloc_skb(MAX_TCP_HEADER, sk_allocation(sk, GFP_ATOMIC));
+	if (skb == NULL)
+		return -1;
+
+	/* Reserve space for headers and set control bits. */
+	skb_reserve(skb, MAX_TCP_HEADER);
+	/* Use a previous sequence.  This should cause the other
+	 * end to send an ack.  Don't queue or clone SKB, just
+	 * send it.
+	 */
+	tcp_init_nondata_skb(skb, tp->snd_una - !urgent, TCPHDR_ACK);
+	TCP_SKB_CB(skb)->when = tcp_time_stamp;
+	return tcp_transmit_skb(sk, skb, 0, GFP_ATOMIC);
+}
+
+/* Initiate keepalive or window probe from timer. */
+int tcp_write_wakeup(struct sock *sk)
+{
+  ...
+	} else {
+		if (between(tp->snd_up, tp->snd_una + 1, tp->snd_una + 0xFFFF))
+			tcp_xmit_probe_skb(sk, 1);
+        // 发送探测报文
+		return tcp_xmit_probe_skb(sk, 0);
+	}
+}
+#+end_src
+
+tcp_keepalive_timer -> tcp_write_wakeup
+keepalive报文序号是snd_una - 1，也就是上次发送报文中最后一个合法的序号。
+按tcpdump 显示方式 上个报文 1:16(15)
+那么keepalive检测报文的序号为15

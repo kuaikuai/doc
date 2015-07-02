@@ -1,3 +1,4 @@
+
 #+OPTIONS: "\n:t"
 
 *重复、重复、再重复*
@@ -12,7 +13,7 @@ http://vdisk.weibo.com/
 - 《专业投机原理》
 - 《共同基金常识》
 - 《解读基金》
-- 《概率统计》（英文） 第6版
+- 《概率统计》（英文） 第4版
 - 《深入浅出统计分析》
 - 《深入浅出统计学》
 - 《精通Excel数据统计与分析》
@@ -103,7 +104,7 @@ http://vdisk.weibo.com/
 - 《分布式系统的原理与范型（英文版）》 
   写的不是很好。
 
-* 函数式编程
+* lisp
 - 《Land of Lisp: Learn to Program in Lisp, One Game at a Time!》 pdf
   中穿插了大量的漫画，很有幽默，我见过最有意思的技术书。
   用来学习common lisp是很好的入门书。
@@ -115,6 +116,12 @@ http://vdisk.weibo.com/
 - 《程序设计方法》
 - 《真实世界的haskell》（英文版）
 - 《计算机程序的构造和解释》
+- 《Paradigms of Artificial Intelligence Programming Case Studies in Common Lisp》
+* clojure
+  基于JVM之上，可以所有java的资源，不会遇到像common lisp之类优质资源匮乏的问题
+- 《Clojure Programming》 lisp in JVM
+- 《Programming Clojure》
+- 《The Joy of Clojure》
 * C语言:
 - 《C编程语言》（中文版、英文版）
 - 《C语言缺陷与陷阱》
@@ -129,22 +136,20 @@ http://vdisk.weibo.com/
    更多的是从C语言角度切入，我比较喜欢。
 - 《C++ Primer》
 - 《C++ 沉思录》
-- 《Modern C++ Design Generic Programming and Design Pattern Applied》
 - 《Effective c++》
 - 《深度探索C++对象模型》
 - 《C++语言的设计和演化》
-- 《The C++ Programming Language (Speical 3rd Edition)》
 * perl:
 perl 三步曲。
-perl很丑，很怪，但我喜欢。
-- 《Learning Perl》
+perl很丑，但我喜欢。
+- 《Learning Perl》 小骆驼书
 - 《Intermediate Perl》
 - 《Master Perl》
-
-- 《perl编程语言》
+- 《Effective Perl Programming》
+- 《perl编程语言》 大骆驼书
 - 《Extending And Embedding Perl》
   详细描述如何拓展perl和嵌入perl
-- 《High Order Perl》 pdf
+- 《High Order Perl》
   perl函数式编程的好书
 - 《C程序员精通Perl》（steve Oualline）人民邮电出版社
 * 指导性的：

@@ -1171,3 +1171,167 @@ while(1) {
   在tunl0口上执行
   tcddump -nn -i tunl0 tcp port 80
   就可以看到IPIP报文剥除外层IP头后的，处理过程。
+* DH
+The dh scheduler only really works if the kernel can see the
+destination address, what you need is for traffic passing through the
+load balancer to be transparently load balanced to its destination....
+
+So rather than clients requesting the load balancers VIP (virtual IP)...
+You need to change the routing so that the clients request
+www.microsoft.com or www.google.com directly BUT these requests are
+routed through the load balancer....
+Then you need to tell the load balancer to transparently intercept
+that traffic with something like:
+
+iptables -t mangle -A PREROUTING -p tcp --dport 80 -j MARK --set-mark 1
+iptables -t mangle -A PREROUTING -p tcp --dport 443 -j MARK --set-mark 1
+ip rule add prio 100 fwmark 1 table 100
+ip route add local 0/0 dev lo table 100 
+* LVS 连接超时与连接持久
+LVS的持续时间有2个
+
+1.把同一个client ip发来请求到同一台Real Server的持久超时时间。(即设置persistent的情况)
+
+2.一个链接创建后空闲时的超时时间，这个超时时间分为3种。
+
+1）TCP的空闲超时时间。
+
+2）LVS收到客户端TCP FIN的超时时间
+
+3）UDP的超时时间
+
+
+第一种超时时间用 ipvsadm -p 时间来设置，如
+
+#ipvsadm -A -t 192.168.20.154:80 -s rr -p 3600
+
+设置超时时间为3600秒
+
+
+查看用ipvsadm -L -n
+#+begin_example
+#ipvsadm
+IP Virtual Server version x.x.x (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+-> RemoteAddress:Port        Forward   Weight   ActiveConn    InActConn
+FWM  99 rr persistent 3600
+#+end_example
+第二总超时时间用ipvsadm --set tcp tcpfin udp设置，比如
+
+#ipvsadm --set 120 20 100
+
+表示tcp空闲等待时间为120 秒
+
+客户端关闭链接等待时间为20秒
+
+udp空闲等待为100秒
+
+
+可以通过ipvsadm -Lcn来查看
+#+begin_example
+pro expire state source virtual destination
+TCP 00:27 NONE 192.168.8.107:0 192.168.20.154:80 192.168.20.194:80
+TCP 00:07 ESTABLISHED 192.168.8.107:53432 192.168.20.154:80 192.168.20.194:80 
+#+end_example
+
+persistent timeout是连接模板的超时时间
+而连接的超时时间仍然后普通的连接超时时间一样
+见持久化调度代码：
+#+begin_src c
+static struct ip_vs_conn *
+ip_vs_sched_persist(struct ip_vs_service *svc,
+		    struct sk_buff *skb,
+		    __be16 src_port, __be16 dst_port, int *ignored)
+{
+ ...
+	/* Check if a template already exists */
+	ct = ip_vs_ct_in_get(&param);
+	if (!ct || !ip_vs_check_template(ct)) {
+		/*
+		 * No template found or the dest of the connection
+		 * template is not available.
+		 * return *ignored=0 i.e. ICMP and NF_DROP
+		 */
+		dest = svc->scheduler->schedule(svc, skb);
+		if (!dest) {
+			IP_VS_DBG(1, "p-schedule: no dest found.\n");
+			kfree(param.pe_data);
+			*ignored = 0;
+			return NULL;
+		}
+
+		if (dst_port == svc->port && svc->port != FTPPORT)
+			dport = dest->port;
+
+		/* Create a template
+		 * This adds param.pe_data to the template,
+		 * and thus param.pe_data will be destroyed
+		 * when the template expires */
+		ct = ip_vs_conn_new(&param, &dest->addr, dport,
+				    IP_VS_CONN_F_TEMPLATE, dest, skb->mark);
+		if (ct == NULL) {
+			kfree(param.pe_data);
+			*ignored = -1;
+			return NULL;
+		}
+        //重要一步：将connection template的超时时间设置为persistence timeout
+		ct->timeout = svc->timeout;
+	} else {
+		/* set destination with the found template */
+		dest = ct->dest;
+		kfree(param.pe_data);
+	}
+
+	dport = dst_port;
+	if (dport == svc->port && dest->port)
+		dport = dest->port;
+
+	flags = (svc->flags & IP_VS_SVC_F_ONEPACKET
+		 && iph.protocol == IPPROTO_UDP)?
+		IP_VS_CONN_F_ONE_PACKET : 0;
+
+	/*
+	 *    Create a new connection according to the template
+	 */
+	ip_vs_conn_fill_param(svc->net, svc->af, iph.protocol, &iph.saddr,
+			      src_port, &iph.daddr, dst_port, &param);
+
+	cp = ip_vs_conn_new(&param, &dest->addr, dport, flags, dest, skb->mark);
+	if (cp == NULL) {
+		ip_vs_conn_put(ct);
+		*ignored = -1;
+		return NULL;
+	}
+
+	/*
+	 *    Add its control
+	 */
+	ip_vs_control_add(cp, ct);
+	ip_vs_conn_put(ct);
+
+	ip_vs_conn_stats(cp, svc);
+	return cp;
+}
+#+end_src
+
+
+其他链接超时：
+#+begin_example
+ip_vs_in()->
+ip_vs_set_state() //更新TCP的状态，同时根据不同的状态设置不同的超时时间
+ip_vs_conn_put()  //根据超时时间，重新设定连接定时器
+#+end_example
+
+#+begin_src c
+/*
+ *      Put back the conn and restart its timer with its timeout
+ */
+void ip_vs_conn_put(struct ip_vs_conn *cp)
+{
+	unsigned long t = (cp->flags & IP_VS_CONN_F_ONE_PACKET) ?
+		0 : cp->timeout;
+	mod_timer(&cp->timer, jiffies+t);
+
+	__ip_vs_conn_put(cp);
+}
+#+end_src
