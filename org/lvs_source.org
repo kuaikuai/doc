@@ -15,10 +15,12 @@ http://www.linuxvirtualserver.org/zh/lvs3.html
   /sbin/route add –host 192.168.1.100 dev eth0:0
 #+end_example
 - 配置网络系统参数（eth0为绑定VIP的网卡设备） TODO？下面四条是否有必要？
+#+begin_example
   echo "0" >/proc/sys/net/ipv4/ip_forward
   echo "1" >/proc/sys/net/ipv4/conf/all/send_redirects   
   echo "1" >/proc/sys/net/ipv4/conf/default/send_redirects
   echo "1" >/proc/sys/net/ipv4/conf/eth0/send_redirects
+#+end_example
 - 配置IPVS的服务类型、VIP地址以及对应的RS信息，例如：
 #+begin_example
 /sbin/ipvsadm -A -t 192.168.1.100:80 -s rr
@@ -1335,3 +1337,53 @@ void ip_vs_conn_put(struct ip_vs_conn *cp)
 	__ip_vs_conn_put(cp);
 }
 #+end_src
+* lvs NAT 问题
+一次配置：忘了-i选项
+#+begin_example
+/sbin/ipvsadm -A -t 10.18.210.152:22120 -s rr
+/sbin/ipvsadm -a -t 10.18.210.152:22120 -r 10.18.210.156
+/sbin/ipvsadm -a -t 10.18.210.152:22120 -r 10.18.210.155
+#+end_example
+结果变成LVS_NAT模式
+#+begin_example
+[root@localhost ~]# ipvsadm -Ln
+IP Virtual Server version 1.2.1 (size=4096)
+Prot LocalAddress:Port Scheduler Flags
+  -> RemoteAddress:Port           Forward Weight ActiveConn InActConn
+TCP  10.18.210.152:22120 rr
+  -> 10.18.210.155:22120          Route   1      0          1         
+  -> 10.18.210.156:22120          Route   1      0          1  
+#+end_example
+在另一个机器测试
+#+begin_example
+linux-19:~ # telnet 10.18.210.152 22120
+Trying 10.18.210.152...
+telnet: connect to address 10.18.210.152: No route to host
+#+end_example
+抓包发现ICMP包
+#+begin_example
+linux-19:~ # tcpdump -vvv -nn -i any icmp          
+tcpdump: listening on any, link-type LINUX_SLL (Linux cooked), capture size 96 bytes
+10:16:16.659713 IP (tos 0x0, ttl 64, id 16521, offset 0, flags [none], proto ICMP (1), length 88) 10.18.210.84 > 10.18.210.44: ICMP host 10.18.210.84 unreachable - admin prohibited, length 68
+	IP (tos 0x0, ttl 64, id 1348, offset 0, flags [DF], proto TCP (6), length 60) 10.18.210.44.58996 > 10.18.210.84.3306: S, cksum 0xca8b (correct), 1060457202:1060457202(0) win 14600 <mss 1460,sackOK,timestamp 3196735414 0,nop,wscale 7>
+#+end_example
+在10.18.210.152上抓包
+#+begin_example
+[root@localhost ~]# tcpdump -vvv -n -i any tcp port 22120
+....
+06:46:11.073156 IP (tos 0x0, ttl 2, id 28116, offset 0, flags [DF], proto TCP (6), length 60)
+    10.18.210.63.45780 > 10.18.210.152.22120: Flags [S], cksum 0xfcc3 (correct), seq 2909014912, win 14600, options [mss 1460,sackOK,TS val 818046548 ecr 0,nop,wscale 7], length 0
+06:46:11.073158 IP (tos 0x0, ttl 2, id 28116, offset 0, flags [DF], proto TCP (6), length 60)
+    10.18.210.63.45780 > 10.18.210.152.22120: Flags [S], cksum 0xfcc3 (correct), seq 2909014912, win 14600, options [mss 1460,sackOK,TS val 818046548 ecr 0,nop,wscale 7], length 0
+06:46:11.073231 IP (tos 0x0, ttl 1, id 28116, offset 0, flags [DF], proto TCP (6), length 60)
+    10.18.210.63.45780 > 10.18.210.152.22120: Flags [S], cksum 0xfcc3 (correct), seq 2909014912, win 14600, options [mss 1460,sackOK,TS val 818046548 ecr 0,nop,wscale 7], length 0
+06:46:11.073231 IP (tos 0x0, ttl 1, id 28116, offset 0, flags [DF], proto TCP (6), length 60)
+    10.18.210.63.45780 > 10.18.210.152.22120: Flags [S], cksum 0xfcc3 (correct), seq 2909014912, win 14600, options [mss 1460,sackOK,TS val 818046548 ecr 0,nop,wscale 7], length 0
+06:46:11.073243 IP (tos 0x0, ttl 1, id 28116, offset 0, flags [DF], proto TCP (6), length 60)
+    10.18.210.63.45780 > 10.18.210.152.22120: Flags [S], cksum 0xfcc3 (correct), seq 2909014912, win 14600, options [mss 1460,sackOK,TS val 818046548 ecr 0,nop,wscale 7], length 0
+#+end_example
+
+显然存在loop。
+
+原因就是director目前工作在LVS_NAT模式,更详细原因呢？
+暂时想不出来。

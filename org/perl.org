@@ -50,8 +50,6 @@ D:\>perlapp --norunlib --add Encode::CN --exe test.exe test.pl
 perldoc perlxs
 perldoc perlguts
 perldoc perlxstut
-* perl批量替换
-  perl -pi -e 's|ABCD|Linux|g' `find ./ -type f`
 * perl 命令行
 ** 选项
 整洁性
@@ -461,128 +459,6 @@ ac7cce07f621b1ed6f692e6df0ac8c16
    mv oldname newname
    
 * wget下载整个页面
-* 加密工具gpg
-
-gpg加密及签名
-
-** 产生密钥对
-gpg --gen-key
-这样会在用户家目录生成一个./gnupg的目录，然后会要求你回答一系列问题，前面三个按默认即可。
-进入到real name，是要求你输入用户ID，注意姓名要5个字符长。这里假设为test
-在Email address处，填写上自己的邮箱地址，假设为test@yahoo.com.cn
-在 comment处，填写一些注释信息
-输入大写字母“O”，回车确认。
-在Enter passphrase处，输入导入私钥用的密码句，这里假设为test，密码句是用来保护私钥的，一定要牢记。这里输入时是没有回显的，且要输入两次。
-
-
-** 导出私钥
- gpg -o filename --export-secret-keys username
- 第一个filename是导出私钥的文件名，第二个xiaolang是用户标识，若不提供用户标
- 识的话就是导出所有的私钥。这个导出的也是以二进制的形式，要以ASCII的形式导出加入-
- a选项
- gpg -o filename -a --export-secret-keys username
-
-** 导入密钥
-导入私钥和公钥都用下面的命令
-gpg –import username.asc
-username.asc是备份密钥的文件
-
-** 导出公钥（公钥应公之于众，以便别人使用你的公钥来加密文件）
-命令各式：
-gpg -o name.gpg -a --export name
-其中name为用户ID
-name.gpg为导出的公钥文件，文件名必须后缀为gpg
-例如：
-gpg -o davidway.gpg -a --export davidway
-这样就把用户ID为davidway的公钥导出来了。
-
-** 导入别人的公钥（以便给别人发送加密文件，公钥用来加密）
-gpg --import someone.gpg
-上面 someone.gpg是别人的公钥
-
-** 删除公钥和私钥
-      gpg --delete-secret-and-public-key xiaolang
-** 删除私钥
-      gpg --delete-secret-key xiaolang7 删除公钥
-      gpg --delete-key xiaolang
-** 显示所有公钥
-      gpg --list-public-keys
-      gpg -k
-** 显示所有私钥
-      gpg --list-secret-keys
-      gpg -K
-
-** 使用外部私钥文件解密
-在本机导入对应的公钥，然后
-将自己的私钥secring.skr放置于U盘根目录下，U盘插入电脑后盘符为/media/usb，则可以这样来解密：
-gpg --secret-keyring /media/usb/secring.skr  -o outputfile -d encryptfile
-这样就可以不必导入私钥就可以来解密文件了。增强了安全性。
-
-** 编辑公钥，以验证导入的公钥的真实性
-gpg --edit-key someone
-someone是别人的用户ID
-出现命令提示符 >
->fpr
-查看用户someone的公钥的指纹，之后应设法核对指纹，以证明真实性。如果真实，则可以签署。
-查看someone的指纹，用下面这个命令
-gpg --list-key
-
->sign
-签署这个公钥，这样以后再使用它加密时，就不会再警告
-
->check
-检查用户someone的公钥已有的签名
-出现sig! 3   sig! 1   表示已完成。
-
-输入quit，回车，再输入y保存退出
-
-** 查看公钥
-gpg --list-key
-
-** 用别人的公钥加密文件
-命令格式：
-gpg -o doc.gpg -er name doc
-其中name是选择谁的公钥加密，即谁是文件的接收者。
-doc为要加密的文件，即原文件
-doc.gpg为命令执行后生成的加密的文件，这里要先指定好文件名
-例如：
-gpg -o test.gpg -er someone test
-加密test文件后，生成test.gpg加密文件，发送给 someone
-
-** 解密文件
-命令格式：
-gpg -o doc.new -d doc.gpg
-其中doc.gpg是别人发给自己的加密过的文件
-doc.new是解密后生成的文件
-d表示解密
-例如：
-gpg -o test.new -d test.gpg
-解密需导入私钥，这时会提示输入密码句，以导出私钥来解密
-
-** 使用对称密钥加密
-gpg -o doc.gpg -c doc
-这种加密适用于本机文件加密，这时提示输入的密码句和私钥密码句没有联系，但一样不能忘记，因为解密时需要输入同样的密码句。
-
-** 数字签名
-命令格式：
-gpg -o doc.sig -s doc
-其中doc是原文件，doc.sig包含了原文件和签名，是二进制的。这个命令会要求你输入你的私钥的密码句。
-gpg -o doc.sig -ser name doc
-既签名又加密
-
-** 文本签名
-gpg -o doc.sig --clearsign doc
-这样产生的doc.sig同样包含原文件和签名，其中签名是文本的，而原文件不变。
-
-** 分离式签名
-gpg -o doc.sig -ab doc
-doc.sig仅包括签名，分离式签名的意思是原文件和签名是分开的。
-b 表示分离式签名detach-sign
-
-** 验证签名
-gpg --verify doc.sig  [doc]
-验证之前必须导入文件作者的公钥，对于分离式签名，最后还要加上原文件，即后面的doc。
-
 * tar 压缩
   压缩为gz格式
   tar zcvf xxx.tgz xxx
