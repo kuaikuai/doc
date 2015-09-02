@@ -1,0 +1,39 @@
+
+* libuuid
+libuuid 用户态代码本身很简单
+从/dev/urandom 或者/dev/random 读取16字节。
+
+*libcurl
+
+#+begin_src c
+CURL *curl = curl_easy_init();
+while(1) {
+curl_easy_setopt(curl, CURLOPT_URL, url);
+curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, write_cb);
+curl_easy_setopt(curl, CURLOPT_WRITEDATA, (void *)result);
+curl_easy_setopt(curl, CURLOPT_CONNECTTIMEOUT, conn_timeout);
+curl_easy_setopt(curl, CURLOPT_TIMEOUT, send_timeout);
+
+rc = curl_easy_perform(curl);
+sleep(60);
+}
+#+end_src
+
+测试连接的另一端为nginx
+设置：
+keepalive_timeout  30;
+
+也就说测试代码每次运行时必须新建连接
+
+
+根据curl文档，我们通过服用CURL来达到复用连接的目的。
+但是如果TCP连接在这期间被动断掉了，libcurl能感知吗？
+
+进过测试，发现每次测试代码都会触发新的连接，也就是说它能感知到tcp断开的动作
+
+url.c
+static bool
+ConnectionExists(struct SessionHandle *data,
+                 struct connectdata *needle,
+                 struct connectdata **usethis,
+                 bool *force_reuse)

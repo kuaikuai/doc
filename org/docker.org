@@ -1,0 +1,55 @@
+
+* 镜像导入
+后台由：
+graph/load.go
+func (s *TagStore) CmdLoad(job *engine.Job) engine.Status
+完成
+
+graph/server.go
+初始化engine
+#+begin_src go
+func (s *TagStore) Install(eng *engine.Engine) error {
+	for name, handler := range map[string]engine.Handler{
+		"image_set":      s.CmdSet,
+		"tag":            s.CmdTag,
+		"image_get":      s.CmdGet,
+		"image_inspect":  s.CmdLookup,
+		"image_tarlayer": s.CmdTarLayer,
+		"image_export":   s.CmdImageExport,
+		"history":        s.CmdHistory,
+		"images":         s.CmdImages,
+		"viz":            s.CmdViz,
+		"load":           s.CmdLoad,
+		"import":         s.CmdImport,
+		"pull":           s.CmdPull,
+		"push":           s.CmdPush,
+	} {
+		if err := eng.Register(name, handler); err != nil {
+			return fmt.Errorf("Could not register %q: %v", name, err)
+		}
+	}
+	return nil
+}
+#+end_src
+
+api/server/server.go 调用engine中job完成
+#+begin_src go
+// we keep enableCors just for legacy usage, need to be removed in the future
+func createRouter(eng *engine.Engine, logging, enableCors bool, corsHeaders string, dockerVersion string) *mux.Router {
+ ...
+		"POST": {
+			"/auth":                         postAuth,
+			"/commit":                       postCommit,
+			"/build":                        postBuild,
+			"/images/create":                postImagesCreate,
+			"/images/load":                  postImagesLoad,
+
+#+end_src
+
+#+begin_src go
+func postImagesLoad(eng *engine.Engine, version version.Version, w http.ResponseWriter, r *http.Request, vars map[string]string) error {
+	job := eng.Job("load")
+	job.Stdin.Add(r.Body)
+	return job.Run()
+}
+#+end_src

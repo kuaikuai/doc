@@ -1,0 +1,27 @@
+* getting ascii value of character
+
+String is an array.
+(aref "foo" 0)
+or
+To get the ascii-number which represents the character, put a question mark before the character and evaluate that expression
+?f
+?\"
+
+* 调用外部程序
+  (call-process "cmd" nil t nil "/c" "dir")
+
+* decode hex string
+#+begin_src lisp
+(defun decode-hex-string1 (hex-string)
+  (let ((res nil))
+    (dotimes (i (/ (length hex-string) 2) (apply #'concat (reverse res)))
+      (let ((hex-byte (substring hex-string (* 2 i) (* 2 (+ i 1)))))
+        (push (format "%c" (string-to-number hex-byte 16)) res)))))
+
+(require 'cl)
+(defun decode-hex-string2 (hex-string)
+  (apply #'concat 
+     (loop for i from 0 to (- (/ (length hex-string) 2) 1) 
+           for hex-byte = (substring hex-string (* 2 i) (* 2 (+ i 1)))
+           collect (format "%c" (string-to-number hex-byte 16)))))
+#+end_src

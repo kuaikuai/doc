@@ -1508,3 +1508,13 @@ jmap -heap 查看，没有发现出BigInteger BigDecimal占用大量内存
 
 
 http://stackoverflow.com/questions/142357/what-are-the-best-jvm-settings-for-eclipse
+* 服务不写日志
+  通过strace -p xxx
+  发现服务程序，向一个fd写数据
+  lsof -p xxx
+  发现该fd对应文件为delete，且名字以及修改为log-2015-12345类似名字
+
+  原因：
+  服务器程序写日志的目录，通过nfs被远程mount到其他机器A上，
+  机器A上也运行着一个相同逻辑的服务器程序，写同一个日志文件，也进行log 重命令，后删除的东西
+ 
