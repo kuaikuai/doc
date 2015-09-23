@@ -1,0 +1,137 @@
+* 网卡中断均衡调整
+(配置中断亲和性 SMP IRQ Affinity)
+
+一般情况下irqbalance，自动做好了多CPU网卡中断负载调工作，
+但是在高流量的服务器上，irqbalance的效果不好时，就需要我们手动分配CPU的中断负载。
+
+观察每CPU上网卡中断的情况
+#+begin_example
+# cat /proc/interrupts
+...
+ 118:          3          0          0          0          0          0          0          0  IR-PCI-MSI-edge      eth0-0
+ 119:        162          0          0          0         10 2159102664          0          0  IR-PCI-MSI-edge      eth0-1
+ 120:         50          0          0          0          0          0          0  346198585  IR-PCI-MSI-edge      eth0-2
+ 121:         52          0          0          0          2          0          0  490077108  IR-PCI-MSI-edge      eth0-3
+ 122:         67          0          0          0          0 3422745453          0          0  IR-PCI-MSI-edge      eth0-4
+# lscpu
+Architecture:          x86_64
+CPU op-mode(s):        32-bit, 64-bit
+Byte Order:            Little Endian
+CPU(s):                8
+On-line CPU(s) list:   0-7
+Thread(s) per core:    1
+Core(s) per socket:    4
+CPU socket(s):         2
+NUMA node(s):          2
+Vendor ID:             GenuineIntel
+CPU family:            6
+Model:                 45
+Stepping:              7
+CPU MHz:               2399.988
+BogoMIPS:              4799.96
+Virtualization:        VT-x
+L1d cache:             32K
+L1i cache:             32K
+L2 cache:              256K
+L3 cache:              10240K
+NUMA node0 CPU(s):     0,2,4,6
+NUMA node1 CPU(s):     1,3,5,7
+#+end_example
+
+下面重新调整，将118、119、120、121、122分别绑定到0、1、2、3、5号CPU上。
+#+begin_example
+# echo '01' > /proc/irq/118/smp_affinity
+# echo '02' > /proc/irq/119/smp_affinity
+# echo '04' > /proc/irq/120/smp_affinity
+# echo '08' > /proc/irq/121/smp_affinity
+# echo '10' > /proc/irq/122/smp_affinity
+#+end_example
+
+如果想让118号中断，分配所有CPU上，
+echo 'ff' > /proc/irq/118/smp_affinity
+但是一些的多队列网卡不支持将中断分配到多个CPU上，建议对于多队列网卡的中断只分配一个CPU即可。
+
+* 网卡软中断负载均衡
+（配置RSS）
+cat /proc/softirqs
+
+top 按1，观察%si，可以看到每个CPU的softirq情况
+若发现个别CPU的%si的一直很高，则需要调整softirq负载
+
+
+例如：
+cat /proc/softirqs
+...
+  52:   94532644    9609586          0          0          0          0          0          0      Phys-fasteoi   eth0
+...
+这个网卡不是多队列网卡，其硬中断显然是不均衡的，由于硬件不支持多CPU，我们没好办法均衡中断。
+但是我们可以调整它的软中断：
+简单有效的办法（推荐）：
+#+begin_example
+echo ffffffff >  /sys/class/net/eth0/queues/rx-queue/rps_cpus
+#+end_example
+
+如果只想负载到0-3号CPU上
+echo 0000000f >  /sys/class/net/eth0/queues/rx-queue/rps_cpus
+负载到4-7号CPU上
+echo 000000f0 >  /sys/class/net/eth0/queues/rx-queue/rps_cpus
+如果存在64个CPU,我们想负责到33-37号CPU上
+echo "0000000f,00000000" > /sys/class/net/eth0/queues/rx-queue/rps_cpus
+
+较理想的办法
+#+begin_example
+# lscpu
+Architecture:          x86_64
+CPU op-mode(s):        32-bit, 64-bit
+Byte Order:            Little Endian
+CPU(s):                32
+On-line CPU(s) list:   0-31
+Thread(s) per core:    2
+Core(s) per socket:    8
+Socket(s):             2
+NUMA node(s):          2
+Vendor ID:             GenuineIntel
+CPU family:            6
+Model:                 62
+Stepping:              4
+CPU MHz:               2001.000
+BogoMIPS:              3999.94
+Virtualization:        VT-x
+L1d cache:             32K
+L1i cache:             32K
+L2 cache:              256K
+L3 cache:              20480K
+NUMA node0 CPU(s):     0-7,16-23
+NUMA node1 CPU(s):     8-15,24-31
+
+# cat /proc/irq/52/smp_affinity
+01
+#+end_example
+我们看到52号中断绑定到0号CPU上。
+这个CPU架构是非对称的，0号和1-7号CPU在同一个NUMA节点上，
+#+begin_example
+# echo 000000fe >  /sys/class/net/eth0/queues/rx-queue/rps_cpus
+#+end_example
+这样，我们尽量将软中断负载到1-7号CPU上。
+
+
+对于单一传输队列的网络设备，配置 RPS 以在同一内存区使用 CPU 可获得最佳性能。在非 NUMA 的系统中，这意味着可以使用所有空闲的 CPU。如果网络中断率极高，排除处理网络中断的 CPU 也可以提高性能。
+对于多队列的网络设备，配置 RPS 通常都不会有好处，因为RSS 配置是默认将所有CPU 映射至每个接收队列。但是，如果硬件队列比 CPU 少，RPS依然有用，并且配置 RPS 是来在同一内存区使用 CPU。
+
+
+ 配置 RFS
+RFS（接收端流的控制）扩展了 RPS 的性能以增加 CPU 缓存命中率，以此减少网络延迟。RPS 仅基于队列长度转发数据包，RFS 使用 RPS 后端预测最合适的 CPU，之后会根据应用程序处理数据的位置来转发数据包。这增加了 CPU 的缓存效率。
+RFS 是默认禁用的。要启用 RFS，用户须编辑两个文件：
+
+/proc/sys/net/core/rps_sock_flow_entries
+    设置此文件至同时活跃连接数的最大预期值。对于中等服务器负载，推荐值为 32768 。所有输入的值四舍五入至最接近的2的幂。 
+/sys/class/net/device/queues/rx-queue/rps_flow_cnt
+    将 device 改为想要配置的网络设备名称（例如，eth0），将 rx-queue 改为想要配置的接收队列名称（例如，rx-0）。
+    将此文件的值设为 rps_sock_flow_entries 除以 N，其中 N 是设备中接收队列的数量。例如，如果 rps_flow_entries 设为 32768，并且有 16 个配置接收队列，那么 rps_flow_cnt 就应设为 2048。对于单一队列的设备，rps_flow_cnt 的值和 rps_sock_flow_entries 的值是一样的。 
+
+现场有的机器不支持，先不配置。
+
+
+
+
+

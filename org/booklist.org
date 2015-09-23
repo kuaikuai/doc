@@ -65,7 +65,7 @@ http://vdisk.weibo.com/
 - 《Data Structures And Algorithms In C++ 2nd》 pdf
 * 编译
 - 《编译原理》中英版龙书
-  我很赖，只看了前三章。
+  我很赖，只看了前四章。
 - 《Language Implementation Patterns：
     Create Your Own Domain-Specific and General Programming Languages》 pdf
   很实用的书!!
@@ -141,17 +141,16 @@ http://vdisk.weibo.com/
 - 《C++语言的设计和演化》
 * perl:
 perl 三步曲。
-perl很丑，但我喜欢。
+perl很丑，但实用
 - 《Learning Perl》 小骆驼书
 - 《Intermediate Perl》
 - 《Master Perl》
 - 《Effective Perl Programming》
 - 《perl编程语言》 大骆驼书
-- 《Extending And Embedding Perl》
-  详细描述如何拓展perl和嵌入perl
 - 《High Order Perl》
   perl函数式编程的好书
 - 《C程序员精通Perl》（steve Oualline）人民邮电出版社
+  我的perl入门书
 * 指导性的：
 -  《程序员修炼之道》
 -  《程序开发心理学》

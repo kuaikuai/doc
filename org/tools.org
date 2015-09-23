@@ -1021,3 +1021,9 @@ OPT
 #+end_example
 * 正则表达式分析工具
   RegexBuddy
+* 动态修改coredump限制
+  nginx的coredump大小限制
+  nginx工作进程是普通用户，没有启用core
+  如果修改/etc/security/limits.conf，那么重启才能生效。
+  
+  ps -ef |grep nginx | grep -v grep | awk '{ print $2 }'| xargs -n 1  prlimit --core=unlimited:unlimited --pid

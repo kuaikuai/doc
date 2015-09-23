@@ -53,3 +53,16 @@ func postImagesLoad(eng *engine.Engine, version version.Version, w http.Response
 	return job.Run()
 }
 #+end_src
+* cgroup
+
+* reboot
+
+
+
+[root@localhost docker]# docker ps 
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+[root@localhost docker]# ./docker-start /etc/docker/wgtest05.conf 
+Error response from daemon: Cannot start container wgtest05: [8] System error: Unit docker-c043ee2478c4ffd1ef309935fbc3236fdd539a73164a31f320fd49bf05f6889c.scope already exists.
+Error: failed to start containers: [wgtest05]
+docker start  failed!
+
