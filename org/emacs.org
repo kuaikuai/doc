@@ -199,7 +199,7 @@ xmodmap -e "keycode  10 = exclam 1 exclam 1"
 * 管理项目
    在项目内，快速打开指定文件，使用find-tag，我绑定到M-.
 * etags
-  find . -name "*.[ch]" -o -name "*.cpp" - print | etags - 
+  find . -name "*.[ch]" -o -name "*.cpp" -print | etags - 
   find . -name "*.[chCH]" -print | etags -
   上述命令可以在当前目录查找所有的.h和.cpp文件并把它们的摘要提取出来做成TAGS文件，具体的etags的用法可以看一下etags的 manual。
   创建好tag表后，告知emacs。

@@ -2281,3 +2281,10 @@ $ echo $?
   然后在浏览器中设置SOCKS代理为127.0.0.1 7070
 * SSH 端口转发
 http://linux-wiki.cn/wiki/zh-hans/SSH%E7%AB%AF%E5%8F%A3%E8%BD%AC%E5%8F%91%EF%BC%88%E9%9A%A7%E9%81%93%EF%BC%89
+* 谁杀死了我的进程 who kill my process
+auditctl -a exit,always -F arch=b64 -S kill
+进程被杀后，执行如下查看
+ausearch -sc kill
+
+完毕后，删除
+auditctl -d exit,always -F arch=b64 -S kill

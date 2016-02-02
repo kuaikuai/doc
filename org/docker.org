@@ -66,3 +66,187 @@ Error response from daemon: Cannot start container wgtest05: [8] System error: U
 Error: failed to start containers: [wgtest05]
 docker start  failed!
 
+* 性能测试
+
+** 网络IO测试
+
+*** 网路延迟
+物理机
+#+begin_example
+linux-129:~ # netperf -t TCP_STREAM -H 10.18.210.84 -l 60 -- -m 2048
+MIGRATED TCP STREAM TEST from 0.0.0.0 (0.0.0.0) port 0 AF_INET to 10.18.210.84 () port 0 AF_INET
+Recv   Send    Send                          
+Socket Socket  Message  Elapsed              
+Size   Size    Size     Time     Throughput  
+bytes  bytes   bytes    secs.    10^6bits/sec  
+#+end_example
+container
+#+begin_example
+linux-129:~ # netperf -t TCP_STREAM -H 10.18.210.90 -l 60 -- -m 2048
+MIGRATED TCP STREAM TEST from 0.0.0.0 (0.0.0.0) port 0 AF_INET to 10.18.210.90 () port 0 AF_INET
+Recv   Send    Send                          
+Socket Socket  Message  Elapsed              
+Size   Size    Size     Time     Throughput  
+bytes  bytes   bytes    secs.    10^6bits/sec  
+
+ 87380  16384   2048    60.00     847.77  
+#+end_example
+
+
+linux-129:/home/yxf # netperf -t TCP_RR -H 10.18.210.90 -l 60 -- -r 32,1024
+MIGRATED TCP REQUEST/RESPONSE TEST from 0.0.0.0 (0.0.0.0) port 0 AF_INET to 10.18.210.90 () port 0 AF_INET : first burst 0
+Local /Remote
+Socket Size   Request  Resp.   Elapsed  Trans.
+Send   Recv   Size     Size    Time     Rate         
+bytes  Bytes  bytes    bytes   secs.    per sec   
+
+16384  87380  32       1024    60.00    4251.18   
+16384  87380 
+linux-129:/home/yxf # netperf -t TCP_RR -H 10.18.210.84 -l 60 -- -r 32,1024
+MIGRATED TCP REQUEST/RESPONSE TEST from 0.0.0.0 (0.0.0.0) port 0 AF_INET to 10.18.210.84 () port 0 AF_INET : first burst 0
+Local /Remote
+Socket Size   Request  Resp.   Elapsed  Trans.
+Send   Recv   Size     Size    Time     Rate         
+bytes  Bytes  bytes    bytes   secs.    per sec   
+
+16384  87380  32       1024    60.00    4463.46   
+16384  87380 
+
+测试多次，取平均值：
+物理机：4409.71 4496.61 5348.66 4346.34 5484.09 4599.85 4457.32 4293.11 4478.43 4368.66 5665.14 4383.55 4379.77 4645.82 4722.83 4426.38 4576.78 4430.25 4379.55 4372.02 4477.84 4628.58 4418.62 5591.64 4407.00 5535.03 5357.05 4574.83 4636.64 4625.49  avg:4683.91
+容器：4721.45 4459.64 4567.35 4391.76 4241.31 4340.74 4642.87 5570.49 4340.99 4358.73 4547.02 4400.66 4656.04 4711.20 4667.93 4738.16 5202.41 4487.06 4549.09 4554.02 4101.53 4181.78 4777.85 4604.96 4333.50 5554.66 4485.80 4460.45 4649.01 4393.94  avg:4589.74
+
+ -r 32, 2048
+
+4170.56 3681.71 3714.16 3837.68 3725.71 3694.28 3751.10 4015.61 3768.48 3522.70 3398.17 3724.25 3660.93 3687.00 3723.53 3848.29 3902.38 3834.25 3715.62 3644.62 3889.06 3688.43 3264.58 2824.98 3224.94 2898.96 3045.69 2613.78 2982.99 3269.86  avg:3557.47
+3706.90 3801.27 3672.27 3732.76 3739.69 3779.05 3707.56 3602.28 3670.00 3353.64 3886.73 3498.33 3637.11 3910.21 3621.97 3539.59 3761.94 4061.78 3662.77 3637.52 3674.62 3320.06 2501.23 2982.41 2767.38 2409.51 3205.13 3018.33 3535.22 3237.10  avg:3487.81
+
+*** 网络带宽
+linux-129:/home/yxf # ./nuttcp -n5G 10.18.210.84
+ 5120.0000 MB /  50.68 sec =  847.5280 Mbps 6 %TX 14 %RX 2873 retrans 0.40 msRTT
+linux-129:/home/yxf # ./nuttcp -n5G 10.18.210.90
+ 5120.0000 MB /  51.42 sec =  835.2154 Mbps 6 %TX 14 %RX 3188 retrans 0.32 msRTT
+
+测试多次，取平均值：
+835.5246 825.9756 839.5432 845.1691 830.9546 831.3182 849.1291 838.6673 841.2590 835.9432 845.7337 820.3917 808.2867 825.3396 852.2284 848.3278 828.5936 861.5682 843.5078 848.7571 853.5836 843.0600 853.1514 853.5545 843.3645 836.3056 854.4825 844.8654 838.1856 832.1979  avg:840.298983333333
+851.2577 831.5534 825.5638 836.4790 835.5644 841.4023 817.8232 835.7545 850.7635 851.9567 841.6794 796.8842 826.5961 838.3174 831.4284 840.8638 818.6935 828.9514 860.0778 832.9151 855.2958 847.2481 847.4131 853.7845 861.7276 855.8500 846.5024 845.9917 849.4107 860.9081  avg:840.62192
+
+发现带宽没有性能差别
+
+** 磁盘IO测试
+  wget http://brick.kernel.dk/snaps/fio-2.0.7.tar.gz
+  yum install libaio-devel
+  tar -zxvf fio-2.0.7.tar.gz
+  cd fio-2.0.7
+  make
+  make install
+
+测试方式
+
+  随机读：
+  fio -readonly -rw=randread -bs=4k -runtime=60 -iodepth 1 -filename /dev/sdb1 -ioengine libaio -direct=1 -name iops_randread
+  说明：
+  filename=/dev/sdb1 测试文件名称，通常选择需要测试的盘的data目录。
+  direct=1 测试过程绕过机器自带的buffer。使测试结果更真实。
+  iodepth io队列深度
+    主要根据设备的并行度来调整
+    应用使用IO通常有二种方式：同步和异步。 同步的IO一次只能发出一个IO请求，等待内核完成才返回，这样对于单个线程iodepth总是小于1，但是可以透过多个线程并发执行来解决
+  rw=randwrite/randread/read/write 测试随机写/随机读/读/写的I/O
+  rw=randrw 测试随机写和读的I/O
+  bs=16k 单次io的块文件大小为16K
+    单次io的块大小，对iops影响比较大，一般来说，要想得到最大的iops，bs越小越好, 当然这也跟文件系统最小块大小有关
+    一般linux下的文件分区最小块大小有 512 1k 2k 4k 8k等 可根据文件系统的类型选择
+  size=5g 本次的测试文件大小为5g
+  numjobs=8 本次的测试线程为8
+    一般来说，对于单磁盘的测试，默认一个线程即可，对于raid设备，如raid1 raid5或并行度高的设备可考虑适当加大测试线程数
+  runtime=1000 测试时间为1000秒
+    此参数与size共同起作用，属于双限制
+  ioengine=libaio io引擎使用libaio方式
+    异步io引擎, 一次提交一批，然后等待一批的完成，减少交互的次数，会更有效率。
+  rwmixwrite=30 在混合读写的模式下，写占30%
+  group_reporting 关于显示结果的，汇总每个进程的信息
+
+**** 顺序读
+物理机
+  fio -readonly -rw=read -bs=4k -runtime=60 -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name fio_test -group_reporting
+  io=5398.4MB, bw=92131KB/s, iops=23032 , runt= 60001msec
+
+fio -readonly -rw=read -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=0 -name fio_test -group_reporting
+   io=10713MB, bw=182832KB/s, iops=45707 , runt= 60001msec
+container
+fio -readonly -rw=read -bs=4k -runtime=60 -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name fio_test -group_reporting
+ io=11741MB, bw=200371KB/s, iops=50092 , runt= 60000msec
+ io=11502MB, bw=196292KB/s, iops=49073 , runt= 60001msec
+ io=8980.7MB, bw=153267KB/s, iops=38316 , runt= 60001msec
+
+ fio -readonly -rw=read -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=0 -name fio_test -group_reporting
+ io=11992MB, bw=524111KB/s, iops=131027 , runt= 23430msec
+
+**** 随机读
+物理
+fio -readonly -rw=randread -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=0 -name iops_randread -group_reporting
+io=55288KB, bw=943550 B/s, iops=230 , runt= 60002msec
+
+fio -readonly -rw=randread -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name iops_randread -group_reporting
+io=56364KB, bw=961897 B/s, iops=234 , runt= 60003msec
+
+container
+fio -readonly -rw=randread -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=0 -name iops_randread -group_reporting
+io=7780.7MB, bw=132790KB/s, iops=33197 , runt= 60000msec
+
+fio -readonly -rw=randread -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name iops_randread -group_reporting
+io=8699.2MB, bw=148480KB/s, iops=37119 , runt= 60000msec
+
+**** 顺序写
+物理
+fio  -rw=write -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name fio_test -group_reporting
+io=5168.2MB, bw=88202KB/s, iops=22050 , runt= 60000msec
+io=3597.9MB, bw=61403KB/s, iops=15350 , runt= 60000msec
+container
+
+io=6747.5MB, bw=114501KB/s, iops=28625 , runt= 60343msec
+io=6187.9MB, bw=105605KB/s, iops=26401 , runt= 60000msec
+
+**** 随机写
+物理
+fio  -rw=randwrite -bs=4k -runtime=60  -iodepth 1 -filename /root/bigdata.dat -ioengine libaio -direct=1 -name fio_test -group_reporting
+io=238564KB, bw=3976.0KB/s, iops=994 , runt= 60001msec
+io=237496KB, bw=3958.3KB/s, iops=989 , runt= 60001msec
+
+container
+io=741136KB, bw=7646.6KB/s, iops=1911 , runt= 96924msec
+io=832316KB, bw=7721.4KB/s, iops=1930 , runt=107794msec
+
+fio  -rw=randwrite -bs=4k -runtime=60  -iodepth 1 -filename /opt/bigdata.dat -ioengine libaio -direct=1 -name fio_test -group_reporting
+io=548192KB, bw=9136.4KB/s, iops=2284 , runt= 60001msec
+
+** CPU测试
+物理机
+#+begin_example
+[root@localhost linpack]# numactl --physcpubind=0-31 --interleave=0,1 ./runme_xeon64
+#+end_example
+
+container
+#+begin_example
+[root@wgtest03 linpack]# numactl --physcpubind=0-31 --interleave=0,1 ./runme_xeon64
+#+end_example
+
+Size 	 host	container
+1000	65.8295	64.2918
+2000	94.1272	94.1021
+5000	167.7265	170.455
+10000	209.8171	203.5901
+15000	200.226	197.9197
+18000	213.599	211.1919
+20000	215.8162	214.7561
+22000	219.3933	217.9698
+25000	220.4034	218.4599
+26000	222.0589	220.9153
+27000	223.3717	222.7842
+30000	223.9151	222.733
+35000	224.4443	223.2153
+40000	239.2316	238.8424
+45000	246.7  	245.6802
+* docker pthread_create failed
+修改
+/etc/security/limits.d/20-nproc.conf

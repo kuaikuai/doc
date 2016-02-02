@@ -1445,3 +1445,42 @@ ip_vs_tunnel_xmit
 #+end_src
 可以看到当IP包长度超过MTU时，LVS将不转发。
 
+* Tunl0 down IP 仍在
+ifconfig tunl0 up
+ifconfig tunl0 10.18.210.89/24
+
+ifconfig tunl0 down
+ping 10.18.210.89
+发现这个IP仍然可用
+
+#+begin_example
+dtest05:~ # ip addr 
+40: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP qlen 1000
+    link/ether 2a:ec:b9:07:8d:c4 brd ff:ff:ff:ff:ff:ff
+    inet 10.18.210.77/24 brd 10.18.210.255 scope global eth0
+    inet6 fe80::28ec:b9ff:fe07:8dc4/64 scope link 
+       valid_lft forever preferred_lft forever
+42: lo: <LOOPBACK,UP,LOWER_UP> mtu 16436 qdisc noqueue state UNKNOWN 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 brd 127.255.255.255 scope host lo
+    inet 127.0.0.2/8 brd 127.255.255.255 scope host secondary lo
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+66: tunl0: <NOARP> mtu 1480 qdisc noqueue state DOWN 
+    link/ipip 0.0.0.0 brd 0.0.0.0
+    inet 10.18.210.89/24 scope global tunl0
+#+end_example
+
+用下面命令查看本机可用IP：
+ip -o -f inet addr show
+删除IP：
+ip -f inet addr delete 10.18.210.89  dev tunl0
+
+
+这个方式没有问题
+#+begin_example
+ ifconfig tunl0 up
+ ifconfig tunl0:0 10.0.64.102 netmask 255.255.255.255 up
+ ifconfig tunl0:0 down
+ ifconfig tunl0 down
+#+end_example
