@@ -103,8 +103,6 @@ output = output.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;");
 
   可以使用工具cain破解。
 
-* 海信社区后台
-http://123.103.18.138:8080/hisadmin/smarttv/login.do
 * rpm segment fault
   原因是stack 值太少
   rpm -ivh xxx.rpm
@@ -1767,7 +1765,7 @@ ldconfig -p |grep libpcap
 
 我将/usr/lib64下的旧版本的
 * snort 安装过程
-* install snort
+** install snort
 #+begin_example
 # cd /tmp ; wget http://www.snort.org/downloads/1850 -O daq-1.1.1.tar.gz # tar -xzvf daq-1.1.1.tar.gz 
 # cd daq-1.1.1/ 
@@ -1852,7 +1850,7 @@ Testing the basic functionality of port scanning detection with nmap
 #+begin_example
 # tail -f /var/log/snort/alert 
 #+end_example
-* install base and barnyard2
+** install base and barnyard2
 Install BASE dependencies
 #+begin_example
 # yum install -y mysql-server mysql-devel php-mysql php-adodb php-pear php-gd httpd 
@@ -2633,7 +2631,8 @@ int main()
   终端不断重试，由于入口流量未达到上限，终端发送的请求总能收到，并且服务端能够处理，
   并且试图向终端发送响应，但是超过出口的流浪限制，响应的数据包被丢弃。服务端的协议栈会尝试继续重发，
   也增大的整个网络出口的数据量。
-** 我认为的解决办法
+** 解决办法
+*** 指数规避
   终端API如果采用指数避让（exponential backoff）
   1.Make a request to the API.
   2.Receive an HTTP 403 rate-limited response, which indicates you should retry the request.
@@ -2685,6 +2684,11 @@ def makeRequestWithExponentialBackoff(analytics):
 
 #+end_src
 
+**
+*** nginx 请求限制
+    针对超标的请求，返回失败，终端根据错误码，采用指数规避。
+*** 启用压缩
+    减少出口数据的带宽
 * ulimit core dump
 How do I enable core dumps for everybody
 ** Overview

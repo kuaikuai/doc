@@ -1,4 +1,9 @@
-tcpcopy 代码
+
+* 使用
+编译时./configure --pcap-capture
+可以支持旁路流量方式工作
+
+* tcpcopy 代码
 
 
 tc_proc_server_msg() -> tc_proc_outgress()

@@ -94,6 +94,9 @@ http://vdisk.weibo.com/
 - 《Fundamental Data Compression》
 * 数据库
   《数据库概念》英文影印版
+  《数据库基础教程》
+  《Mysql技术内幕》
+  《高性能MYSQL》
 * 多CPU，分布式
 - 《Principles of Transaction Processing》 出版商Morgan Kaufmann
    事务处理入门, 需要再复习一遍，
@@ -151,18 +154,17 @@ perl很丑，但实用
   perl函数式编程的好书
 - 《C程序员精通Perl》（steve Oualline）人民邮电出版社
   我的perl入门书
+* 架构与设计
+-  《企业应用架构模式》
+-  《实现领域驱动设计》 
+-  《架构之美》（英文版）
+-  《设计模式》
+-  《七周七并发》
 * 指导性的：
 -  《程序员修炼之道》
--  《程序开发心理学》
--  《系统设计的一般原理》 
 -  《The Practice of Programming》
--  《Write Solid Code》
--  《Code Complete, 2nd》
+-  《代码大全》《Code Complete, 2nd》
 -  《卓有成效的程序员（影印版）》
--  《架构之美》（英文版）
-   经典语句：
-   conceptual integrity is the most important attribute of an architecture.
-   本人深以为然！
 -  《编程人生》
 -  《程序员的自我修养--链接、装载与库》
 -  《软件开发者路线图》

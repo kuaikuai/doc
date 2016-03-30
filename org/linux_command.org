@@ -2288,3 +2288,15 @@ ausearch -sc kill
 
 完毕后，删除
 auditctl -d exit,always -F arch=b64 -S kill
+* iptables intercept received packet with proxy and then forward to destination
+  使用Burp对智能电视进行渗透测试，方法如下：
+
+  通过iptables 和代理截获packet，
+  要使用Burp 做代理，需要设置Burp的Invisible Proxy support配置，
+
+  对于HTTP 80 和 HTTPS 443执行下面命令：
+  iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 80 -j REDIRECT --to-ports 8080
+  iptables -t nat -A PREROUTING -i eth0 -p tcp --dport 443 -j REDIECT --to-ports 8443
+
+ 数据流如下：
+  TV-->eth0-->proxy-->internet

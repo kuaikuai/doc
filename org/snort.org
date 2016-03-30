@@ -1,0 +1,7 @@
+
+* barnyard2增加新分类
+修改classification.config
+
+然后重启barnyard2进程
+
+分类内容保存在sig_class表中

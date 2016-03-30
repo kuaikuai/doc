@@ -1,0 +1,53 @@
+* 安全的核心问题：用于可以提交任何数据
+  用户可以干预客户端和服务器间传输的所有数据，可以轻易避开客户端执行的任何安全检查，如输入参数验证。
+用户并一定使用浏览器以及我们所期望的客户端，来访问服务器，可以使用浏览器嵌入控件，或者其他工具生成大量的请求
+  修改隐藏表单中数据，如商品价格
+  开发对外接口，务必牢记在心。
+
+* 基本防御原则
+- 最小权限原则
+- 不可预测性原则
+
+
+* tips
+
+** 不能仅依赖javascript做输入参数校验，后台也必须做参数校验
+   js做参数校验的母的是提高用户友好度，而后台校验是提高了后台安全性和稳定性。
+
+** 管理界面不可开放外网权限
+   管理界面开放外网权限，恶意用户可以通过暴力破解，或者管理员账户和密码。
+
+** 界面显示的错误信息，不能造成信息泄露，不能出现调用栈信息等有利于程序调试的信息。
+
+** 对于以下情况必须维护审计日志：
+- 所有与身份验证有关的事件，如登陆成功或者失败、密码修改
+- 关键交易，如支付与转账
+- 被访问控制机制阻止的访问企图
+- 任何包含已知攻击字符串，可以看出恶意意图的请求
+
+记录：每个事件的发生事件、发出请求的IP地址，会话令牌和用户名
+
+** 严格校验入参的合法性
+   对于直接对终端的API接口，需要严格校验输入参数的数据类型
+
+** 服务网元尽量不使用root用户启动，如tomcat,mysql,oracle,apache等
+   
+** 注册功能必须有防恶意注册功能
+
+** 防御SQL注入
+*** 使用预编译语句
+一般来说，防御SQL注入的最佳方式，就是使用预编译语句，绑定变量。
+
+String username = req.getParameter("username");  
+String pwd =req.getParameter("pwd");   
+String sql="select * from t_u where username = ? and pwd = ?";  
+System.out.println(sql);   
+PreparedStatement prep= conn.prepareStatement(sql);   
+prep.setString(1, username);  
+prep.setString(2, pwd);
+
+但是不要这样写：
+PreparedStatement Stment = con.prepareStatement("SELECT * FROM table WHERE cond = ' + UserInput + ' ");
+
+*** 数据表用户应具有最小权限
+*** 不同的业务也尽量使用不同数据用户，及时使用的时同一个数据库。

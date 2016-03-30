@@ -1262,3 +1262,48 @@ tcp_keepalive_timer -> tcp_write_wakeup
 keepalive报文序号是snd_una - 1，也就是上次发送报文中最后一个合法的序号。
 按tcpdump 显示方式 上个报文 1:16(15)
 那么keepalive检测报文的序号为15
+* 连接丢失问题
+服务A 与 服务B，之间进项压力测试，
+测试两天下来发现，服务B上存在大量的处于ESTABLISH状态的连接。
+而A上确没有发现对应的链接。
+
+开始时推断是服务A与服务B之间存在网络丢包，导致丢失FIN报文。
+
+后来换了测试环境采用同一网段的两台服务器，发现还是出现问题。
+
+问题原因是：
+服务B处理请求速度过慢，导致大量链接积压到半链接队列中，
+服务A发送请求，等待回应超时，关闭链接
+
+服务B的由于对应链接仍在半链接队列中，不接受FIN报文，所以丢弃该报文。
+当B有机会将该链接accept到，使用该链接，这时实际对端的连接已经关闭了
+* procps
+  top ps vmstat等命令
+* ftrace 使用
+* LXC虚拟机操作系统日志混乱问题
+
+** 解决办法
+登陆到每个LXC虚机，进行如下操作
+1.修改配置/etc/init.d/syslog:
+将其中
+start_klogd=yes
+修改为：
+start_klogd=no
+ 
+2.执行如下命令，重启syslog服务
+service syslog restart 
+
+** 问题原因
+   
+   上层应用程序通过/proc/kmsg来获取操作系统的日志信息。
+   这些日志信息由printk调用输出到ring buffer中
+   读取/proc/kmsg就是读取该ring buffer的内容。
+   当有多个klog进程同时读取/proc/kmsg时，就会出现每个进程都读不到完整的日志
+
+   每个LXC虚拟机都会启动一个syslog服务，而syslog依赖klog。
+   最后在物理机层面上会出现多个klog进程
+
+代码见/kernel/printk.c
+
+* LVS "IPV6 header not found"
+  ip_vs_local_reply6 -> ip_vs_out -> ip_vs_fill_iph_skb -> ipv6_find_hdr

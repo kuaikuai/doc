@@ -1,0 +1,4 @@
+- %prep section: source tarball is extracted to $RPM_BUILD_DIR (not buildroot!) usually under ~/rpmbuild/BUILD/
+- %build section: configure and make are executed within $RPM_BUILD_DIR
+- %install section: make install takes files from $RPM_BUILD_DIR and installs them in $RPM_BUILD_ROOT
+- %files section: defines the files found under $RPM_BUILD_ROOT to add to the package, you will be warned if you don't list them all

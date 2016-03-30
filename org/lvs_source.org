@@ -12,7 +12,7 @@ http://www.linuxvirtualserver.org/zh/lvs3.html
   #配置eth0的VIP地址
   /sbin/ifconfig eth0:0 192.168.1.100 broadcast 192.168.1.100 netmask 255.255.255.255 up
   #加路由
-  /sbin/route add –host 192.168.1.100 dev eth0:0
+  /sbin/route add -host 192.168.1.100 dev eth0:0
 #+end_example
 - 配置网络系统参数（eth0为绑定VIP的网卡设备） TODO？下面四条是否有必要？
 #+begin_example
@@ -89,6 +89,77 @@ http://www.linuxvirtualserver.org/zh/lvs3.html
    ParseToDict的主要函数为parseComplex
 
 6. iptv_ipvsman 启动、停止ipvsmand服务的脚本
+
+* ip_vs_out 作用
+ip_vs_out函数就挂到NF_INET_LOCAL_OUT上，也就输出的数据流都会经过这个函数。
+从下面代码可以看到，对于LVS本身发送的请求，该函数直接pass。
+#+begin_src c
+	/* Already marked as IPVS request or reply? */
+	if (skb->ipvs_property)
+		return NF_ACCEPT;
+#+end_src
+
+ipvs_property在每个xmit函数中设置
+如：
+#+begin_src c
+/* return NF_ACCEPT to allow forwarding or other NF_xxx on error */
+static inline int ip_vs_tunnel_xmit_prepare(struct sk_buff *skb,
+					    struct ip_vs_conn *cp)
+{
+	int ret = NF_ACCEPT;
+
+	skb->ipvs_property = 1;
+	if (unlikely(cp->flags & IP_VS_CONN_F_NFCT))
+		ret = ip_vs_confirm_conntrack(skb);
+	if (ret == NF_ACCEPT) {
+		nf_reset(skb);
+		skb_forward_csum(skb);
+	}
+	return ret;
+}
+#+end_src
+ip_vs_tunnel_xmit -> ip_vs_tunnel_xmit_prepare
+
+所以TUNNEL、DR模式的数据仅由ip_vs_in函数处理。
+
+NAT模式下，realserver发送到LVS的回应报文，由ip_vs_reply4处理，
+ip_vs_reply4 -> ip_vs_out
+---> ip_vs_fill_iph_skb() ： 得到IP头
+---> 判断是否是ICMP，如果是则调用ip_vs_out_icmp()函数处理
+---> ip_vs_proto_data_get() ： 取四层处理结构
+---> 检查处理分片
+---> 调用proto->conn_out_get() 得到当前connection
+---> 如果得到connection，则调用handle_response()处理response
+---> handle_response()
+     将数据包的源IP修改为vip
+
+ip_vs_in 中调用proto->conn_in_get() 获得当前连接
+#+begin_src c
+static struct nf_hook_ops ip_vs_ops[] __read_mostly = {
+	/* After packet filtering, change source only for VS/NAT */
+	{
+		.hook		= ip_vs_reply4,
+		.owner		= THIS_MODULE,
+		.pf		= NFPROTO_IPV4,
+		.hooknum	= NF_INET_LOCAL_IN,
+		.priority	= NF_IP_PRI_NAT_SRC - 2,
+	},
+	/* After packet filtering, forward packet through VS/DR, VS/TUN,
+	 * or VS/NAT(change destination), so that filtering rules can be
+	 * applied to IPVS. */
+	{
+		.hook		= ip_vs_remote_request4,
+		.owner		= THIS_MODULE,
+		.pf		= NFPROTO_IPV4,
+		.hooknum	= NF_INET_LOCAL_IN,
+		.priority	= NF_IP_PRI_NAT_SRC - 1,
+	},
+#+end_src
+
+所以对于每个数据流都要先经过ip_vs_reply4，如果该函数查不到对应输出连接，
+才会经过ip_vs_remote_request4，这个所有从client发送来的数据的集中处理地。
+
+可以看出对于TUNNEL、DR模式而言，ip_vs_reply4是浪费CPU的流程。
 
 * LVS集群系统网络核心原理分析
 ** LVS结构与工作原理
@@ -522,6 +593,9 @@ static int tcp_app_conn_bind(struct ip_vs_conn *cp)
 本函数实现将多连接应用协议处理模块和IPVS连接进行绑定
 
 * proc
+/proc/net/ip_vs
+/proc/net/ip_vs_stats_percpu
+/proc/net/ip_vs_conn
 /proc/sys/net/ipv4/vs/amemthresh
 /proc/sys/net/ipv4/vs/am_droprate
 /proc/sys/net/ipv4/vs/drop_entry
