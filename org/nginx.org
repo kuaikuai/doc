@@ -1,3 +1,4 @@
+#+OPTIONS: "\n:t"
 
 * proxy_set_header
 配置如下：
@@ -60,3 +61,12 @@ The adjustment of the file offset and the write operation are performed as an at
   可以使用proxy_cache 缓存静态资源
   使用fastcgi_cache 缓存fastcgi请求的应答
 * DDOS
+* gzip 问题
+  nginx 后端的server，在nginx开启gzip的情况下，不能再开启gzip压缩。
+  比如同时开启nginx和其后端的tomcat的gzip压缩的支持，
+  当tomcat收到HTTP请求时发现Accept-Encoding: gzip, deflate，终端支持gzip压缩，
+  于是将返回内容进行压缩。
+  当tomcat的reponse被nginx接收时，nginx ngx_http_gzip_filter_module也检测到该请求对应终端支持压缩，
+  于是再压缩一边，再将数据发送到终端。
+
+  终端接收到压缩两遍的数据，无法正常使用。

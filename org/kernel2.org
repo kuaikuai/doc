@@ -1280,6 +1280,121 @@ keepalive报文序号是snd_una - 1，也就是上次发送报文中最后一个
 * procps
   top ps vmstat等命令
 * ftrace 使用
+* 简介
+
+ftrace是内建于Linux内核的跟踪工具，从2.6.27开始加入主流内核。ftrace的作用是帮助开发人员了解
+Linux 内核的运行时行为，以便进行故障调试或性能分析。使用ftrace可以对内核函数调用、上下文切换进行跟踪，还可以查看中断被关闭的时长，跟踪内核态中的延迟以及性能问题等。使用ftrace对内核进行跟踪调试，可以找到内核中出现的问题的根源，通过ftrace来观察内核中发生的活动，则可以了解内核的工作机制。
+* 原理
+
+ftrace本质上是一种静态代码插装技术，借助于GCC提供的profile特性，在所有的内核函数的开始部分插入一段代码，通过插入的代码来实现跟踪功能。GCC的-pg选项将在每个函数入口处加入对 mcount 的调用代码，ftrace使用自己定义的mcount函数来代替默认的mcount，实现了对于函数调用的跟踪。在每个内核函数入口加入跟踪代码，必然会影响内核的性能，为了减小对内核性能的影响，ftrace支持动态跟踪功能。在没有启用其跟踪功能时，它将mcount换成nop指令，只有在开启跟踪功能时，才将mcount换成用户注册的跟踪函数，因此在不进行跟踪的时候，对内核性能的影响微乎其微。
+* 使用
+
+ftrace通过debugfs向用户态提供访问接口，使用时需先挂载debugfs，挂载debugfs之后，在挂载目录下（默认是/sys/kernel/debug）会有一个tracing的文件夹，这个文件夹就是ftrace导出的借口。该文件夹下一些主要的文件的用途如下：
+#+CAPTION: 功能
+| README文件     | 提供了一个简短的使用说明，展示了 ftrace 的操作命令序列。可以通过 cat 命令查看该文件以了解概要的操作流程 |
+| current_tracer | 用于设置或显示当前使用的跟踪器，其缺省值为nop，即不做任何跟踪操作。                                     |
+|available_tracers|记录了当前编译进内核的跟踪器的列表，current_tracer必须在该文件列出的跟踪器名字列表中。|
+|trace文件|提供了查看获取到的跟踪信息的接口。可以通过 cat 等命令查看该文件以查看跟踪到的内核活动记录，也可以将其内容保存为记录文件以备后续查看|
+|tracing_enabled|用于控制current_tracer中的跟踪器是否跟踪内核函数的调用情况。写入0会关闭跟踪活动，写入1则激活跟踪功能。|
+|set_graph_function|设置要清晰显示调用关系的函数，显示的信息结构类似于 C 语言代码，这样在分析内核运作流程时会更加直观一些。在使用 function_graph 跟踪器时使用；缺省为对所有函数都生成调用关系序列，可以通过写该文件来指定需要特别关注的函数|
+|buffer_size_kb|用于设置单个 CPU 所使用的跟踪缓存的大小|
+|available_filter_functions|记录了当前可以跟踪的内核函数。对于不在该文件中列出的函数，无法跟踪其活动。|
+|set_ftrace_filter| 用于指定要跟踪的函数，支持简单形式的含有通配符的表达式，这样可以用一个表达式一次指定多个目标函数；注意，要写入文件的函数名必须可以在文件 available_filter_functions中看到|
+|set_ftrace_notrace |与set_ftrace_filter相反，用于指定不跟踪的函数|
+
+Ftrace使用起来很简单，大致可以分成三步完成，首先是选择函数跟踪器、设置将要跟踪的函数、启用其跟踪功能，然后执行你想要跟踪的代码，执行完成之后，停止跟踪器，将结果导出。下面通过一些实例来看看ftrace的使用
+
+*function跟踪器*
+#+begin_example
+# cd /sys/kernel/debug/tracing
+# echo 1 > /proc/sys/kernel/ftrace_enabled
+# echo 0 > tracing_enabled
+# echo function > current_tracer
+# echo do_fork > set_ftrace_filter
+# echo 1 > tracing_on
+# echo 1 > tracing_enabled
+#+end_example
+让内核执行一段时间
+# echo 0 > tracing_on
+# echo 0 > tracing_enabled
+# cat trace
+
+*sched_switch 跟踪器*
+#+begin_example
+# cd /sys/kernel/debug/tracing
+# echo 1 >/proc/sys/kernel/ftrace_enabled
+# echo 0 > tracing_enabled
+# echo sched_switch >current_tracer
+# echo 1 > tracing_on
+# echo 1 > tracing_enabled
+#+end_example
+让内核执行一段时间
+# echo 0 > tracing_on
+# echo 0 > tracing_enabled
+# cat trace
+
+其他的跟踪器的使用也类似上面的流程。上面的过程很容易写成脚步，此外还可以通过trace-cmd来操作。
+
+* 使用vm.dirty_radio和vm.dirty_background_ratio 调整磁盘缓存和性能
+in previous posts on vm.swappiness and using RAM disks we talked about how the memory on a Linux guest is used for the OS itself (the kernel, buffers, etc.), applications, and also for file cache. File caching is an important performance improvement, and read caching is a clear win in most cases, balanced against applications using the RAM directly. Write caching is trickier. The Linux kernel stages disk writes into cache, and over time asynchronously flushes them to disk. This has a nice effect of speeding disk I/O but it is risky. When data isn’t written to disk there is an increased chance of losing it.
+
+当大量IO发生时，可能写满缓存。
+There is also the chance that a lot of I/O will overwhelm the cache, too. Ever written a lot of data to disk all at once, and seen large pauses on the system while it tries to deal with all that data? Those pauses are a result of the cache deciding that there’s too much data to be written asynchronously (as a non-blocking background operation, letting the application process continue), and switches to writing synchronously (blocking and making the process wait until the I/O is committed to disk). Of course, a filesystem also has to preserve write order, so when it starts writing synchronously it first has to destage the cache. Hence the long pause.
+
+
+好消息是有几个可以调整的选项，我们可以根据实际的负载，做调整。
+#+begin_example
+$ sysctl -a | grep dirty
+vm.dirty_background_ratio = 10
+vm.dirty_background_bytes = 0
+vm.dirty_ratio = 20
+vm.dirty_bytes = 0
+vm.dirty_writeback_centisecs = 500
+vm.dirty_expire_centisecs = 3000
+#+end_example
+vm.dirty_background_ratio is the percentage of system memory that can be filled with “dirty” pages — memory pages that still need to be written to disk — before the pdflush/flush/kdmflush background processes kick in to write it to disk. My example is 10%, so if my virtual server has 32 GB of memory that’s 3.2 GB of data that can be sitting in RAM before something is done.
+
+vm.dirty_ratio is the absolute maximum amount of system memory that can be filled with dirty pages before everything must get committed to disk. When the system gets to this point all new I/O blocks until dirty pages have been written to disk. This is often the source of long I/O pauses, but is a safeguard against too much data being cached unsafely in memory.
+
+vm.dirty_background_bytes and vm.dirty_bytes are another way to specify these parameters. If you set the _bytes version the _ratio version will become 0, and vice-versa.
+
+vm.dirty_expire_centisecs is how long something can be in cache before it needs to be written. In this case it’s 30 seconds. When the pdflush/flush/kdmflush processes kick in they will check to see how old a dirty page is, and if it’s older than this value it’ll be written asynchronously to disk. Since holding a dirty page in memory is unsafe this is also a safeguard against data loss.
+
+vm.dirty_writeback_centisecs is how often the pdflush/flush/kdmflush processes wake up and check to see if work needs to be done.
+
+You can also see statistics on the page cache in /proc/vmstat:
+#+begin_example
+$ cat /proc/vmstat | egrep "dirty|writeback"
+ nr_dirty 878 nr_writeback 0 nr_writeback_temp 0
+#+end_example
+
+In my case I have 878 dirty pages waiting to be written to disk.
+** 减少缓存
+计算机领域中，你做什么调整，取决于你要干什么。
+如果我们有高速磁盘系统，且磁盘系统有带电池的NVRAM缓存，那么我们把数据保留在OS的page cache是有风险的。
+应该让数据尽快写入磁盘系统。这是我们减少下面两个选项：
+vm.dirty_background_ratio = 5
+vm.dirty_ratio = 10
+
+** 增加缓存
+
+还有一些场景缓存可以极大的提高性能。保存在LINUX上的数据不是十分关键和可以允许丢失，而且可能存在应用频繁的写同一个文件。
+理论上
+There are scenarios where raising the cache dramatically has positive effects on performance. These situations are where the data contained on a Linux guest isn’t critical and can be lost, and usually where an application is writing to the same files repeatedly or in repeatable bursts. In theory, by allowing more dirty pages to exist in memory you’ll rewrite the same blocks over and over in cache, and just need to do one write every so often to the actual disk. To do this we raise the parameters:
+
+vm.dirty_background_ratio = 50 vm.dirty_ratio = 80
+
+Sometimes folks also increase the vm.dirty_expire_centisecs parameter to allow more time in cache. Beyond the increased risk of data loss, you also run the risk of long I/O pauses if that cache gets full and needs to destage, because on large VMs there will be a lot of data in cache.
+
+** 两者都用
+
+There are also scenarios where a system has to deal with infrequent, bursty traffic to slow disk (batch jobs at the top of the hour, midnight, writing to an SD card on a Raspberry Pi, etc.). In that case an approach might be to allow all that write I/O to be deposited in the cache so that the background flush operations can deal with it asynchronously over time:
+
+vm.dirty_background_ratio = 5 vm.dirty_ratio = 80
+
+Here the background processes will start writing right away when it hits that 5% ceiling but the system won’t force synchronous I/O until it gets to 80% full. From there you just size your system RAM and vm.dirty_ratio to be able to consume all the written data. Again, there are tradeoffs with data consistency on disk, which translates into risk to data. Buy a UPS and make sure you can destage cache before the UPS runs out of power. :)
+
+No matter the route you choose you should always be gathering hard data to support your changes and help you determine if you are improving things or making them worse. In this case you can get data from many different places, including the application itself, /proc/vmstat, /proc/meminfo, iostat, vmstat, and many of the things in /proc/sys/vm. Good luck!
 * LXC虚拟机操作系统日志混乱问题
 
 ** 解决办法
@@ -1307,3 +1422,260 @@ service syslog restart
 
 * LVS "IPV6 header not found"
   ip_vs_local_reply6 -> ip_vs_out -> ip_vs_fill_iph_skb -> ipv6_find_hdr
+* kprobe使用
+Kprobe is a very simple method to probe the running kernel. At a fundamental level, it requires the address of a kernel function that needs to be debugged. Then, you create pre- and post-handlers that will print a debugging message when the target kernel function is called. (Actually, a handler performs any action specified in its code; in this case, it happens to be printing.) Thus, every time that function is called, you can track it.
+An example
+
+To keep things simple, I have created a small and easy-to-understand example. The target kernel function is ip_rcv(). The Kprobe example kernel module is as follows:
+mod1.c
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+ 
+static unsigned int counter = 0;
+int Pre_Handler(struct kprobe *p, struct pt_regs *regs){
+    printk("Pre_Handler: counter=%u\n",counter++);
+    return 0;
+}
+ 
+void Post_Handler(struct kprobe *p, struct pt_regs *regs, unsigned long flags){
+    printk("Post_Handler: counter=%u\n",counter++);
+}
+ 
+static struct kprobe kp;
+ 
+int myinit(void)
+{
+    printk("module inserted\n ");
+    kp.pre_handler = Pre_Handler;
+    kp.post_handler = Post_Handler;
+    kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+    register_kprobe(&kp);
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_kprobe(&kp);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("KPROBE MODULE");
+MODULE_LICENSE("GPL");
+#+end_src
+
+The makefile required to build the kernel module object file that you need to insert into the kernel is as follows:
+#+begin_src c
+obj-m +=mod1.o
+KDIR= /lib/modules/$(shell uname -r)/build
+all:
+    $(MAKE) -C $(KDIR) SUBDIRS=$(PWD) modules
+clean:
+       rm -rf *.o *.ko *.mod.* .c* .t*
+#+end_src
+Code walk-through
+
+Here’s an explanation for the less obvious sections of the code.
+struct kprobe kp;
+
+To make use of Kprobe functionality, you must declare a variable of the structure struct kprobe, which is declared in include/linux/kprobes.h. Here’s a little extract:
+#+begin_src c
+struct kprobe {
+    .
+    .
+    kprobe_opcode_t *addr;
+    kprobe_pre_handler_t pre_handler;
+    kprobe_post_handler_t post_handler;
+}
+#+end_src
+The three members listed above are of interest to us. You need to assign the kernel address of the target function to the addr member; you can retrieve the address from the /proc/kallsyms file, as follows:
+#+begin_src c
+# cat /proc/kallsyms | grep ip_rcv
+c071c3e0 t ip_rcv_finish
+c071c9a9 T ip_rcv
+#+end_src
+Once you’ve found the address, use it in the myinit() function, as follows:
+kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+
+Kprobe executes handler functions before and after the target kernel function is called, and we created the Pre_Handler() and Post_Handler() functions for this purpose. Assign these to their respective pointer members in the Kprobe struct — pre_handler and post_handler — in myinit(), as you can see. Finally, register your Kprobe with the kernel, with register_kprobe(&kp);.
+
+Then compile the module by running make:
+#+begin_example
+# make
+make -C /lib/modules/2.6.34/build SUBDIRS=/root/kprobe modules
+make[1]: Entering directory '/root/linux-2.6.34'
+  CC [M]  /root/kprobe/mod1.o
+  Building modules, stage 2.
+  MODPOST 1 modules
+  CC      /root/kprobe/mod1.mod.o
+  LD [M]  /root/kprobe/mod1.ko
+make[1]: Leaving directory '/root/linux-2.6.34'
+#+end_example
+
+When done, you are ready to test your example module by inserting it into the kernel:
+# insmod mod1.ko
+
+Confirm that the module is successfully inserted:
+# lsmod | head -n 5
+Module                  Size  Used by
+mod1                     904  0
+fuse                   46627  2
+sunrpc                158985  1
+xt_physdev              1355  1
+
+Now, since you have used ip_rcv() as your target function, you need to invoke it with a simple ping:
+# ping localhost
+
+Run dmesg and find your module’s messages:
+module inserted
+Pre_Handler: counter=0
+Post_Handler: counter=1
+Pre_Handler: counter=2
+Post_Handler: counter=3
+
+As you see, you can probe a kernel address and do instrumentation without recompiling the kernel, as was required by the simple printk. When you are done with your debugging, don’t forget to remove the module:
+# rmmod mod1
+
+In the exit function, myexit(), Kprobe is unregistered by calling unregister_kprobe(&kp);.
+
+However, Kprobe has limits to what you can do with it. In the above example, you have just printed some messages in the handlers; you cannot access the function’s arguments with Kprobe. Let’s move on to something better.
+Probing with Jprobe
+
+For those who like bonus features, Jprobe is another kind of probing technique, which can be used to access the target function’s arguments, and thus display what was passed to the function. The basics are the same as that of Kprobe, but this additional feature makes Jprobe an interesting tool.
+
+To get the Jprobe structure details, look in the file include/linux/kprobes.h:
+struct jprobe {
+        struct kprobe kp;
+        void *entry;    /* probe handling code to jump to */
+};
+
+As you see, it contains a struct kprobe member, plus a pointer to store the address of a handler function to jump to.
+A Jprobe example
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+#include<net/ip.h>
+#include <linux/kallsyms.h>
+ 
+int my_handler (struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev){
+ 
+    struct iphdr *my_iph;
+    u32 S_ip,D_ip;
+    my_iph = ip_hdr(skb);
+    S_ip = my_iph->saddr;
+    D_ip = my_iph->daddr;
+    printk("Source IP: \n"NIPQUAD_FMT,NIPQUAD(S_ip));
+     jprobe_return();
+}
+ 
+static struct jprobe my_probe;
+ 
+int myinit(void)
+{
+    int ret;
+    //my_probe.kp.addr = (kprobe_opcode_t *)0xc071c9a9;
+    my_probe.kp.addr = (kprobe_opcode_t *) kallsyms_lookup_name("ip_rcv");
+    if (!my_probe.kp.addr) {
+       printk("Couldn't find %s to plant jprobe\n", "ip_rcv");
+       return -1;
+    }
+    my_probe.entry = (kprobe_opcode_t *)my_handler;
+    if ((ret = register_jprobe(&my_probe)) < 0) {
+       printk("register_jprobe failed, returned %d\n", ret);
+       return -1;
+    }
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_jprobe(&my_probe);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+ 
+/*Kernel module Comments*/
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("SIMPLE MODULE");
+MODULE_LICENSE("GPL");
+//MODULE_LICENSE("GPL v2");
+#+end_src
+Code walk-through
+
+The example is simple to understand, but let me explain things a bit. Here, in the myinit() function, you assigned the target function address to the addr member of the Kprobe member struct kp, just like for the earlier module. The main difference is that you’ve now assigned a single handler function, my_handler, to the entry member:
+my_probe.entry = (kprobe_opcode_t *)my_handler;
+
+You’ve probably already noted that the signature of the single handler function here is quite different from the Kprobe handlers. The reason is, the handler must have the same arguments as that of the kernel function you’re probing, which is once again ip_rcv():
+int my_handler (struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev);
+extern int   ip_rcv(struct sk_buff *skb, struct net_device *dev,  struct packet_type *pt, struct net_device *orig_dev);
+
+Jprobe lets us access the arguments of a function by calling your handler with the same arguments passed to the target function. This means that when ip_rcv is called, its arguments can be accessed from your probe handler as it is able to refer to the function’s address space plus the components within that function stack.
+
+The line my_iph = ip_hdr(skb); will extract the IP header from sk_buff. Then extract the source and destination IP addresses in dot notation form, using the NIPQUAD and NIPQUAD_FMT macros declared in include/linux/kernel.h, and print the addresses.
+
+Now, compile your module, insert it, and check that the module has been inserted successfully, just as before. Again, to invoke ip_rcv(), run a ping and then run dmesg to check the output:
+# ping www.google.com
+# dmesg
+Source IP: 192.168.1.1
+Destination IP: 192.168.1.3
+Source IP: 209.85.231.104
+Destination IP: 192.168.1.3
+
+The output shows that Jprobe lets you get the function’s argument values, which can be very handy when debugging data-dependent bugs.
+
+修改一下
+#+begin_src c	
+#include<linux/module.h>
+#include<linux/version.h>
+#include<linux/kernel.h>
+#include<linux/init.h>
+#include<linux/kprobes.h>
+static const char *probed_func = "ip_rcv"; 
+static unsigned int counter = 0;
+int Pre_Handler(struct kprobe *p, struct pt_regs *regs){
+    printk("Pre_Handler: counter=%u\n",counter++);
+    return 0;
+}
+ 
+void Post_Handler(struct kprobe *p, struct pt_regs *regs, unsigned long flags){
+    printk("Post_Handler: counter=%u\n",counter++);
+}
+ 
+static struct kprobe kp;
+ 
+int myinit(void)
+{
+    printk("module inserted\n ");
+    kp.pre_handler = Pre_Handler;
+    kp.post_handler = Post_Handler;
+    /* 直接使用函数名 */
+    kp.symbol_name = (char *)probed_func;
+    register_kprobe(&kp);
+    return 0;
+}
+ 
+void myexit(void)
+{
+    unregister_kprobe(&kp);
+    printk("module removed\n ");
+}
+ 
+module_init(myinit);
+module_exit(myexit);
+MODULE_AUTHOR("Manoj");
+MODULE_DESCRIPTION("KPROBE MODULE");
+MODULE_LICENSE("GPL");
+#+end_src
+
+更详细的内容可以阅读linux-2.6.21/Documentation/kprobes.txt。
