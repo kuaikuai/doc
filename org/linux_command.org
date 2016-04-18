@@ -33,8 +33,6 @@ ss命令可以用来获取socket统计信息，它可以显示和netstat类似�
 
 >>>>>>> .r272
 
-* lwp-request
-echo "a=&b=&=" | lwp-request -m POST http://xxxxx
 * tcpdump用法
   tcpdump相比较wireshark是很轻量的东东，而且机器一般默认安装又不需要图形界面。
   需要注意tcpdump默认获取一个包的前96字节，如果你想看更多，需要使用-s 选项。建议使用-s 0， 会获取所有的数据。
@@ -322,8 +320,6 @@ To print IP broadcast or multicast packets that were not sent via Ethernet broad
 To print all ICMP packets that are not echo requests/replies (i.e., not ping packets):
 
     tcpdump 'icmp[icmptype] != icmp-echo and icmp[icmptype] != icmp-echoreply'
-
-
 
 * 使用telnet测试端口是否联通
 =======

@@ -1280,14 +1280,14 @@ keepalive报文序号是snd_una - 1，也就是上次发送报文中最后一个
 * procps
   top ps vmstat等命令
 * ftrace 使用
-* 简介
+** 简介
 
 ftrace是内建于Linux内核的跟踪工具，从2.6.27开始加入主流内核。ftrace的作用是帮助开发人员了解
 Linux 内核的运行时行为，以便进行故障调试或性能分析。使用ftrace可以对内核函数调用、上下文切换进行跟踪，还可以查看中断被关闭的时长，跟踪内核态中的延迟以及性能问题等。使用ftrace对内核进行跟踪调试，可以找到内核中出现的问题的根源，通过ftrace来观察内核中发生的活动，则可以了解内核的工作机制。
-* 原理
+** 原理
 
 ftrace本质上是一种静态代码插装技术，借助于GCC提供的profile特性，在所有的内核函数的开始部分插入一段代码，通过插入的代码来实现跟踪功能。GCC的-pg选项将在每个函数入口处加入对 mcount 的调用代码，ftrace使用自己定义的mcount函数来代替默认的mcount，实现了对于函数调用的跟踪。在每个内核函数入口加入跟踪代码，必然会影响内核的性能，为了减小对内核性能的影响，ftrace支持动态跟踪功能。在没有启用其跟踪功能时，它将mcount换成nop指令，只有在开启跟踪功能时，才将mcount换成用户注册的跟踪函数，因此在不进行跟踪的时候，对内核性能的影响微乎其微。
-* 使用
+** 使用
 
 ftrace通过debugfs向用户态提供访问接口，使用时需先挂载debugfs，挂载debugfs之后，在挂载目录下（默认是/sys/kernel/debug）会有一个tracing的文件夹，这个文件夹就是ftrace导出的借口。该文件夹下一些主要的文件的用途如下：
 #+CAPTION: 功能
@@ -1308,29 +1308,23 @@ Ftrace使用起来很简单，大致可以分成三步完成，首先是选择�
 #+begin_example
 # cd /sys/kernel/debug/tracing
 # echo 1 > /proc/sys/kernel/ftrace_enabled
-# echo 0 > tracing_enabled
 # echo function > current_tracer
 # echo do_fork > set_ftrace_filter
 # echo 1 > tracing_on
-# echo 1 > tracing_enabled
 #+end_example
 让内核执行一段时间
 # echo 0 > tracing_on
-# echo 0 > tracing_enabled
 # cat trace
 
 *sched_switch 跟踪器*
 #+begin_example
 # cd /sys/kernel/debug/tracing
 # echo 1 >/proc/sys/kernel/ftrace_enabled
-# echo 0 > tracing_enabled
 # echo sched_switch >current_tracer
 # echo 1 > tracing_on
-# echo 1 > tracing_enabled
 #+end_example
 让内核执行一段时间
 # echo 0 > tracing_on
-# echo 0 > tracing_enabled
 # cat trace
 
 其他的跟踪器的使用也类似上面的流程。上面的过程很容易写成脚步，此外还可以通过trace-cmd来操作。
@@ -1421,7 +1415,156 @@ service syslog restart
 代码见/kernel/printk.c
 
 * LVS "IPV6 header not found"
-  ip_vs_local_reply6 -> ip_vs_out -> ip_vs_fill_iph_skb -> ipv6_find_hdr
+  lvs服务器内核报错：IPv6 header not found
+** 问题根源
+在于kernel 3.10代码ip_vs_core.c中：
+#+begin_src c
+	/* Before ip_vs_in, change source only for VS/NAT */
+	{
+		.hook		= ip_vs_local_reply6,
+		.owner		= THIS_MODULE,
+		.pf		= NFPROTO_IPV4,
+		.hooknum	= NF_INET_LOCAL_OUT,
+		.priority	= NF_IP6_PRI_NAT_DST + 1,
+	},
+	/* After mangle, schedule and forward local requests */
+	{
+		.hook		= ip_vs_local_request6,
+		.owner		= THIS_MODULE,
+		.pf		= NFPROTO_IPV6,
+		.hooknum	= NF_INET_LOCAL_OUT,
+		.priority	= NF_IP6_PRI_NAT_DST + 2,
+	},
+#+end_src
+NFPROTO_IPV4应为NFPROTO_IPV6
+ip_vs_local_reply6 被错挂到ipv4的处理流程上。
+所以本机发送的消息，可能被改错误的hook function处理。
+（LVS本身发送的信息，在这些hook函数入口，直接返回了，不受影响）
+ 
+现在发送一个报文：
+ip_vs_local_reply6 -> ip_vs_out
+ip_vs_out部分代码如下：（这部分代码只有非LVS报文才能走到）
+#+begin_src c
+	ip_vs_fill_iph_skb(af, skb, &iph);
+#ifdef CONFIG_IP_VS_IPV6
+	if (af == AF_INET6) {
+		if (unlikely(iph.protocol == IPPROTO_ICMPV6)) {
+			int related;
+			int verdict = ip_vs_out_icmp_v6(skb, &related,
+							hooknum, &iph);
+
+			if (related)
+				return verdict;
+		}
+	} else
+#endif
+#+end_src
+ip_vs_fill_iph_skb调用ipv6_find_hdr 设置iphdr->protocol
+#+begin_src c
+static inline void
+ip_vs_fill_iph_skb(int af, const struct sk_buff *skb, struct ip_vs_iphdr *iphdr)
+{
+#ifdef CONFIG_IP_VS_IPV6
+	if (af == AF_INET6) {
+		const struct ipv6hdr *iph =
+			(struct ipv6hdr *)skb_network_header(skb);
+		iphdr->saddr.in6 = iph->saddr;
+		iphdr->daddr.in6 = iph->daddr;
+		/* ipv6_find_hdr() updates len, flags */
+		iphdr->len	 = 0;
+		iphdr->flags	 = 0;
+		iphdr->protocol  = ipv6_find_hdr(skb, &iphdr->len, -1,
+						 &iphdr->fragoffs,
+						 &iphdr->flags);
+	} else
+#endif
+#+end_src
+
+当某个ipv4报文第40个字节恰好等于58，也就是IPPROTO_ICMPV6时。
+ipv6_find_hdr很可能把该报文的协议解释为合法的ICMP6。
+这时，在图1中iph.protocol == IPPROTO_ICMPV6就判断通过了。
+接下来会执行ip_vs_out_icmp6_v6 -> ipv6_find_hdr 
+ip_vs_out_icmp6 代码如下：
+#+begin_src c
+    //对于非icmp报，或者其他长度少于icmp包，就被直接drop了
+	ic = frag_safe_skb_hp(skb, ipvsh->len, sizeof(_icmph), &_icmph, ipvsh);
+	if (ic == NULL)
+		return NF_DROP;
+    ...
+	/* skip possible IPv6 exthdrs of contained IPv6 packet */
+	ciph.protocol = ipv6_find_hdr(skb, &ciph.len, -1, &ciph.fragoffs, NULL);
+	if (ciph.protocol < 0)
+		return NF_ACCEPT; /* Contained IPv6 hdr looks wrong, ignore */
+#+end_src
+注意：到ciph.protocol < 0 时， 返回ACCEPT，也就是该报文最后会走到正常的流程。
+ 
+再第二次调用ipv6_find_hdr，下图中画红线代码判断发现问题，于是打印出了IPv6 header not found
+ipv6_find_hdr:
+#+begin_src c
+	if (*offset) {
+		struct ipv6hdr _ip6, *ip6;
+
+		ip6 = skb_header_pointer(skb, *offset, sizeof(_ip6), &_ip6);
+		if (!ip6 || (ip6->version != 6)) {
+			printk(KERN_ERR "IPv6 header not found\n");
+			return -EBADMSG;
+		}
+		start = *offset + sizeof(struct ipv6hdr);
+		nexthdr = ip6->nexthdr;
+	}
+ #+end_src
+** 触发原因
+日志上报和应用商店某个接口，会发送大量数据到服务端，不是典型的入口流量小出口流量多的场景。
+会出现一些TCP协议的IP报大小超过1480的情况，例如1492字节，当出现这些打包时，由于我们的LVS采用了tunnel，也就IP over IP的方式。
+当向realserver转发数据时，1492+20 = 1512 > MTU(1500)，相关判断在下图__ip_vs_get_out_rt中
+#+begin_src c
+ 	if (likely(!(rt_mode & IP_VS_RT_MODE_TUNNEL))) {
+		mtu = dst_mtu(&rt->dst);
+		df = iph->frag_off & htons(IP_DF);
+	} else {
+		struct sock *sk = skb->sk;
+
+		mtu = dst_mtu(&rt->dst) - sizeof(struct iphdr);
+		if (mtu < 68) {
+			IP_VS_DBG_RL("%s(): mtu less than 68\n", __func__);
+			goto err_put;
+		}
+		ort = skb_rtable(skb);
+		if (!skb->dev && sk && sk->sk_state != TCP_TIME_WAIT)
+			ort->dst.ops->update_pmtu(&ort->dst, sk, NULL, mtu);
+		/* MTU check allowed? */
+		df = sysctl_pmtu_disc(ipvs) ? iph->frag_off & htons(IP_DF) : 0;
+	}
+
+	/* MTU checking */
+	if (unlikely(df && skb->len > mtu && !skb_is_gso(skb))) {
+		icmp_send(skb, ICMP_DEST_UNREACH, ICMP_FRAG_NEEDED, htonl(mtu));
+		IP_VS_DBG(1, "frag needed for %pI4\n", &iph->saddr);
+		goto err_put;
+	}
+ #+end_src
+当出现这种情况时，icmp_send向终端发送ICMP包通知对方：报文过大。
+但是当终端的IP是58.x.x.x时，icmp报文中58的位置刚好和ipv6中protocol位置一样，所以这种发往58.x.x.x的这种icmp报文可能触发LVS bug。
+ 
+** 问题影响
+经过上面分析，我们可以发现实际上，有两个问题。
+1、LVS tunnel模式：虽然Director的MTU是1500，实际上只能最大接受1480的报文
+    问题1，是一直存在的问题，对性能略微有影响，TCP路径MTU发现时，会接受到icmp包的通知，获取实际MTU 1480，后续通讯时，不会再发送超过1480的报文。
+   可以不与处理。
+ 
+2、LVS BUG 本身   
+     a. 发送到58.x.x.x网端的ICMP包会触发LVS bug。打印告警日志。
+       但是实际上不影响该ICMP报文的发送。
+      (即使影响的ICMP发送，由于TCP会重传，且重传时会使用默认MSS 576，长度不会超过1480)
+     可以不与处理。
+ 
+    b. 导致本机其他应用对外发送消息存在一定概率的丢失问题。
+       在LVS director上，只存在ipvsman在发送检测信息且一直工作正常，
+      只有UDP第11字节是58的报文，和 TCP第0字节是58的报文，才有可能被拦截。
+      58是“：”的ascii码。ipvsman发送报文不会出现这种情况。
+ 
+    当中间的网络设备（运营商的路由器和交换机的MTU少于1500时），上面问题1和问题2.a都不会发生。
+
 * kprobe使用
 Kprobe is a very simple method to probe the running kernel. At a fundamental level, it requires the address of a kernel function that needs to be debugged. Then, you create pre- and post-handlers that will print a debugging message when the target kernel function is called. (Actually, a handler performs any action specified in its code; in this case, it happens to be printing.) Thus, every time that function is called, you can track it.
 An example
