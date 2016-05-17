@@ -1,5 +1,4 @@
 
-* http://lxr.free-electrons.com/ident
 * ip_options_build
 #+BEGIN_SRC c 
 void ip_options_build(struct sk_buff * skb, struct ip_options * opt,
