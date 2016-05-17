@@ -792,7 +792,7 @@ static int loadavg_read_proc(char *page, char **start, off_t off,
 #+end_src
 
 根据输出格式，LOAD_INT对应计算的是load的整数部分，LOAD_FRAC计算的是load的小数部分。 
-将a=avenrun[0] + (FIXED_1/200）带入整数部分和小数部分计算可得： 
+将a=avenrun\[0\] + (FIXED_1/200）带入整数部分和小数部分计算可得： 
 #+begin_example
 LOAD_INT(a) = avenrun[0]/(2^11) + 1/200
 LOAD_FRAC(a) = ((avenrun[0]%(2^11) + 2^11/200) * 100) / (2^11)
@@ -803,10 +803,10 @@ LOAD_FRAC(a) = ((avenrun[0]%(2^11) + 2^11/200) * 100) / (2^11)
 由上述计算结果可以看出，FIXED_1/200在这里是用于小数部分第三位的四舍五入，由于小数部分只取前两位，第三位如果大于5，则进一位，否则直接舍去。 
 
 临时变量a/b/c的低11位存放的为load的小数部分值，第11位开始的高位存放的为load整数部分。因此可以得到a=load(1min) * 2^11 
-因此有: load(1min) * 2^11 = avenrun[0] + 2^11 / 200 
-进而推导出： load(1min)=avenrun[0]/(2^11) + 1/200 
-忽略用于小数部分第3位四舍五入的1/200，可以得到load(1min)=avenrun[0] / 2^11，即： 
-avenrun[0] = load(1min) * 2^11 
+因此有: load(1min) * 2^11 = avenrun\[0\] + 2^11 / 200 
+进而推导出： load(1min)=avenrun\[0\]/(2^11) + 1/200 
+忽略用于小数部分第3位四舍五入的1/200，可以得到load(1min)=avenrun\[0\] / 2^11，即： 
+avenrun\[0\] = load(1min) * 2^11 
 
 avenrun是个陌生的量，这个变量是如何计算的，和系统运行进程、cpu之间的关系如何，在第二阶段进行分析。 
 
