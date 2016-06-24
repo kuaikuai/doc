@@ -1529,3 +1529,43 @@ token + "salt" 加密成 refresh_token
 那么这些问题refresh_token是在salt变化以前被终端拿到的，
 也就是终端保存refresh_token后，一直没有及时更新，即使告诉它该refresh_token已经过期了。
 
+* 
+新版nginx在现场链接很高，对于服务本身没有影响，但是快达到防火墙最大链接数，
+所以需要处理一下：
+ 
+为了解决这个问题需要将新版的nginx.conf中
+keepalive_timeout  60; 
+改为
+keepalive_timeout  0;
+这样关闭nginx对keepalive支持。
+ 
+是否需要测试同事确认一下是否存在问题？
+ 
+如果有明确需要长链接请求，我们需要单独处理例如
+#+begin_example
+location /test {
+   keepalive_timeout  60;
+   ....
+}
+#+end_example
+ 
+问题分析：
+ 
+
+新版和老版本对待msie6 和safari两个浏览器处理方式不一样，上面代码都一样。
+但是clcf->keepalived_disable默认值不一样，1.1.13版本初始值：-1， 1.6.2的初始值：0
+1.1.13版本中如果http报文头中包含“safari”，那么keepalive是关闭的。
+而1.6.2中没有关闭。
+ 
+现场的终端http报文：
+#+begin_example
+/api/weibo/tmline_count?type=1&sinceId=42340&language_id=0&appPakageName=&oauthToken=29416628088702&format=xml HTTP/1.1
+Host: api.hismarttv.com:8080
+Connection: Keep-Alive
+User-Agent: Mozilla/5.0(Linux;U;Android 2.2.1;en-us;Nexus One Build.FRG83) AppleWebKit/553.1(KHTML,like Gecko) Version/4.0 Mobile Safari/533.1
+#+end_example
+User-Agent包含了Safari
+
+对于老版本1.1.13，绝大部分请求的user-agent都是包含safari，连接数大多为短链接。
+
+而新版本1.6.2，由于支持了keepalive,所以大多数链接都是keepalive的，所以数量巨大

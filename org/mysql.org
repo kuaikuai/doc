@@ -1,0 +1,79 @@
+
+
+* mysql_stmt_prepare failed! error(1461)Can't create more than max_prepared_stmt_count statements (current value: 16382)
+
+
+max_prepared_stmt_count参数限制了同一时间在mysqld上所有session中prepared 语句的上限。
+它的取值范围为“0 - 1048576”，默认为16382。
+mysql对于超出max_prepared_stmt_count的prepare语句就会报1461的错误。
+
+对于现场而言，可以先将这个值调大。
+
+一般而言，默认值应该是足够用的，因为现场的并发其实没有那么的大。
+一个可能的原因是应用端那边没有关闭prepared的语句。
+直连后端master执行如下命令
+#+begin_example
+mysql> show global status like ‘com_stmt%’;
+#+end_example
+查看如下3个参数值：
+Com_stmt_close             prepare语句关闭的次数
+Com_stmt_execute           prepare语句执行的次数
+Com_stmt_prepare           prepare语句创建的次数
+
+请确认Com_stmt_close的值是否接近于Com_stmt_prepare。
+ 
+ 
+ 
+information_schema很有用，大家可以去这里面查看一些db的基础信息。
+
+use information_schema;  -- mysql的基础信息库
+select * from ENGINES ;  -- 后台存储引擎信息数据的表
+show engines;   -- mysql窗口界面的命令
+
+select * from GLOBAL_STATUS ;   --  当前运行的全局的status参数信息数据
+show status;  -- 命令行查看
+
+select * from GLOBAL_VARIABLES ;   -- 当前的全局的参数存储的数据
+show variables;  -- 命令行查看
+ 
+查看值
+#+begin_example
+mysql> show global status like 'com_stmt%';
++-------------------------+----------+
+| Variable_name           | Value    |
++-------------------------+----------+
+| Com_stmt_close          | 15000    |
+| Com_stmt_execute        | 11024051 |
+| Com_stmt_fetch          | 0        |
+| Com_stmt_prepare        | 124200   |
+| Com_stmt_reprepare      | 0        |
+| Com_stmt_reset          | 0        |
+| Com_stmt_send_long_data | 0        |
++-------------------------+----------+
+
+mysql> show global variables like 'com_stmt%';     
+Empty set (0.00 sec)
+
+mysql> show global variables like '%stmt%';   
++----------------------------+----------------------+
+| Variable_name              | Value                |
++----------------------------+----------------------+
+| binlog_stmt_cache_size     | 32768                |
+| max_binlog_stmt_cache_size | 18446744073709547520 |
+| max_prepared_stmt_count    | 16382                |
++----------------------------+----------------------+
+3 rows in set (0.00 sec)
+
+mysql> set global max_prepared_stmt_count=124000;
+Query OK, 0 rows affected (0.00 sec)
+#+end_example
+
+当com_stmt_prepare与com_stmt_close的差值等于max_prepared_stmt_count时，就会报这个错误。
+
+现场的问题是由于没有close导致的。
+于是打开query log，扩大max_prepared_stmt_count。
+#+begin_example
+mysql> SET GLOBAL general_log = 'ON';
+mysql> set global max_prepared_stmt_count=124000;
+#+end_example
+通过general query log查看那些prepare statment没有close

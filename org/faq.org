@@ -16,3 +16,43 @@ Debugger entered--Lisp error: (file-error "Opening output file" "permission deni
 
 建立d:/home/.emacs.d/server目录即可.并且保准当前用户有可写可读权限.
 
+* 利用posix_fadvise清理系统中的文件缓存
+当我们需要对某段读写文件并进行处理的程序进行性能测试时，文件会被系统cache住从而影响I/O的效率，必须清理cache中的对应文件的才能正确的进行性能测试。通常清理内存可以采用下面的这条命令，但这条命令只有root才能使用，另外一方面这个会清理所有的cache，也许会影响其他程序的性能。
+#+begin_example
+echo 3>/proc/sys/vm/drop_caches
+#+end_example
+linux下有一个posix_fadvise函数可以用来对cache中的文件进行清理，有关posix_fadvise的详细说明查看man手册。
+#+begin_example
+    int posix_fadvise(int fd, off_t offset, off_t len, int advice);  
+”Programs  can  use  posix_fadvise  to  announce an intention to access file data in a specific pattern in the future, thus allowing the kernel to perform appropriate optimisations”
+#+end_example
+fd是文件的描述符，用于清理对应文件cache的advice值选取POSIX_FADV_DONTNEED，利用此函数编写下面程序进行文件的清理。
+#+begin_src c
+    int clear_file_cache(const char *filename) 
+    {   
+        struct stat st;   
+        if(stat(filename , &st) < 0) {   
+            fprintf(stderr , "stat localfile failed, path:%s\n",filename);   
+            return -1;   
+        }
+        int fd = open(filename, O_RDONLY);   
+        if( fd < 0 ) {   
+            fprintf(stderr , "open localfile failed, path:%s\n",filename);   
+            return -1;   
+        }
+        //clear cache by posix_fadvise  
+        if( posix_fadvise(fd,0,st.st_size,POSIX_FADV_DONTNEED) != 0) {   
+            printf("Cache FADV_DONTNEED failed, %s\n",strerror(errno));   
+        }   
+        else {   
+            printf("Cache FADV_DONTNEED done\n");   
+        }   
+      
+        return 0;   
+    }  
+#+end_src
+此外，linux-ftools这个工具也可以帮助清理并查看文件的内存状态，主页上也有详细的使用说明。编译后我们利用fincore这个工具来查看文件在内存中的状态，有关fincore的实现可以在linux下man mincore，mincore是根据缓存buffer指针来其指向的缓冲区判断在cache中的状态，fincore就是在mincore的基础上直接操作文件，就是通过对文件mmap获得指针，再调用mincore来判断。
+#+begin_example
+cp bigdata ../
+./fincore -p=false -s -o bigdata
+#+end_example

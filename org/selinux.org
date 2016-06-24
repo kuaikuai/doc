@@ -1,0 +1,53 @@
+* logrotate 无法切分日志
+/var/log/messages显示 ：
+    logrotate fails with error ALERT exited abnormally with \[1\]
+
+
+** 解决办法：
+   检查是否logrocate用于切分/var/log之外的日志。
+   如果是这样SElinux 可能导致问题的原因。
+
+   例如logrotate 配置为/backup/mysql切分日志。
+#+begin_example
+# semanage fcontext -a -t var_log_t '/backup/mysql(/.*)?'
+# 
+#+end_example
+上面命令定义一个上下文将被自动用于/backup/mysql目录下的新文件。
+这个定义将保存在
+/etc/selinux/targeted/contexts/files/file_contexts.local
+
+
+运行下面的命令递归设置/backup/mysql目录下文件的context
+
+#+begin_example
+# restorecon -Frvv /backup/mysql
+restorecon reset /backup/mysql context system_u:object_r:default_t:s0->system_u:object_r:var_log_t:s0
+restorecon reset /backup/mysql/backup.tar context system_u:object_r:default_t:s0->system_u:object_r:var_log_t:s0
+# 
+#+end_example
+
+
+** 根源
+   当日志文件位于/var/log/目录外时，SELinux 禁止logrotate检查被切分的日志文件的属性。
+   使用audit观察的结果
+#+begin_example
+
+    CALL msg=audit(1335727501.512:1389214): arch=c000003e syscall=4 success=no exit=-13 a0=12ec760 a1=7fffdba0de60 a2=7fffdba0de60 a3=b 
+    items=0 ppid=14260 pid=14262 auid=0 uid=0 gid=0 euid=0 suid=0 fsuid=0 egid=0 sgid=0 fsgid=0 tty=(none) ses=44399 comm="logrotate" 
+    exe="/usr/sbin/logrotate" subj=system_u:system_r:logrotate_t:s0-s0:c0.c1023 key=(null)
+
+    type=AVC msg=audit(1335727501.512:1389214): avc:  denied  { getattr } for  pid=14262 comm="logrotate" path="/backup/mysql/backup.gz" 
+    dev=dm-0 ino=131206 scontext=system_u:system_r:logrotate_t:s0-s0:c0.c1023 tcontext=unconfined_u:object_r:default_t:s0 tclass=file
+
+#+end_example
+
+   /backup/mysql/backup.gz的context是 unconfined_u:object_r:default_t:s0
+   selinux需要有var_log_t context，没有该context时，就阻止logrotate获取文件属性(getattr)
+
+
+
+
+
+
+
+

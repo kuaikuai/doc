@@ -1,0 +1,199 @@
+#+TITTLE: *HTTPS防劫持方案*
+#+OPTIONS: ^:nil
+#+OPTIONS: "\n:t"
+
+
+* 背景
+  终端访问时，aaa等业务存在http劫持。
+
+* 解决方案
+  - 服务端配置nginx将aaa API接口由原来的http接口改为https接口。
+  - 终端修改SDK，支持https方式访问aaa。
+
+* 引入的问题
+** https性能问题
+- *访问延时*
+- *消耗较多的CPU资源*
+
+*** 分析
+   经过分析https的性能瓶颈点主要有两点：
+   - SSL握手阶段
+   - 数据对称解密
+   https性能受终端建链接的频率，双方协商后，采用非对称算法和对称算法等影响,
+   而其中有以SSL握手阶段对性能影响最大。
+
+   *解决方法*
+   - 将nginx配置keepalive_timeout 0; 修改为：keepalive_timeout 10;
+   - 采用重用session的方式：session id 或者session tickets
+   HTTPS 采用会话缓存也要至少1*RTT的延时，但是至少延时已经减少为原来的一半，；
+   同时，基于会话缓存建立的 HTTPS 连接不需要服务器使用RSA私钥解密获取 Pre-master 信息，
+   可以省去CPU 的消耗。如果缓存命中率高，则HTTPS的接入能力将明显提升。
+   - 采用ssl硬件加速卡
+     一张硬件卡可以实现接近10台服务器的ssl处理能力
+   - 采用AES、RC4的同时，减少密钥长度为128bit
+   综上，nginx配置如下：
+#+begin_example
+   keepalive_timeout  10;
+   ...
+    server {
+        listen 80;
+        server_name new.hismarttv.com;
+        return 302 https://$host;
+    }
+    server {
+        listen  443 backlog=8192;
+        server_name new.hismarttv.com;
+        ssl on;
+        ssl_session_cache builtin:0 shared:SSL:1000m;
+        ssl_session_timeout 6h;
+        ssl_session_tickets on;
+        ssl_certificate /usr/local/openresty/nginx/conf/server.crt;
+        ssl_certificate_key /usr/local/openresty/nginx/conf/server.key;
+        ssl_prefer_server_ciphers on;
+        ssl_protocols TLSv1 TLSv1.1 TLSv1.2;
+        ssl_ciphers RSA+AES128:RSA+AES256:RC4:MEDIUM:!MD5:!aNULL:!eNULL:!NULL:!DH:!DEH:!EDH:!AESGCM;
+        add_header Strict-Transport-Security "max-age=60; includeSubDomains";
+#+end_example
+   该配置基于性能优先考虑，降低了安全性。
+   不采用DH等低效率的算法
+   所以对于支付等业务不能采用该配置，
+   另外：由于ssl加密套件是由客户端和服务端协商决定的，该配置需要继续调整和测试，防止出现密钥协商失败而导致链接失败的情况出现。
+
+
+*** 测试方法和环境
+    在32核服务器上，编写程序：使用libcurl多线并发方式压测另一服务器上nginx,
+    nginx配置8个worker，版本为1.6.2。
+    nginx配置https采用AES、RC4作为对称加密算法。
+    /采用jmeter分布式压测时，压测效果不好。原因不清楚。/
+*** 测试数据
+#+CAPTION: *keepalive on 1000并发*
+|       |   rps | cpu | error | time |
+|-------+-------+-----+-------+------|
+| http  | 79408 |  53 |   1.1 | 11ms |
+| https | 72615 |  92 |    23 |      |
+
+keepalive 开启时, 1000并发https与http相比：
+- rps减少8.6%
+- cpu使用率增加73.5%
+- 请求失败率变成原来22倍
+
+#+CAPTION: *keepalive off 1000并发*
+|       |   rps |  cpu | error | time |
+|-------+-------+------+-------+------|
+| http  | 27398 | 26.8 |    18 | 34ms |
+| https |  6397 |   97 |   107 | 16ms |
+keepalive 关闭时 100并发 https与http相比：
+- rps减少为http的23%，约1/4
+- cpu使用率增加为http的3.6倍
+此时HTTPS错误很高，原因可能是负载到达nginx上限了。  
+
+#+CAPTION: *keepalive on 100 并发*
+|       |   rps | cpu | error | time |
+|-------+-------+-----+-------+------|
+| http  | 46864 |  35 |     0 | 1ms  |
+| https | 47101 |  60 |     0 | 1ms  | 
+
+keepalive 开启时 100并发 https与http相比：
+- rps增加
+- cpu使用率增加71.4%，约https的2倍
+rps增加原因不清楚
+
+#+CAPTION: *keepalive off 100并发*
+|       |   rps |  cpu | error | time |
+|-------+-------+------+-------+------|
+| http  | 17536 | 16.9 |     0 | 5ms  |
+| https |  6103 |   90 |     0 | 16ms |
+keepalive 关闭时 100并发 https与http相比：
+- rps减少为http的34.8%，原性能的1/3
+- cpu使用率增加为http的5.32部
+
+由于原来发起测试系统的libcurl不支持session id，更换测试机
+#+CAPTION: *keepalive off  100并发*
+|                  |   rps |   cpu | error | time |
+|------------------+-------+-------+-------+------|
+| http             | 21862 |    20 |     0 |      |
+| https session id | 11225 | 47.75 |     0 |      |
+| https            |  5061 |    79 |     0 |      |
+
+keepalive 关闭的情况下，客户端开启session id重用后
+- rps 提高为未启用session id的2倍
+- cpu 降低为未启用session id的60%
+
+优化效果还是很明显的。
+
+但是与http相比：
+- rps 降低为http的51%
+- cpu使用增加为http的238.75%
+
+#+CAPTION: *外网时延测试*
+|       | time  |
+|-------+-------|
+| http  | 10ms  |
+| https | 200ms |
+可以看出由于经过TLS握手增加1次/2次RTT，可以看出响应时间明显降低
+
+* 进一步分析
+** keepalive
+    现场nginx keepalive是关闭的。
+    若开启nginx keepalive可能会对https性能有一定优化效果，但对于aaa业本身来讲效果有限。
+    而且一旦开启keepalive现场的tcp链接会翻倍，目前防火墙cpu利用30%，如果翻倍的话，防火墙也成为性能瓶颈。
+    所以keepalived 不能开启。
+
+** session id 重用
+
+经过编写java测试程序确认 HttpsURLConnection默认即支持session id，后经绍栋在android上测试也支持session id。
+
+session id的缺点：server端记录协商过的TLS session，当并发量很大时需要记录大量session信息，且nginx使用进程间锁来完成这些缓存。
+采用session id，由于session的缓存，仅存在于单个nginx节点上。
+- 使用LVS的源IP哈希的方式，将请求转发nginx节点
+
+  问题：终端IP变化，存储的session就无法起做作用了
+- 采用共享的session缓存，比如存储到redis、memcache
+  问题：共享缓存可能会成为瓶颈点，共享session缓存没有官方实现
+
+** session ticket重用
+   
+  session ticket 优点：
+  由于终端保持会话信息，server无需缓存，所以不需要考虑session信息共享存储的问题。
+
+  缺点：
+  - 需要定时更新ticket.key
+  - 需要明确java HTTPURLConnection如何才能支持session tickets，是否能支持
+
+** 总结
+*** 性能
+   在keepalive 关闭时，客户端开启session id重用 且 server端session缓存全命中的情况下
+   rps 降低为http的一半，
+   cpu 利用率增加http的两倍。
+
+   当session无法重用时，
+   rps 降低为http的1/4，
+   cpu 利用率增加http的4
+
+*待优化的点：非对称加密算法、证书选取等对性能都很大的影响*
+
+**** 优化措施
+1. 方案一 优先
+   - 新终端支持session tickets，需要绍栋一起确认如何支持
+2. 方案二
+   - 旧终端使用session id重用ssl session
+   - 服务端实现非阻塞式分布式session缓存，难度和工作量都很大。
+
+*** https降级
+1. 方案一：\\
+  由终端先使用https方式访问服务，当接受到connectin refused后，切换为http方式。
+  这样可以通过关闭服务端的https端口来达到降级为http请求。
+  这种方式是不安全，只能作为临时措施。
+
+2. 方案二：\\
+  我们启用新的域名，
+  终端通过HTTP访问新域名，
+  服务端对终端请求进行重定向到https
+  nginx https配置HSTS，告诉终端多长时间内采用https。
+  为了降级我们先把HSTS的超时时间设置的短一些。
+ 
+  降级时，去掉http的重定向配置既可以，
+  当终端发现自己接受的HSTS的过期时间到了，请求自动切换为http。
+ 
+*问题*:
+  需终端支持302重定向以及HSTS
