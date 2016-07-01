@@ -1039,7 +1039,7 @@ static int ipip_rcv(struct sk_buff *skb)
 #+end_src
 * lvs简单调优
 
-1，调整ipvs connection hash表的大小
+** 调整ipvs connection hash表的大小
 
 IPVS connection hash table size，取值范围:[12,20]。该表用于记录每个进来的连接及路由去向的信息。连接的Hash表要容纳几百万个并发连接，任何一个报文到达都需要查找连接Hash表，Hash表是系统使用最频繁的部分。Hash表的查找复杂度为O(n/m)，其中n为Hash表中对象的个数，m为Hash表的桶个数。当对象在Hash表中均匀分布和Hash表的桶个数与对象个数一样多时，Hash表的查找复杂度可以接近O(1)。
 
@@ -1085,7 +1085,7 @@ Centos6.2，内核版本2.6.32-220.13.1.el6.x86_64，仍然不支持这个参数
 或者重新编译内核。
 
 
-2，linux系统参数优化
+** linux系统参数优化
 
 关闭网卡LRO和GRO
 
@@ -1110,7 +1110,13 @@ net.ipv4.conf.all.arp_announce = 2
 net.core.netdev_max_backlog = 500000  （在每个网络接口接收数据包的速率比内核处理这些包的速率快时，允许送到队列的数据包的最大数目）
 #+end_example
 
-3，lvs自身配置
+** 更好的网卡
+
+增加LVS主机的网络吞吐能力，有利于提高LVS的处理速度和能力。
+1. 使用更快的网卡，比如使用千兆、万兆的网卡。
+2. 可以进一步将两块或多块网卡绑定（多块网卡的绑定有待验证），bonding 时 mode=0 （balance-rr）或者 mode=4（802.3ad，需要交换机支持聚合端口），miimon=80或者 miimon=100（毫秒）。
+
+** lvs自身配置
 
 尽量避免sh算法
 
@@ -1119,7 +1125,7 @@ net.core.netdev_max_backlog = 500000  （在每个网络接口接收数据包的
 实际线上使用时，如需 会话保持，建议配置 persistence_timeout参数，保证一段时间同一源ip的请求到同一RS上。
 
 
-4，手动绑定linux系统网卡中断
+** 手动绑定linux系统网卡中断
 lvs的并发过大，对网卡的利用很频繁，而对网卡的调优，也能增加lvs的效率。当前大多数系统网卡都是支持硬件多队列的，为了充分发挥多核的性能，需要手动将网卡中断（流量）分配到所有CPU核上去处理。默认情况下，网卡的所有的中断都是发送到一个默认的cpu上去处理的，而cpu中断需要等待时间，这样对于使用网卡频繁的服务，网卡性能就会成为瓶颈。
 1，查看网卡中断：
 # cat /proc/interrupts
@@ -1161,6 +1167,7 @@ echo "80" > /proc/irq/59/smp_affinity
 配置方法同硬中断绑定，例：
 # echo 01 > /sys/class/net/eth0/queues/rx-0/rps_cpus
 # echo  02 > /sys/class/net/eth0/queues/rx-1/rps_cpus
+
 * lvs 一个负载不均衡的问题
   ipvsadm -Ln
   显示一个IP的活动链接数是64,另一个IP的活动链接数是0.

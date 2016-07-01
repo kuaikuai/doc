@@ -76,6 +76,7 @@ keepalive 开启时, 1000并发https与http相比：
 - rps减少8.6%
 - cpu使用率增加73.5%
 - 请求失败率变成原来22倍
+此时由于测试程序复用tcp链接，https没有TLS握手的性能损耗，所以此时增加的CPU利用率是对称加解密流程消耗的。
 
 #+CAPTION: *keepalive off 1000并发*
 |       |   rps |  cpu | error | time |
@@ -169,6 +170,15 @@ session id的缺点：server端记录协商过的TLS session，当并发量很�
    当session无法重用时，
    rps 降低为http的1/4，
    cpu 利用率增加http的4
+
+注意测试rps降低比例并不意味着实际nginx的处理能力下降的比例，应该看rps与cpu比例，
+因为测试程序是采用多线程同步并发，当采用https时测试程序本身并发性降低了，而实际nginx并发应该远大测试的情况，
+也就是说最大的瓶颈在于CPU。
+
+通过粗略计算可以得出(这个数值只能做定性分析)，keepalive关闭情况下：
+HTTP处理每个请求的消耗的cpu为0.915 x 10^-3
+采用重用session id时，HTTPS握手以及解密增加的cpu: 3.339 x 10^-3
+未重用session时，HTTPS握手以及解密增加的cpu: 14.695 x 10^-3
 
 *待优化的点：非对称加密算法、证书选取等对性能都很大的影响*
 
